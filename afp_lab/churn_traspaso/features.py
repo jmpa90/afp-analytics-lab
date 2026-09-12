@@ -22,7 +22,7 @@ import pandas as pd
 from afp_lab.rim_nowcasting.calendario import add_months, periodo_to_idx, rango_periodos
 
 from . import HORIZONTE_MESES, MESES_DESFASE_RIM
-from .synthetic import AFP_PROPIA, AFP_TODAS, CANALES, FONDOS
+from .synthetic import AFP_PROPIA, AFP_TODAS, CANALES, FONDOS, TIPOS_RECLAMO
 
 EDAD_LEGAL_PENSION = {"F": 60, "M": 65}
 
@@ -211,16 +211,18 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
     rel["reclamos_abiertos_12m"] = _suma_movil(_matriz(rec_ab, "_u", afil_pos, per_pos, agregar=True), 12)
     rel["reclamos_desfavorables_12m"] = _suma_movil(_matriz(rec_df, "_u", afil_pos, per_pos, agregar=True), 12)
     rel["meses_desde_reclamo"] = _meses_desde(m_rec > 0)
+    # catalogo FIJO (no derivado del slice): asi la categoria significa lo mismo en todos los cortes
+    cod = {t: i + 1 for i, t in enumerate(TIPOS_RECLAMO)}
+    etiquetas_reclamo = np.array(["SIN_RECLAMO"] + list(TIPOS_RECLAMO), dtype=object)
     if len(rec):
-        tipos = sorted(rec["tipo"].unique())
-        cod = {t: i + 1 for i, t in enumerate(tipos)}
+        desconocidos = set(rec["tipo"].unique()) - set(TIPOS_RECLAMO)
+        if desconocidos:
+            raise ValueError(f"tipos de reclamo fuera del catalogo: {sorted(desconocidos)}")
         m_tipo = _matriz(rec.assign(_t=rec["tipo"].map(cod)), "_t", afil_pos, per_pos,
                          dtype=np.float32, relleno=0.0)
         tipo_rec_cod = _ultimo_valor(m_tipo, m_tipo > 0, relleno=0.0)
-        etiquetas_reclamo = np.array(["SIN_RECLAMO"] + tipos, dtype=object)
     else:
         tipo_rec_cod = np.zeros((n, n_t), dtype=np.float32)
-        etiquetas_reclamo = np.array(["SIN_RECLAMO"], dtype=object)
 
     dig = tablas["uso_digital"]
     logins = (_matriz(dig, "logins_app", afil_pos, per_pos) + _matriz(dig, "logins_web", afil_pos, per_pos))
@@ -260,11 +262,12 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
         mes_salida.loc[primera.index] = [per_pos.get(int(p), np.inf) for p in primera.to_numpy()]
     mes_salida_arr = mes_salida.to_numpy()
 
+    faltan = [c for c, t in zip(cortes, idx_cortes) if t - desf < 0]
+    if faltan:
+        raise ValueError(f"cortes sin historia laboral suficiente (se necesita corte-{desf}): {faltan}")
     ii_list, jj_list = [], []
     for t in idx_cortes:
         t_lab = t - desf
-        if t_lab < 0:
-            continue
         # poblacion: vigente al corte, con solicitud de salida aun no presentada y no retirado
         ok = vig[:, t] & (mes_salida_arr > t) & (estado[:, t_lab] != "RETIRADO")
         idx = np.where(ok)[0]
@@ -332,8 +335,10 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
     df["saldo_sobre_rim_ref"] = np.where(ref > 0, df["saldo_obligatorio"].to_numpy() / np.maximum(ref, 1.0), np.nan)
     df["rim_ref"] = df["rim_ref"].astype(np.float32)
     df["region"] = df["region"].astype("int16")
+    df["tipo_ultimo_reclamo"] = pd.Categorical(df["tipo_ultimo_reclamo"], categories=etiquetas_reclamo)
+    df["fondo"] = pd.Categorical(df["fondo"], categories=["SIN_FONDO"] + list(FONDOS))
     for c in COLUMNAS_CATEGORICAS:
-        if c in df.columns:
+        if c in df.columns and str(df[c].dtype) != "category":
             df[c] = df[c].astype("category")
     return df.reset_index(drop=True)
 
@@ -393,17 +398,36 @@ def columnas_features(df: pd.DataFrame) -> list[str]:
 
 def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
                    horizonte: int = HORIZONTE_MESES) -> dict[str, list[int]]:
-    """Split temporal con gap de `horizonte` meses entre el ultimo target y el corte siguiente.
+    """Split temporal con **purga por filas** entre particiones contiguas.
 
-    test  = los ultimos `n_test` cortes evaluables.
-    valid = `n_valid` cortes cuyo ultimo target queda `horizonte` meses antes del primer test.
-    train = todos los cortes anteriores que respetan el mismo gap frente a validacion.
+    La purga es la minima que elimina el solapamiento: un corte `c` aporta target hasta `c+h`, asi
+    que la particion siguiente empieza en `c+h+1`. Eso deja la validacion **pegada** al test (a
+    `h+1` meses) en vez de arrastrarla `2h` meses hacia atras como hacia la version anterior, que
+    encadenaba dos gaps y terminaba entrenando 26 meses antes del test.
+
+    Se sigue respetando CONVENCIONES §3 (gap >= `horizonte` entre el ultimo target de entrenamiento
+    y el primer corte de test): con esta construccion el gap efectivo es `horizonte + 2`.
+
+    Devuelve `train`, `valid`, `test` y `descartados` (los cortes que caen en las zonas de purga).
     """
-    cortes = sorted(cortes)
+    cortes = sorted(int(c) for c in cortes)
+    if len(cortes) < n_test + n_valid + 1 + 2 * (horizonte + 1):
+        raise ValueError(
+            f"se necesitan al menos {n_test + n_valid + 1 + 2 * (horizonte + 1)} cortes evaluables "
+            f"para un split con purga de {horizonte} meses; hay {len(cortes)}")
     test = cortes[-n_test:]
-    limite_valid = add_months(test[0], -2 * horizonte)          # corte + h + gap(h) <= primer test
+    limite_valid = add_months(test[0], -(horizonte + 1))
     candidatos = [c for c in cortes if c <= limite_valid]
+    if len(candidatos) < n_valid + 1:
+        raise ValueError("no quedan cortes suficientes para validacion despues de purgar el test")
     valid = candidatos[-n_valid:]
-    limite_train = add_months(valid[0], -2 * horizonte)
+    limite_train = add_months(valid[0], -(horizonte + 1))
     train = [c for c in cortes if c <= limite_train]
-    return {"train": train, "valid": valid, "test": test}
+    if not train:
+        raise ValueError("no quedan cortes de entrenamiento despues de purgar la validacion")
+    usados = set(train) | set(valid) | set(test)
+    descartados = [c for c in cortes if c not in usados]
+    gap = periodo_to_idx(test[0]) - periodo_to_idx(add_months(max(train), horizonte))
+    if gap < horizonte:
+        raise ValueError(f"gap train->test de {gap} meses, menor que el horizonte {horizonte}")
+    return {"train": train, "valid": valid, "test": test, "descartados": descartados}

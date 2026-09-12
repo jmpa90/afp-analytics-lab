@@ -20,7 +20,7 @@ Todos los parametros numericos estan en `ParametrosChurn` y se documentan en el 
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 import pandas as pd
@@ -64,18 +64,24 @@ TASA_COTIZACION_OBLIGATORIA = 0.10  # 10 % de la renta imponible a la cuenta de 
 
 @dataclass(frozen=True)
 class ParametrosChurn:
-    """Parametros de la simulacion (ver README, seccion 2)."""
+    """Parametros de la simulacion. La tabla del README se genera desde aqui (`tabla_parametros`)."""
 
     # --- composicion de la cartera propia
     p_antiguo_desde_afiliacion: float = 0.78   # siempre estuvo en la AFP propia
     p_antiguo_traspaso_previo: float = 0.12    # entro antes de la ventana simulada
     # el resto (10 %) entra durante la ventana via traspaso de ENTRADA
-    p_entrada_no_licitado: float = 0.0         # un afiliado nuevo al sistema solo puede entrar por licitacion
 
     # --- saldo inicial
-    tasa_mensual_saldo_inicial: float = 0.0035  # rentabilidad real mensual usada para capitalizar la historia
+    tasa_mensual_saldo_inicial: float = 0.0035  # rentabilidad real mensual para capitalizar la historia
     densidad_cotizacion_historica: float = 0.68
     sigma_saldo_inicial: float = 0.35
+
+    # --- mercado: rentabilidad relativa entre AFP
+    rho_ar_rentabilidad: float = 0.92        # persistencia mensual de la desviacion de cada AFP
+    sigma_ar_rentabilidad: float = 0.00025   # innovacion mensual; da ~0,5 pp de sd en la ventana de 12 m
+    castigo_rentabilidad_propia: float = -0.010   # -1,0 pp anual en la ventana de castigo
+    castigo_desde: int = 202401
+    castigo_hasta: int = 202512
 
     # --- contactos (probabilidad mensual base por afiliado)
     p_vendedor_competencia: float = 0.016
@@ -94,16 +100,21 @@ class ParametrosChurn:
     # --- uso digital
     lambda_login_base: float = 0.55
     factor_login_joven: float = 1.8
-    factor_login_intencion: float = 3.5
-    p_certificado_base: float = 0.012
-    p_certificado_intencion: float = 0.40
+    p_intencion_visible: float = 0.35        # fraccion de afiliados cuya intencion se ve en los canales
+    factor_login_intencion: float = 1.7      # solo para esa fraccion
+    p_certificado_base: float = 0.010        # motivo administrativo corriente
+    p_certificado_hipotecario: float = 0.006 # credito / tramite bancario (30-50 anos con renta media-alta)
+    p_certificado_tramite_pension: float = 0.030  # a menos de 24 meses de la edad legal
+    p_certificado_cambio_empleo: float = 0.020    # finiquito o cambio de empleador reciente
+    factor_certificado_operacion_renta: float = 2.5   # abril-mayo
+    p_certificado_intencion: float = 0.060   # incremento por intencion, solo en la fraccion visible
 
     # --- cambios de fondo
     p_cambio_fondo_base: float = 0.0055
     factor_cambio_fondo_activo: float = 3.0
 
     # --- hazard mensual de traspaso (escala logit)
-    b0: float = -6.20
+    b0: float = -5.90
     b_brecha_comision: float = 1.05        # por punto porcentual de comision sobre la mas barata
     b_brecha_rentabilidad: float = 0.55    # por punto porcentual de rentabilidad 12m bajo el promedio
     b_vendedor_competencia_3m: float = 1.45
@@ -123,14 +134,87 @@ class ParametrosChurn:
     sigma_mes: float = 0.15                # ruido idiosincratico mensual
     p_retardo_intencion: tuple = (0.10, 0.22, 0.28, 0.25, 0.15)  # meses entre la intencion y la solicitud
 
-    # --- escenario de rentabilidad de la AFP propia
-    castigo_rentabilidad_propia: float = -0.010   # -1,0 pp anual
-    castigo_desde: int = 202401
-    castigo_hasta: int = 202512
-
     def __post_init__(self) -> None:
         if abs(sum(self.p_retardo_intencion) - 1.0) > 1e-9:
             raise ValueError("p_retardo_intencion debe sumar 1")
+
+
+DESCRIPCION_PARAMETROS = {
+    "p_antiguo_desde_afiliacion": "Afiliados antiguos que siempre estuvieron en la AFP propia",
+    "p_antiguo_traspaso_previo": "Afiliados antiguos que entraron antes de la ventana simulada",
+    "tasa_mensual_saldo_inicial": "Rentabilidad real mensual con la que se capitaliza la historia previa",
+    "densidad_cotizacion_historica": "Densidad de cotizacion supuesta para el saldo inicial",
+    "sigma_saldo_inicial": "Dispersion lognormal del saldo inicial",
+    "rho_ar_rentabilidad": "Persistencia AR(1) de la desviacion de rentabilidad de cada AFP",
+    "sigma_ar_rentabilidad": "Innovacion mensual del AR(1) (~0,5 pp de sd en la ventana de 12 meses)",
+    "castigo_rentabilidad_propia": "Castigo anual de rentabilidad de la AFP propia en su ventana",
+    "castigo_desde": "Primer mes del castigo de rentabilidad",
+    "castigo_hasta": "Ultimo mes del castigo de rentabilidad",
+    "p_vendedor_competencia": "Prob. mensual de visita de un vendedor de la competencia",
+    "p_ejecutivo_propio": "Prob. mensual de contacto del ejecutivo propio",
+    "p_call_center": "Prob. mensual de contacto del call center propio",
+    "p_campana_digital": "Prob. mensual de impacto de campana digital",
+    "factor_saldo_alto_competencia": "Multiplicador de la visita de la competencia en el decil de saldo alto",
+    "factor_retencion_ejecutivo": "Multiplicador del contacto propio tras reclamo o visita de la competencia",
+    "factor_campana_marzo_agosto": "Estacionalidad de campanas en marzo y agosto",
+    "p_reclamo_base": "Prob. mensual base de reclamo",
+    "factor_reclamo_rentabilidad_mala": "Multiplicador del reclamo si la rentabilidad propia va mal",
+    "factor_reclamo_comision_alta": "Multiplicador del reclamo si la comision propia es cara",
+    "lambda_login_base": "Logins mensuales medios (Poisson) de un afiliado tipico",
+    "factor_login_joven": "Multiplicador de logins para jovenes y universitarios",
+    "p_intencion_visible": "Fraccion de afiliados cuya intencion de traspaso se nota en los canales propios",
+    "factor_login_intencion": "Multiplicador de logins durante la intencion (solo fraccion visible)",
+    "p_certificado_base": "Prob. mensual de pedir certificado por motivo administrativo corriente",
+    "p_certificado_hipotecario": "Prob. adicional por credito o tramite bancario (30-50 anos, renta media-alta)",
+    "p_certificado_tramite_pension": "Prob. adicional a menos de 24 meses de la edad legal de pension",
+    "p_certificado_cambio_empleo": "Prob. adicional tras finiquito o cambio de empleador",
+    "factor_certificado_operacion_renta": "Estacionalidad del certificado en abril-mayo (Operacion Renta)",
+    "p_certificado_intencion": "Prob. adicional por intencion de traspaso (solo fraccion visible)",
+    "p_cambio_fondo_base": "Prob. mensual base de cambio de fondo",
+    "factor_cambio_fondo_activo": "Multiplicador del cambio de fondo para el afiliado activo",
+    "b0": "Intercepto del hazard mensual (escala logit)",
+    "b_brecha_comision": "Efecto de 1 pp de comision sobre la AFP mas barata",
+    "b_brecha_rentabilidad": "Efecto de 1 pp de rentabilidad 12m bajo el promedio del sistema",
+    "b_vendedor_competencia_3m": "Efecto de una visita de la competencia en los ultimos 3 meses",
+    "b_vendedor_interesado_3m": "Efecto adicional si esa visita termino en INTERESADO",
+    "b_reclamo_6m": "Efecto de un reclamo en los ultimos 6 meses",
+    "b_reclamo_desfavorable_6m": "Efecto adicional si el reclamo se resolvio en contra",
+    "b_ejecutivo_propio_3m": "Efecto (retencion) del contacto del ejecutivo propio en 3 meses",
+    "b_joven": "Efecto por cada ano bajo los 40",
+    "b_renta": "Efecto por log(RIM de referencia / IMM)",
+    "b_antiguedad": "Efecto por log1p(anos en la AFP)",
+    "b_cambios_fondo_12m": "Efecto por cambio de fondo en 12 meses (tope 3)",
+    "b_cesante": "Efecto de estar cesante",
+    "b_retirado": "Efecto de estar retirado",
+    "b_marzo": "Estacionalidad de marzo",
+    "b_agosto": "Estacionalidad de agosto",
+    "sigma_afiliado": "Desviacion del efecto aleatorio NO observable por afiliado",
+    "sigma_mes": "Desviacion del ruido idiosincratico mensual",
+    "p_retardo_intencion": "Distribucion del retardo (meses) entre la intencion y la firma",
+}
+
+
+def tabla_parametros(par: "ParametrosChurn | None" = None) -> pd.DataFrame:
+    """Tabla parametro / valor / descripcion generada desde `ParametrosChurn` (fuente unica)."""
+    par = par or ParametrosChurn()
+    filas = []
+    for campo in fields(par):
+        v = getattr(par, campo.name)
+        filas.append({
+            "parametro": campo.name,
+            "valor": ", ".join(str(x) for x in v) if isinstance(v, tuple) else v,
+            "descripcion": DESCRIPCION_PARAMETROS.get(campo.name, ""),
+        })
+    return pd.DataFrame(filas)
+
+
+def tabla_parametros_markdown(par: "ParametrosChurn | None" = None) -> str:
+    """La misma tabla en markdown, para pegarla (y verificarla con un test) en el README."""
+    df = tabla_parametros(par)
+    lineas = ["| Parametro | Valor | Que representa |", "|---|---|---|"]
+    for _, f in df.iterrows():
+        lineas.append(f"| `{f['parametro']}` | {f['valor']} | {f['descripcion']} |")
+    return "\n".join(lineas)
 
 
 # --------------------------------------------------------------------- utilidades
@@ -179,10 +263,10 @@ def generar_mercado(periodo_inicio: int, periodo_fin: int, seed: int,
     desv = {}
     for a in AFP_TODAS:
         for f in FONDOS:
-            e = rng.normal(0, 0.0009, n_t)
+            e = rng.normal(0, par.sigma_ar_rentabilidad, n_t)
             x = np.zeros(n_t)
             for t in range(1, n_t):
-                x[t] = 0.92 * x[t - 1] + e[t]
+                x[t] = par.rho_ar_rentabilidad * x[t - 1] + e[t]
             desv[(a, f)] = x
 
     ret = {}
@@ -376,6 +460,15 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
     dig_certif = np.zeros((n, n_t), dtype=np.int16)
 
     joven_login = (rng.random(n) < 0.5) | (afiliados["nivel_educacional"].to_numpy() == "UNIVERSITARIA")
+    # solo una fraccion de los afiliados manifiesta la intencion en los canales propios: el resto
+    # decide por fuera (la AFP de destino tramita el traspaso y no necesita nada de la de origen)
+    intencion_visible = rng.random(n) < par.p_intencion_visible
+    sexo_arr = afiliados["sexo"].to_numpy()
+    edad_legal = np.where(sexo_arr == "F", 60, 65)
+    # cambio de estado laboral respecto del mes anterior (finiquito, nuevo empleo): motivo
+    # administrativo tipico para pedir un certificado de saldo
+    cambio_estado = np.zeros((n, n_t), dtype=bool)
+    cambio_estado[:, 1:] = estado_mat[:, 1:] != estado_mat[:, :-1]
     retardos = np.arange(len(par.p_retardo_intencion))
 
     for t, periodo in enumerate(periodos):
@@ -511,17 +604,27 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
         if len(idx):
             intencion[idx] = rng.choice(retardos, size=len(idx), p=list(par.p_retardo_intencion))
 
-        # --- 4. uso digital (la intencion se manifiesta antes de la solicitud)
+        # --- 4. uso digital: la intencion se nota ANTES de la solicitud, pero solo en la fraccion
+        # `p_intencion_visible` de los afiliados y con multiplicadores moderados. La mayor parte de
+        # las descargas de certificado tiene causas exogenas (credito, tramite de pension, cambio de
+        # empleo, Operacion Renta), no el traspaso.
         con_int = intencion >= 0
+        int_vis = con_int & intencion_visible
         lam = np.zeros(n)
         lam[act] = (par.lambda_login_base
                     * np.where(joven_login[act], par.factor_login_joven, 1.0)
                     * (1.0 + 0.6 * saldo_pct[act])
-                    * np.where(con_int[act], par.factor_login_intencion, 1.0))
+                    * np.where(int_vis[act], par.factor_login_intencion, 1.0))
         la = rng.poisson(lam)
         lw = rng.poisson(lam * 0.55)
         cs = rng.poisson(lam * 0.8)
-        p_cert = np.where(con_int, par.p_certificado_intencion, par.p_certificado_base)
+        edad_t = edad_mat[:, t]
+        p_cert = (par.p_certificado_base
+                  * (par.factor_certificado_operacion_renta if mes in (4, 5) else 1.0)
+                  + par.p_certificado_hipotecario * ((edad_t >= 30) & (edad_t <= 50) & (renta_rel > 0.3))
+                  + par.p_certificado_tramite_pension * ((edad_legal - edad_t) * 12 < 24)
+                  + par.p_certificado_cambio_empleo * cambio_estado[:, t]
+                  + par.p_certificado_intencion * int_vis)
         ce = (rng.random(n) < p_cert) & en_afp
         dig_logins_app[act, t] = la[act]
         dig_logins_web[act, t] = lw[act]
@@ -617,8 +720,11 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
             df.sort_values(["afiliado_id", "periodo" if "periodo" in df.columns else "periodo_solicitud"],
                            inplace=True, ignore_index=True)
 
+    latente = pd.DataFrame({"afiliado_id": af_ids, "lat_u_traspaso": u_afil,
+                            "lat_intencion_visible": intencion_visible.astype(int)})
     return {
         "afiliados": afiliados,
+        "afiliados_latente_churn": latente,
         "empleadores": universo["empleadores"],
         "panel_mensual": panel.reset_index(drop=True),
         "macro": macro,

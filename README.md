@@ -32,6 +32,15 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | 07 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
 | 08 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
 
+## Persona: somos AFP Cuprum
+
+Para que los proyectos tengan un contexto real, el laboratorio se pone en el lugar de **AFP Cuprum**:
+la AFP más pequeña en afiliados (~5 %) pero cuarta en fondos (~17 %), con la cartera de mayores ingresos
+del sistema (ingreso imponible promedio ~$2,08 M vs ~$1,22 M), líder en APV (29 % del mercado) y una
+comisión de 1,44 % frente al 0,46 % de Uno. Historia, competencia, reforma de pensiones (Ley 21.735) y
+la calibración del universo sintético están en `docs/contexto_afp_cuprum.md`. Desde la ronda 2 los
+proyectos usan `generar_universo(perfil="cuprum")`.
+
 ## Universo sintético común
 
 `afp_lab/common/synth_base.py::generar_universo` genera afiliados, empleadores, un panel mensual

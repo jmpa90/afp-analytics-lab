@@ -20,7 +20,7 @@ Todos los parametros numericos estan en `ParametrosChurn` y se documentan en el 
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 import numpy as np
 import pandas as pd
@@ -28,30 +28,107 @@ import pandas as pd
 from afp_lab.common.synth_base import generar_universo
 from afp_lab.rim_nowcasting.calendario import add_months, periodo_to_idx, rango_periodos
 
+from .licitacion import ParametrosLicitacion, simular_licitacion_stock
+
 # --------------------------------------------------------------------- catalogos
-AFP_PROPIA = "AFP_ANDES"
-AFP_COMPETIDORAS = ("AFP_COSTA", "AFP_SUR", "AFP_AUSTRAL", "AFP_CUMBRE", "AFP_PACIFICO")
-AFP_TODAS = (AFP_PROPIA,) + AFP_COMPETIDORAS
 FONDOS = ("A", "B", "C", "D", "E")
 CANALES = ("EJECUTIVO_PROPIO", "VENDEDOR_COMPETENCIA", "CALL_CENTER", "CAMPANA_DIGITAL")
 RESULTADOS_CONTACTO = ("NO_CONTACTADO", "CONTACTADO", "INTERESADO", "RECHAZADO")
 TIPOS_RECLAMO = ("RENTABILIDAD", "ATENCION", "COMISION", "PENSION")
 ESTADOS_RECLAMO = ("ABIERTO", "RESUELTO_FAVORABLE", "RESUELTO_DESFAVORABLE")
 
-# Comision sobre la renta imponible (% ), tramos vigentes desde el periodo indicado.
-# Rango realista del sistema chileno (~0,58 % a ~1,45 %). La propia es cara y recorta dos veces.
-COMISIONES = {
-    "AFP_ANDES": [(202001, 1.27), (202401, 1.19), (202507, 1.14)],
-    "AFP_COSTA": [(202001, 0.69), (202208, 0.58)],
-    "AFP_SUR": [(202001, 1.16), (202408, 0.99)],
-    "AFP_AUSTRAL": [(202001, 1.45)],
-    "AFP_CUMBRE": [(202001, 1.27)],
-    "AFP_PACIFICO": [(202001, 1.44), (202601, 1.39)],
+MESES_PERMANENCIA_LICITACION = 24   # permanencia obligatoria del afiliado asignado por licitacion
+
+# Ventana simulada. Se extiende a 2028-12 (ronda 2) para cubrir la primera licitacion de afiliados
+# antiguos de la Ley 21.735 (sorteo 2027-08, traspasos desde 2028-06). La macro de 2027-2028 es una
+# extrapolacion plana del ultimo ancla disponible.
+PERIODO_INICIO, PERIODO_FIN = 202101, 202812
+
+
+@dataclass(frozen=True)
+class MercadoPerfil:
+    """Roster de AFP, precios y escenario de rentabilidad de un perfil de cartera.
+
+    `perfil="sistema"` conserva el mercado ficticio de la ronda 1 (para que sus resultados sigan
+    siendo reproducibles). `perfil="cuprum"` usa el roster y los precios reales de la Ficha
+    Estadistica Previsional N 165 (SP, agosto 2026) con Cuprum como AFP propia.
+    """
+
+    propia: str
+    competidoras: tuple[str, ...]
+    comisiones: dict[str, list[tuple[int, float]]]
+    licitaciones: list[tuple[int, str]]          # licitacion de NUEVOS afiliados
+    ventaja_rentabilidad_propia: float           # desviacion anual persistente de la propia
+    ventaja_desde: int
+    ventaja_hasta: int
+
+    @property
+    def todas(self) -> tuple[str, ...]:
+        return (self.propia,) + self.competidoras
+
+
+MERCADOS = {
+    # Ronda 1: 6 AFP ficticias. La propia es cara (1,27 %) y recorta dos veces; arrastra un castigo
+    # de rentabilidad de -1,0 pp anual entre 2024-01 y 2025-12 que motiva la ola de traspasos.
+    "sistema": MercadoPerfil(
+        propia="AFP_ANDES",
+        competidoras=("AFP_COSTA", "AFP_SUR", "AFP_AUSTRAL", "AFP_CUMBRE", "AFP_PACIFICO"),
+        comisiones={
+            "AFP_ANDES": [(202001, 1.27), (202401, 1.19), (202507, 1.14)],
+            "AFP_COSTA": [(202001, 0.69), (202208, 0.58)],
+            "AFP_SUR": [(202001, 1.16), (202408, 0.99)],
+            "AFP_AUSTRAL": [(202001, 1.45)],
+            "AFP_CUMBRE": [(202001, 1.27)],
+            "AFP_PACIFICO": [(202001, 1.44), (202601, 1.39)],
+        },
+        licitaciones=[(202001, "AFP_COSTA"), (202208, "AFP_ANDES"), (202408, "AFP_SUR")],
+        ventaja_rentabilidad_propia=-0.010, ventaja_desde=202401, ventaja_hasta=202512,
+    ),
+    # Ficha N 165 (ago 2026): comisiones vigentes 2026 y licitacion de nuevos afiliados adjudicada a
+    # Uno con 0,46 % desde el 1 de octubre de 2025 (antes Modelo). Cuprum **lidera la rentabilidad a
+    # 36 meses en los cinco fondos**, asi que su desviacion es POSITIVA y persistente (+0,25 pp
+    # anual) en toda la ventana: el motor del churn aqui es el precio (1,44 % contra 0,46 % de Uno),
+    # no la rentabilidad.
+    "cuprum": MercadoPerfil(
+        propia="CUPRUM",
+        competidoras=("UNO", "MODELO", "PLANVITAL", "HABITAT", "CAPITAL", "PROVIDA"),
+        comisiones={
+            "CUPRUM": [(202001, 1.44)],
+            "UNO": [(202001, 0.69), (202110, 0.49), (202605, 0.46)],
+            "MODELO": [(202001, 0.58)],
+            "PLANVITAL": [(202001, 1.16)],
+            "HABITAT": [(202001, 1.27)],
+            "CAPITAL": [(202001, 1.44)],
+            "PROVIDA": [(202001, 1.45)],
+        },
+        licitaciones=[(202001, "MODELO"), (202110, "UNO"), (202310, "MODELO"), (202510, "UNO")],
+        ventaja_rentabilidad_propia=+0.0025, ventaja_desde=202101, ventaja_hasta=203012,
+    ),
 }
-# Licitacion de nuevos afiliados: la adjudicataria recibe a TODOS los que se afilian al sistema
-# durante la vigencia y ellos deben permanecer 24 meses (regla real chilena).
-LICITACIONES = [(202001, "AFP_COSTA"), (202208, AFP_PROPIA), (202408, "AFP_SUR")]
-MESES_PERMANENCIA_LICITACION = 24
+
+# Ajustes del hazard y de la composicion de la cartera propios de cada perfil. Para Cuprum:
+#  * `b0` mas bajo: la Ficha N 165 muestra que Cuprum es la AFP con MAS traspasos netos positivos
+#    (+4.128 en junio 2026) pese a cobrar 1,44 %, asi que su fuga bruta es menor que la del sistema
+#    (~0,47 % mensual de cuentas traspasadas, 56.974 sobre 12,2 millones de afiliados);
+#  * mas entradas por traspaso durante la ventana (capta afiliados de renta alta de otras AFP), que
+#    es lo que produce el saldo neto positivo;
+#  * la retencion propia es mas intensa (asesoria presencial, cartera premium).
+PARAMETROS_POR_PERFIL = {
+    "cuprum": {
+        "b0": -6.32,
+        "p_antiguo_desde_afiliacion": 0.58,
+        "p_antiguo_traspaso_previo": 0.06,     # => 36 % entra por traspaso durante la ventana
+        "p_ejecutivo_propio": 0.020,
+        "factor_retencion_ejecutivo": 3.5,
+    },
+}
+
+# Compatibilidad con la ronda 1 (perfil "sistema"): siguen exportados como constantes.
+AFP_PROPIA = MERCADOS["sistema"].propia
+AFP_COMPETIDORAS = MERCADOS["sistema"].competidoras
+AFP_TODAS = MERCADOS["sistema"].todas
+COMISIONES = MERCADOS["sistema"].comisiones
+LICITACIONES = MERCADOS["sistema"].licitaciones
 
 # Rentabilidad real anual esperada y volatilidad por multifondo (supuestos de largo plazo).
 FONDO_MU_ANUAL = {"A": 0.062, "B": 0.052, "C": 0.042, "D": 0.032, "E": 0.022}
@@ -69,7 +146,7 @@ class ParametrosChurn:
     # --- composicion de la cartera propia
     p_antiguo_desde_afiliacion: float = 0.78   # siempre estuvo en la AFP propia
     p_antiguo_traspaso_previo: float = 0.12    # entro antes de la ventana simulada
-    # el resto (10 %) entra durante la ventana via traspaso de ENTRADA
+    # el resto entra durante la ventana via traspaso de ENTRADA (1 - los dos anteriores)
 
     # --- saldo inicial
     tasa_mensual_saldo_inicial: float = 0.0035  # rentabilidad real mensual para capitalizar la historia
@@ -79,9 +156,7 @@ class ParametrosChurn:
     # --- mercado: rentabilidad relativa entre AFP
     rho_ar_rentabilidad: float = 0.92        # persistencia mensual de la desviacion de cada AFP
     sigma_ar_rentabilidad: float = 0.00025   # innovacion mensual; da ~0,5 pp de sd en la ventana de 12 m
-    castigo_rentabilidad_propia: float = -0.010   # -1,0 pp anual en la ventana de castigo
-    castigo_desde: int = 202401
-    castigo_hasta: int = 202512
+    # la ventaja/castigo de rentabilidad de la propia y su ventana viven en `MercadoPerfil`
 
     # --- contactos (probabilidad mensual base por afiliado)
     p_vendedor_competencia: float = 0.016
@@ -156,9 +231,6 @@ DESCRIPCION_PARAMETROS = {
     "sigma_saldo_inicial": "Dispersion lognormal del saldo inicial",
     "rho_ar_rentabilidad": "Persistencia AR(1) de la desviacion de rentabilidad de cada AFP",
     "sigma_ar_rentabilidad": "Innovacion mensual del AR(1) (~0,5 pp de sd en la ventana de 12 meses)",
-    "castigo_rentabilidad_propia": "Castigo anual de rentabilidad de la AFP propia en su ventana",
-    "castigo_desde": "Primer mes del castigo de rentabilidad",
-    "castigo_hasta": "Ultimo mes del castigo de rentabilidad",
     "p_vendedor_competencia": "Prob. mensual de visita de un vendedor de la competencia",
     "p_ejecutivo_propio": "Prob. mensual de contacto del ejecutivo propio",
     "p_call_center": "Prob. mensual de contacto del call center propio",
@@ -242,10 +314,11 @@ def _valor_vigente(tramos: list[tuple[int, float]], periodo: int) -> float:
     return val
 
 
-def adjudicataria_licitacion(periodo: int) -> str:
-    """AFP que tiene adjudicada la licitacion de nuevos afiliados en `periodo`."""
-    afp = LICITACIONES[0][1]
-    for desde, nombre in LICITACIONES:
+def adjudicataria_licitacion(periodo: int, mercado: MercadoPerfil | None = None) -> str:
+    """AFP que tiene adjudicada la licitacion de NUEVOS afiliados en `periodo`."""
+    lic = (mercado or MERCADOS["sistema"]).licitaciones
+    afp = lic[0][1]
+    for desde, nombre in lic:
         if desde <= periodo:
             afp = nombre
     return afp
@@ -253,15 +326,17 @@ def adjudicataria_licitacion(periodo: int) -> str:
 
 # --------------------------------------------------------------------- mercado
 def generar_mercado(periodo_inicio: int, periodo_fin: int, seed: int,
-                    par: ParametrosChurn | None = None) -> pd.DataFrame:
+                    par: ParametrosChurn | None = None, perfil: str = "sistema") -> pd.DataFrame:
     """Tabla mes x AFP: comision, rentabilidad 12m de cada fondo y licitacion vigente.
 
     La rentabilidad del sistema por fondo es un paseo aleatorio mensual con la media y volatilidad
     de `FONDO_MU_ANUAL` / `FONDO_SIGMA_ANUAL`; cada AFP le suma una desviacion persistente (AR(1))
-    de pocos decimos de punto, que es lo que se observa en la industria. La AFP propia arrastra un
-    castigo de rentabilidad entre `castigo_desde` y `castigo_hasta` (escenario que motiva el churn).
+    de pocos decimos de punto, que es lo que se observa en la industria. La AFP propia suma ademas
+    la ventaja (o castigo) del perfil entre `ventaja_desde` y `ventaja_hasta`.
     """
     par = par or ParametrosChurn()
+    merc = MERCADOS[perfil]
+    afp_todas, afp_propia = merc.todas, merc.propia
     rng = np.random.default_rng(seed + 101)
     # se parte 12 meses antes para poder calcular la rentabilidad movil de 12 meses del primer mes
     periodos = rango_periodos(add_months(periodo_inicio, -12), periodo_fin)
@@ -276,7 +351,7 @@ def generar_mercado(periodo_inicio: int, periodo_fin: int, seed: int,
 
     # desviacion persistente de cada AFP en cada fondo (AR(1) con media 0)
     desv = {}
-    for a in AFP_TODAS:
+    for a in afp_todas:
         for f in FONDOS:
             e = rng.normal(0, par.sigma_ar_rentabilidad, n_t)
             x = np.zeros(n_t)
@@ -285,26 +360,26 @@ def generar_mercado(periodo_inicio: int, periodo_fin: int, seed: int,
             desv[(a, f)] = x
 
     ret = {}
-    for a in AFP_TODAS:
+    for a in afp_todas:
         for f in FONDOS:
             serie = ret_sistema[f] + desv[(a, f)]
-            if a == AFP_PROPIA:
-                castigo = np.array([par.castigo_rentabilidad_propia / 12.0
-                                    if par.castigo_desde <= p <= par.castigo_hasta else 0.0
+            if a == afp_propia:
+                ventaja = np.array([merc.ventaja_rentabilidad_propia / 12.0
+                                    if merc.ventaja_desde <= p <= merc.ventaja_hasta else 0.0
                                     for p in periodos])
-                serie = serie + castigo
+                serie = serie + ventaja
             ret[(a, f)] = serie
 
     for t, p in enumerate(periodos):
         if p < periodo_inicio:
             continue
-        for a in AFP_TODAS:
+        for a in afp_todas:
             fila = {
                 "periodo": p,
                 "afp": a,
-                "es_propia": int(a == AFP_PROPIA),
-                "comision": _valor_vigente(COMISIONES[a], p),
-                "gano_licitacion": int(adjudicataria_licitacion(p) == a),
+                "es_propia": int(a == afp_propia),
+                "comision": _valor_vigente(merc.comisiones[a], p),
+                "gano_licitacion": int(adjudicataria_licitacion(p, merc) == a),
             }
             for f in FONDOS:
                 v = np.prod(1.0 + ret[(a, f)][t - 11: t + 1]) - 1.0
@@ -333,24 +408,36 @@ def _fondo_defecto(edad: np.ndarray, sexo: np.ndarray) -> np.ndarray:
     return idx.astype(np.int8)
 
 
-def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
-                   periodo_fin: int = 202609, seed: int = 42,
-                   par: ParametrosChurn | None = None) -> dict[str, pd.DataFrame]:
+def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = PERIODO_INICIO,
+                   periodo_fin: int = PERIODO_FIN, seed: int = 42,
+                   par: ParametrosChurn | None = None, perfil: str = "sistema",
+                   par_licitacion: ParametrosLicitacion | None = None) -> dict[str, pd.DataFrame]:
     """Universo comun + tablas propias del proyecto de traspasos.
 
-    Devuelve un dict con: afiliados, empleadores, panel_mensual, macro (del universo comun) y
-    mercado, saldos, cambios_fondo, traspasos, contactos, reclamos, uso_digital (propias).
+    `perfil`: "sistema" (promedio del sistema, el de la ronda 1) o "cuprum" (nuestra cartera; ver
+    `docs/contexto_afp_cuprum.md`). El perfil cambia a la vez el universo comun (renta, educacion,
+    region, rubros, edad, densidad) y el mercado (roster de AFP, comisiones, licitacion de nuevos
+    afiliados y ventaja de rentabilidad de la propia).
+
+    Devuelve un dict con: afiliados, empleadores, panel_mensual, macro (del universo comun),
+    mercado, saldos, cambios_fondo, traspasos, contactos, reclamos, uso_digital, licitacion_stock
+    (propias) y afiliados_latente_churn (latente, solo para diagnosticos).
     """
     par = par or ParametrosChurn()
+    merc = MERCADOS[perfil]
+    afp_propia, afp_competidoras, afp_todas = merc.propia, merc.competidoras, merc.todas
+    n_comp = len(afp_competidoras)
+    if perfil in PARAMETROS_POR_PERFIL:
+        par = replace(par, **PARAMETROS_POR_PERFIL[perfil])
     rng = np.random.default_rng(seed + 202)
 
     universo = generar_universo(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                                periodo_fin=periodo_fin, seed=seed)
+                                periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     afiliados = universo["afiliados"]
     empleadores_id_max = int(universo["empleadores"]["empleador_id"].max())
     panel = universo["panel_mensual"]
     macro = universo["macro"]
-    mercado = generar_mercado(periodo_inicio, periodo_fin, seed, par)
+    mercado = generar_mercado(periodo_inicio, periodo_fin, seed, par, perfil=perfil)
 
     periodos = rango_periodos(periodo_inicio, periodo_fin)
     n_t, n = len(periodos), len(afiliados)
@@ -376,18 +463,18 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
 
     # ---- mercado en matrices (periodo x fondo) para la AFP propia y el sistema
     merc_idx = mercado.set_index(["periodo", "afp"])
-    com_propia = np.array([merc_idx.loc[(p, AFP_PROPIA), "comision"] for p in periodos])
-    com_min = np.array([min(merc_idx.loc[(p, a), "comision"] for a in AFP_TODAS) for p in periodos])
-    rent_propia = np.array([[merc_idx.loc[(p, AFP_PROPIA), f"rent_12m_{f}"] for f in FONDOS]
+    com_propia = np.array([merc_idx.loc[(p, afp_propia), "comision"] for p in periodos])
+    com_min = np.array([min(merc_idx.loc[(p, a), "comision"] for a in afp_todas) for p in periodos])
+    rent_propia = np.array([[merc_idx.loc[(p, afp_propia), f"rent_12m_{f}"] for f in FONDOS]
                             for p in periodos])                                    # (n_t, 5)
-    rent_prom = np.array([[np.mean([merc_idx.loc[(p, a), f"rent_12m_{f}"] for a in AFP_TODAS])
+    rent_prom = np.array([[np.mean([merc_idx.loc[(p, a), f"rent_12m_{f}"] for a in afp_todas])
                            for f in FONDOS] for p in periodos])                    # (n_t, 5)
-    licit = np.array([adjudicataria_licitacion(p) for p in periodos])
-    com_comp = np.array([[merc_idx.loc[(p, a), "comision"] for a in AFP_COMPETIDORAS] for p in periodos])
+    licit = np.array([adjudicataria_licitacion(p, merc) for p in periodos])
+    com_comp = np.array([[merc_idx.loc[(p, a), "comision"] for a in afp_competidoras] for p in periodos])
     rent_comp_mat = np.array([[[merc_idx.loc[(p, a), f"rent_12m_{f}"] for f in FONDOS]
-                               for a in AFP_COMPETIDORAS] for p in periodos])      # (n_t, 5 afp, 5 fondos)
-    gana_comp = np.array([[1.0 if adjudicataria_licitacion(p) == a else 0.0
-                           for a in AFP_COMPETIDORAS] for p in periodos])
+                               for a in afp_competidoras] for p in periodos])      # (n_t, n_comp, 5)
+    gana_comp = np.array([[1.0 if adjudicataria_licitacion(p, merc) == a else 0.0
+                           for a in afp_competidoras] for p in periodos])
 
     # ---- composicion de la cartera: quien esta en la AFP propia y desde cuando
     periodo_afil = afiliados["periodo_afiliacion"].to_numpy()
@@ -402,7 +489,7 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
     # afiliados nuevos al sistema: entran a la adjudicataria de la licitacion vigente
     for i in np.where(nuevo_sistema)[0]:
         t = int(idx_afil[i])
-        if t < n_t and licit[t] == AFP_PROPIA:
+        if t < n_t and licit[t] == afp_propia:
             entrada[i], licitado[i] = t, True
 
     antiguos = np.where(~nuevo_sistema)[0]
@@ -415,7 +502,10 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
         caso == 0, meses_previos,
         np.where(caso == 1, np.minimum(meses_previos, 1 + np.floor(rng.random(len(antiguos)) * 120)), 0))
     idx_entrada_ventana = antiguos[caso == 2]
-    t_ent = 1 + np.floor(rng.random(len(idx_entrada_ventana)) * max(n_t - 13, 1)).astype(np.int32)
+    # el traspaso de ENTRADA puede ocurrir en cualquier mes de la ventana (si entra al final, el
+    # afiliado simplemente aporta pocas filas); acotarlo a n_t-13 dejaba el ultimo ano sin entradas
+    # y volvia negativo el saldo neto de traspasos justo en el tramo que se reporta
+    t_ent = 1 + np.floor(rng.random(len(idx_entrada_ventana)) * max(n_t - 2, 1)).astype(np.int32)
     entrada[idx_entrada_ventana] = t_ent
     via_traspaso[idx_entrada_ventana] = True
 
@@ -511,12 +601,12 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
             antig[entra] = np.where(licitado[entra], 0, antig_ini[entra])
             idx = np.where(entra & via_traspaso)[0]
             if len(idx):
-                origen = rng.choice(np.array(AFP_COMPETIDORAS), size=len(idx))
+                origen = rng.choice(np.array(afp_competidoras), size=len(idx))
                 ev_traspasos.append({"afiliado_id": af_ids[idx],
                                      "periodo_solicitud": np.full(len(idx), add_months(periodo, -1)),
                                      "periodo_efectivo": np.full(len(idx), periodo),
                                      "afp_origen": origen,
-                                     "afp_destino": np.full(len(idx), AFP_PROPIA),
+                                     "afp_destino": np.full(len(idx), afp_propia),
                                      "tipo": np.full(len(idx), "ENTRADA")})
             idx_l = np.where(entra & licitado)[0]
             if len(idx_l):
@@ -524,7 +614,7 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
                                      "periodo_solicitud": np.full(len(idx_l), periodo),
                                      "periodo_efectivo": np.full(len(idx_l), periodo),
                                      "afp_origen": np.full(len(idx_l), "NUEVO_AFILIADO"),
-                                     "afp_destino": np.full(len(idx_l), AFP_PROPIA),
+                                     "afp_destino": np.full(len(idx_l), afp_propia),
                                      "tipo": np.full(len(idx_l), "ENTRADA")})
 
         act = np.where(en_afp)[0]
@@ -682,11 +772,12 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
             w = np.exp(score - score.max(axis=1, keepdims=True))
             w = w / w.sum(axis=1, keepdims=True)
             sorteo = rng.random(len(idx))[:, None]
-            destino = np.array(AFP_COMPETIDORAS)[(w.cumsum(axis=1) < sorteo).sum(axis=1).clip(0, 4)]
+            destino = np.array(afp_competidoras)[
+                (w.cumsum(axis=1) < sorteo).sum(axis=1).clip(0, n_comp - 1)]
             ev_traspasos.append({"afiliado_id": af_ids[idx],
                                  "periodo_solicitud": np.full(len(idx), periodo),
                                  "periodo_efectivo": np.full(len(idx), add_months(periodo, 1)),
-                                 "afp_origen": np.full(len(idx), AFP_PROPIA),
+                                 "afp_origen": np.full(len(idx), afp_propia),
                                  "afp_destino": destino,
                                  "tipo": np.full(len(idx), "SALIDA")})
 
@@ -763,7 +854,7 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
                             "lat_intencion_visible": intencion_visible.astype(int),
                             "lat_switcher": es_switcher.astype(int),
                             "lat_con_brecha_antiguedad": con_brecha.astype(int)})
-    return {
+    tablas = {
         "afiliados": afiliados,
         "afiliados_latente_churn": latente,
         "empleadores": universo["empleadores"],
@@ -777,6 +868,11 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
         "reclamos": reclamos,
         "uso_digital": uso_digital,
     }
+    # licitacion de afiliados antiguos (Ley 21.735): sorteo del 10 % de los no pensionados
+    tablas["licitacion_stock"] = simular_licitacion_stock(
+        tablas, latente.set_index("afiliado_id")["lat_u_traspaso"], periodo_inicio, periodo_fin,
+        seed, par_licitacion)
+    return tablas
 
 
 def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | None = None,
@@ -799,7 +895,10 @@ def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | 
     saldos = tablas["saldos"]
     cartera_mes = saldos.groupby("periodo")["afiliado_id"].count()
     salidas_mes = salidas.groupby("periodo_solicitud")["afiliado_id"].count().reindex(cartera_mes.index).fillna(0)
+    # se descartan los primeros 24 meses: la cartera y el estado del hazard todavia se estan
+    # llenando y la tasa movil de esos meses no es representativa del regimen
     tasa_12m = (salidas_mes.rolling(12).sum() / cartera_mes.rolling(12).mean()).dropna()
+    tasa_12m = tasa_12m.iloc[12:] if len(tasa_12m) > 24 else tasa_12m
     merc = tablas["mercado"]
     rangos = []
     for f in FONDOS:
@@ -825,6 +924,10 @@ def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | 
         {"indicador": "rango_rentabilidad_12m_entre_afp_p95_pp", "valor": float(rango_rent.quantile(0.95)), "detalle": ""},
         {"indicador": "traspasos_salida_total", "valor": float(len(salidas)), "detalle": ""},
         {"indicador": "traspasos_entrada_total", "valor": float((tr["tipo"] == "ENTRADA").sum()) if len(tr) else 0.0, "detalle": ""},
+        {"indicador": "traspasos_netos_total", "valor": float((tr["tipo"] == "ENTRADA").sum() - len(salidas)) if len(tr) else 0.0,
+         "detalle": "entradas - salidas; Cuprum real: +4.128 en jun-26"},
+        {"indicador": "tasa_salida_mensual", "valor": float((salidas_mes / cartera_mes).mean()),
+         "detalle": "sistema real (Ficha N 165): 0,47 % mensual"},
         {"indicador": "saldo_mediano_clp", "valor": float(saldos["saldo_obligatorio"].median()), "detalle": ""},
         {"indicador": "contactos_por_afiliado_ano", "valor": float(len(tablas["contactos"]) / max(cartera_mes.mean(), 1) / n_anios), "detalle": ""},
         {"indicador": "reclamos_por_afiliado_ano", "valor": float(len(tablas["reclamos"]) / max(cartera_mes.mean(), 1) / n_anios), "detalle": ""},

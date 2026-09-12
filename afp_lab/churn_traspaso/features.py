@@ -22,7 +22,7 @@ import pandas as pd
 from afp_lab.rim_nowcasting.calendario import add_months, periodo_to_idx, rango_periodos
 
 from . import HORIZONTE_MESES, MESES_DESFASE_RIM
-from .synthetic import AFP_PROPIA, AFP_TODAS, CANALES, FONDOS, TIPOS_RECLAMO
+from .synthetic import CANALES, FONDOS, TIPOS_RECLAMO
 
 EDAD_LEGAL_PENSION = {"F": 60, "M": 65}
 
@@ -266,14 +266,19 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
     # ---------------------------------------------------------------- 4. mercado
     merc = tablas["mercado"]
     merc = merc[merc["periodo"].isin(per_pos)]
+    # la AFP propia y el roster salen de la tabla `mercado`, no de constantes: asi las features
+    # funcionan igual con el mercado ficticio del perfil "sistema" y con el roster real del perfil
+    # "cuprum" (7 AFP), sin que features.py sepa nada del perfil
+    afp_propia = str(merc.loc[merc["es_propia"] == 1, "afp"].iloc[0])
+    afp_todas = sorted(merc["afp"].unique().tolist())
     piv_com = merc.pivot(index="periodo", columns="afp", values="comision").reindex(periodos).ffill()
-    com_propia = piv_com[AFP_PROPIA].to_numpy(dtype=np.float32)
-    com_min = piv_com[list(AFP_TODAS)].min(axis=1).to_numpy(dtype=np.float32)
+    com_propia = piv_com[afp_propia].to_numpy(dtype=np.float32)
+    com_min = piv_com[afp_todas].min(axis=1).to_numpy(dtype=np.float32)
     rent_propia_f, rent_prom_f = {}, {}
     for f in FONDOS:
         piv = merc.pivot(index="periodo", columns="afp", values=f"rent_12m_{f}").reindex(periodos).ffill()
-        rent_propia_f[f] = piv[AFP_PROPIA].to_numpy(dtype=np.float32)
-        rent_prom_f[f] = piv[list(AFP_TODAS)].mean(axis=1).to_numpy(dtype=np.float32)
+        rent_propia_f[f] = piv[afp_propia].to_numpy(dtype=np.float32)
+        rent_prom_f[f] = piv[afp_todas].mean(axis=1).to_numpy(dtype=np.float32)
     gan = merc[merc["gano_licitacion"] == 1].set_index("periodo")["afp"].reindex(periodos).ffill().bfill()
     afp_licit = gan.to_numpy(dtype=object)
 
@@ -332,7 +337,7 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
     datos["brecha_comision_pp"] = com_propia[jj] - com_min[jj]
     datos["brecha_comision_rel"] = (com_propia[jj] - com_min[jj]) / np.maximum(com_min[jj], 0.01)
     datos["afp_licitacion"] = afp_licit[jj]
-    datos["licitacion_propia"] = (afp_licit[jj] == AFP_PROPIA).astype(np.int8)
+    datos["licitacion_propia"] = (afp_licit[jj] == afp_propia).astype(np.int8)
     datos["mes"] = (np.array(periodos, dtype=np.int64)[jj] % 100).astype(np.int8)
 
     df = pd.DataFrame(datos)
@@ -410,13 +415,31 @@ def construir_target(tablas: dict[str, pd.DataFrame], df: pd.DataFrame,
 
 
 def cortes_evaluables(tablas: dict[str, pd.DataFrame], horizonte: int = HORIZONTE_MESES,
-                      meses_burn_in: int = 14) -> list[int]:
-    """Cortes con historia suficiente (>= `meses_burn_in`) y con los `horizonte` meses completos."""
+                      meses_burn_in: int = 14, excluir_licitacion: bool = True) -> list[int]:
+    """Cortes con historia suficiente (>= `meses_burn_in`) y con los `horizonte` meses completos.
+
+    `excluir_licitacion`: descarta los cortes cuya ventana de target (`corte+1 … corte+h`) contiene
+    un mes de traspaso efectivo de la **licitacion de stock** (Ley 21.735). Esos traspasos no son
+    churn voluntario: son un evento masivo y determinista con otra mecanica, y meterlos en la
+    etiqueta ensuciaria el modelo. El sorteo se combina con el score aparte (`licitacion.py`).
+    """
     periodos = sorted(tablas["saldos"]["periodo"].unique().tolist())
     p_ini, p_fin = periodos[0], periodos[-1]
     primero = add_months(int(p_ini), meses_burn_in)
     ultimo = add_months(int(p_fin), -horizonte)
-    return [p for p in rango_periodos(primero, ultimo)]
+    cortes = list(rango_periodos(primero, ultimo))
+    if not excluir_licitacion:
+        return cortes
+    lic = tablas.get("licitacion_stock")
+    if lic is None or not len(lic):
+        return cortes
+    idx_lic = sorted(periodo_to_idx(int(m)) for m in lic["periodo_efectivo"].unique())
+    if not idx_lic:
+        return cortes
+    # se TRUNCA (no se filtra) para que la serie de cortes quede contigua: el primer corte
+    # contaminado es `primer mes efectivo - horizonte`, y desde ahi en adelante no se usa nada.
+    primer_contaminado = idx_lic[0] - horizonte
+    return [c for c in cortes if periodo_to_idx(c) < primer_contaminado]
 
 
 def construir_dataset(tablas: dict[str, pd.DataFrame], cortes: list[int],
@@ -441,7 +464,8 @@ def columnas_features(df: pd.DataFrame) -> list[str]:
 
 
 def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
-                   horizonte: int = HORIZONTE_MESES) -> dict[str, list[int]]:
+                   horizonte: int = HORIZONTE_MESES,
+                   max_cortes_train: int | None = 31) -> dict[str, list[int]]:
     """Split temporal con **purga por filas** entre particiones contiguas.
 
     La purga es la minima que elimina el solapamiento: un corte `c` aporta target hasta `c+h`, asi
@@ -470,8 +494,16 @@ def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
     train = [c for c in cortes if c <= limite_train]
     if not train:
         raise ValueError("no quedan cortes de entrenamiento despues de purgar la validacion")
+    # ventana de reentrenamiento acotada: se usan los `max_cortes_train` cortes MAS RECIENTES que
+    # respetan la purga. Mantiene el costo del run estable al alargar la ventana simulada y se
+    # parece a lo que hace un reentrenamiento mensual en produccion.
+    descartados_antiguos = []
+    if max_cortes_train is not None and len(train) > max_cortes_train:
+        descartados_antiguos = train[:-max_cortes_train]
+        train = train[-max_cortes_train:]
     usados = set(train) | set(valid) | set(test)
     descartados = [c for c in cortes if c not in usados]
+    assert all(c in descartados for c in descartados_antiguos)
     gap = periodo_to_idx(test[0]) - periodo_to_idx(add_months(max(train), horizonte))
     if gap < horizonte:
         raise ValueError(f"gap train->test de {gap} meses, menor que el horizonte {horizonte}")

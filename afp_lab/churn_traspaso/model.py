@@ -26,6 +26,8 @@ import pandas as pd
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
+from afp_lab.rim_nowcasting.calendario import periodo_to_idx
+
 from .features import COLUMNAS_CATEGORICAS, columnas_features
 
 # Hiperparametros elegidos por AUC de VALIDACION entre 5 configuraciones (nunca con test):
@@ -98,23 +100,30 @@ def calibrador_isotonico(prob: np.ndarray, y: np.ndarray,
     return iso
 
 
-def ajustar_prior(prob: np.ndarray, tasa_objetivo: float, tol: float = 1e-9) -> np.ndarray:
+def ajustar_prior(prob: np.ndarray, tasa_objetivo: float, tol: float = 1e-9,
+                  peso: np.ndarray | None = None) -> np.ndarray:
     """Desplaza el log-odds para que la media de `prob` sea `tasa_objetivo` (prior shift).
 
     Sirve para **anclar el nivel** de la probabilidad a un pronostico agregado del flujo mensual de
     traspasos, que es la unica forma de corregir el error de nivel cuando la tasa base del mes que
     se esta puntuando difiere de la del ultimo mes con horizonte cerrado (ver README §6 y §8: entre
     semillas la tasa base del test se mueve hasta -54 % respecto de la ventana de calibracion).
+    `peso` permite anclar una media **ponderada** en vez del conteo: con `peso=saldo` el ancla deja
+    `sum(p x saldo) / sum(saldo)` en `tasa_objetivo`, que es exactamente el estimando del saldo en
+    riesgo. Anclar el conteo no basta: el desplazamiento uniforme del logit sube mas a los afiliados
+    de probabilidad alta, que son los de saldo alto, asi que el sesgo ponderado queda peor.
     No cambia el orden del score, asi que no afecta AUC, lift ni captura.
     """
     p = np.clip(np.asarray(prob, dtype=float), 1e-9, 1 - 1e-9)
     if not 0 < tasa_objetivo < 1:
         raise ValueError("tasa_objetivo debe estar en (0, 1)")
+    w = np.ones_like(p) if peso is None else np.asarray(peso, dtype=float)
+    w = w / max(w.sum(), 1e-12)
     z = np.log(p / (1 - p))
     lo, hi = -20.0, 20.0
     for _ in range(200):
         mid = (lo + hi) / 2
-        m = float(np.mean(1.0 / (1.0 + np.exp(-(z + mid)))))
+        m = float(np.sum(w / (1.0 + np.exp(-(z + mid)))))
         if abs(m - tasa_objetivo) < tol:
             break
         if m < tasa_objetivo:
@@ -239,6 +248,184 @@ def baseline_regla_graduada(df: pd.DataFrame) -> np.ndarray:
     """
     reclamo, competencia, rentabilidad = _condiciones_regla(df)
     return (reclamo.astype(float) + competencia.astype(float) + rentabilidad.astype(float)) / 3.0
+
+
+# --------------------------------------------------------------------- pronostico agregado del flujo
+COLUMNAS_PRONOSTICO = ("brecha_comision_pp", "brecha_rentabilidad_pp", "antiguedad_afp_meses",
+                       "es_marzo", "es_agosto", "t_rel")
+
+
+def serie_mensual_flujo(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrega el dataset a una serie mensual por corte: tasa observada y regresores del mes.
+
+    Todos los regresores son conocidos AL CORTE: brecha de comision contra la AFP mas barata, brecha
+    de rentabilidad 12 m del fondo del afiliado (promedio de la cartera), antiguedad media de la
+    cartera, estacionalidad de marzo y agosto, y una tendencia lineal.
+    """
+    g = df.groupby("periodo_corte", observed=True)
+    peso = df["saldo_obligatorio"].to_numpy(dtype=float)
+    aux = df[["periodo_corte", "y"]].assign(_w=peso, _wy=peso * df["y"].to_numpy(dtype=float))
+    ga = aux.groupby("periodo_corte", observed=True)
+    d = pd.DataFrame({
+        "periodo_corte": g["y"].mean().index.astype(int),
+        "n": g["y"].size().to_numpy(),
+        "tasa_observada": g["y"].mean().to_numpy(),
+        # tasa ponderada por saldo: la que hay que pronosticar si el objetivo es el saldo en riesgo
+        "tasa_saldo_observada": (ga["_wy"].sum() / ga["_w"].sum()).to_numpy(),
+        "brecha_comision_pp": g["brecha_comision_pp"].mean().to_numpy(),
+        "brecha_rentabilidad_pp": g["brecha_rentabilidad_pp"].mean().to_numpy(),
+        "antiguedad_afp_meses": g["antiguedad_afp_meses"].mean().to_numpy(),
+    }).reset_index(drop=True)
+    mes = d["periodo_corte"] % 100
+    d["es_marzo"] = (mes == 3).astype(float)
+    d["es_agosto"] = (mes == 8).astype(float)
+    d["t_rel"] = d["periodo_corte"].map(periodo_to_idx).astype(float)
+    return d
+
+
+class PronosticoFlujo:
+    """Pronostico agregado del flujo mensual de traspasos (backlog de la ronda 1, encargo C).
+
+    Regresion lineal del **logit de la tasa de traspaso a 6 meses** sobre variables conocidas al
+    corte. Sirve para una sola cosa: **anclar el nivel** de la probabilidad calibrada
+    (`ajustar_prior`) cuando se quiere sumar `prob x saldo`. No toca el orden del score.
+
+    Se ajusta solo con cortes de **horizonte cerrado** (train y validacion); el test nunca entra.
+    """
+
+    def __init__(self, columnas: tuple[str, ...] = COLUMNAS_PRONOSTICO,
+                 objetivo: str = "saldo") -> None:
+        if objetivo not in ("conteo", "saldo"):
+            raise ValueError("objetivo debe ser 'conteo' o 'saldo'")
+        self.objetivo = objetivo
+        self.col_objetivo = "tasa_observada" if objetivo == "conteo" else "tasa_saldo_observada"
+        self.columnas = tuple(columnas)
+        self.coef_: np.ndarray | None = None
+        self.media_: np.ndarray | None = None
+        self.escala_: np.ndarray | None = None
+        self.r2_: float = float("nan")
+        self.mae_logit_: float = float("nan")
+
+    def _diseno(self, d: pd.DataFrame) -> np.ndarray:
+        if not self.columnas:
+            return np.ones((len(d), 1))
+        x = d[list(self.columnas)].to_numpy(dtype=float)
+        x = (x - self.media_) / self.escala_
+        return np.column_stack([np.ones(len(x)), x])
+
+    def ajustar(self, df_cerrado: pd.DataFrame) -> "PronosticoFlujo":
+        return self._ajustar_serie(serie_mensual_flujo(df_cerrado))
+
+    def _ajustar_serie(self, d: pd.DataFrame) -> "PronosticoFlujo":
+        if len(d) < len(self.columnas) + 3:
+            raise ValueError(f"se necesitan al menos {len(self.columnas) + 3} cortes cerrados; hay {len(d)}")
+        x0 = d[list(self.columnas)].to_numpy(dtype=float) if self.columnas else np.zeros((len(d), 0))
+        self.media_ = x0.mean(axis=0) if self.columnas else np.zeros(0)
+        self.escala_ = (np.where(x0.std(axis=0) > 1e-12, x0.std(axis=0), 1.0) if self.columnas
+                        else np.ones(0))
+        x = self._diseno(d)
+        y = _logit(d[self.col_objetivo].to_numpy())
+        self.coef_, *_ = np.linalg.lstsq(x, y, rcond=None)
+        pred = x @ self.coef_
+        self.r2_ = float(1 - ((y - pred) ** 2).sum() / max(((y - y.mean()) ** 2).sum(), 1e-12))
+        self.mae_logit_ = float(np.mean(np.abs(y - pred)))
+        return self
+
+    def predecir(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Tasa pronosticada por corte (una fila por corte)."""
+        if self.coef_ is None:
+            raise ValueError("el pronostico no esta ajustado")
+        d = serie_mensual_flujo(df)
+        z = self._diseno(d) @ self.coef_
+        d["tasa_pronosticada"] = 1.0 / (1.0 + np.exp(-z))
+        d["tasa_objetivo_observada"] = d[self.col_objetivo]
+        d["error_relativo"] = d["tasa_pronosticada"] / d[self.col_objetivo] - 1.0
+        return d[["periodo_corte", "n", "tasa_observada", "tasa_saldo_observada",
+                  "tasa_objetivo_observada", "tasa_pronosticada", "error_relativo"]]
+
+    def coeficientes(self) -> pd.DataFrame:
+        return pd.DataFrame({"termino": ("intercepto",) + tuple(self.columnas), "coef": self.coef_})
+
+
+ESPECIFICACIONES_PRONOSTICO = {
+    "estructural": ("brecha_comision_pp", "brecha_rentabilidad_pp", "antiguedad_afp_meses",
+                    "es_marzo", "es_agosto"),
+    "estructural+tendencia": COLUMNAS_PRONOSTICO,
+    "precio+antiguedad": ("brecha_comision_pp", "antiguedad_afp_meses"),
+    "constante": (),
+}
+
+
+def seleccionar_pronostico(df_train: pd.DataFrame, df_valid: pd.DataFrame, objetivo: str = "saldo",
+                           min_cortes: int = 10) -> tuple["PronosticoFlujo", pd.DataFrame]:
+    """Elige la especificacion del pronostico con un **backtest de ventana expansiva**.
+
+    Sobre la serie mensual de los cortes con horizonte cerrado (train + validacion) se recorre el
+    tiempo: para cada corte `t >= min_cortes` se ajusta con los cortes anteriores y se predice `t`.
+    Eso da del orden de 20 evaluaciones fuera de muestra en vez de las 3 de la validacion, y ningun
+    numero de test participa. Gana la especificacion con menor error absoluto medio relativo; la
+    ganadora se reajusta con toda la historia cerrada, que es lo que se usaria en produccion.
+
+    La especificacion "constante" (la tasa media de la historia) es el baseline honesto, y la
+    tendencia lineal compite en igualdad de condiciones en vez de venir por defecto: extrapolar una
+    tendencia es justamente lo que rompe el nivel.
+    """
+    cerrado = pd.concat([df_train, df_valid])
+    serie = serie_mensual_flujo(cerrado).sort_values("periodo_corte").reset_index(drop=True)
+    filas = []
+    for nombre, cols in ESPECIFICACIONES_PRONOSTICO.items():
+        errores = []
+        for t in range(max(min_cortes, len(cols) + 4), len(serie)):
+            pr = PronosticoFlujo(columnas=cols, objetivo=objetivo)
+            try:
+                pr._ajustar_serie(serie.iloc[:t])
+            except ValueError:
+                break
+            z = pr._diseno(serie.iloc[[t]]) @ pr.coef_
+            pred = float(1.0 / (1.0 + np.exp(-z[0])))
+            real = float(serie.iloc[t][pr.col_objetivo])
+            errores.append(pred / max(real, 1e-9) - 1.0)
+        if not errores:
+            continue
+        e = np.asarray(errores)
+        pr_full = PronosticoFlujo(columnas=cols, objetivo=objetivo).ajustar(cerrado)
+        filas.append({
+            "especificacion": nombre,
+            "n_variables": len(cols),
+            "n_evaluaciones_backtest": len(e),
+            "r2_dentro_de_muestra": pr_full.r2_,
+            "mae_relativo_backtest": float(np.mean(np.abs(e))),
+            "sesgo_relativo_backtest": float(np.mean(e)),
+            "p90_abs_backtest": float(np.quantile(np.abs(e), 0.90)),
+        })
+    if not filas:
+        raise ValueError(f"no hay suficientes cortes cerrados ({len(serie)}) para el backtest del "
+                         f"pronostico con min_cortes={min_cortes}")
+    tabla = pd.DataFrame(filas).sort_values("mae_relativo_backtest").reset_index(drop=True)
+    ganadora = tabla.loc[0, "especificacion"]
+    tabla["elegida"] = tabla["especificacion"] == ganadora
+    final = PronosticoFlujo(columnas=ESPECIFICACIONES_PRONOSTICO[ganadora],
+                            objetivo=objetivo).ajustar(cerrado)
+    return final, tabla
+
+
+def anclar_con_pronostico(df: pd.DataFrame, prob: np.ndarray, pronostico: PronosticoFlujo,
+                          col_peso: str = "saldo_obligatorio") -> np.ndarray:
+    """Aplica `ajustar_prior` corte por corte con la tasa pronosticada de ese corte.
+
+    Si el pronostico es de tasa ponderada por saldo (`objetivo="saldo"`), el ancla se aplica con
+    `peso=saldo`, de modo que lo que queda anclado es el saldo en riesgo y no el numero de traspasos.
+    """
+    out = np.asarray(prob, dtype=float).copy()
+    tasas = pronostico.predecir(df).set_index("periodo_corte")["tasa_pronosticada"]
+    cortes = df["periodo_corte"].to_numpy()
+    peso_total = df[col_peso].to_numpy(dtype=float) if pronostico.objetivo == "saldo" else None
+    for corte, tasa in tasas.items():
+        m = cortes == corte
+        if m.any():
+            w = None if peso_total is None else peso_total[m]
+            out[m] = ajustar_prior(out[m], float(np.clip(tasa, 1e-6, 0.5)), peso=w)
+    return out
 
 
 # --------------------------------------------------------------------- interpretabilidad

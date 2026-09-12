@@ -2,7 +2,12 @@
 
 Responsable: DS-3. Ronda 3 (aprobada con correcciones menores en ronda 2). Revisado contra
 `CONVENCIONES.md` §7, `docs/revisiones/ronda_1/riesgo_cese_cotizacion.md` y
-`docs/revisiones/ronda_2/riesgo_cese_cotizacion.md`.
+`docs/revisiones/ronda_2/riesgo_cese_cotizacion.md`. Aprobada por el cliente e integrada en
+`main`; el addendum `BRIEF_RONDA2.md` (perfil `--perfil` y features de planilla) se
+documenta en el **§11 "Ronda 2" al final de este README** — un nombre de sección
+desafortunadamente igual al de los encabezados de más abajo ("Correcciones de la ronda 2/3
+(revisión del gerente)"), que son las correcciones internas post-revisión del brief
+original y **no tienen relación** con este addendum posterior a la aprobación del cliente.
 
 ## Correcciones de la ronda 2 (revisión del gerente)
 
@@ -602,7 +607,9 @@ conocer antes de usarla para un compromiso operativo mes a mes (ver más en §7 
 
 ```bash
 cd /home/user/afp-analytics-lab
-python -m afp_lab.riesgo_cese_cotizacion.run --n-afiliados 20000
+python -m afp_lab.riesgo_cese_cotizacion.run --n-afiliados 20000                 # perfil "sistema" (por defecto)
+python -m afp_lab.riesgo_cese_cotizacion.run --n-afiliados 20000 --perfil cuprum
+python -m afp_lab.riesgo_cese_cotizacion.run --n-afiliados 20000 --perfil ambos  # corre los dos y compara (ronda 2, §11)
 python -m pytest afp_lab/riesgo_cese_cotizacion/tests -q
 ```
 
@@ -611,19 +618,27 @@ python -m pytest afp_lab/riesgo_cese_cotizacion/tests -q
   una corrida de **152 s** — la máquina es de 4 núcleos compartida con otros 2 data
   scientists, `n_jobs=2` en LightGBM). La corrida de referencia de este informe tomó
   **50,1 s**. Muy por debajo del límite de 5 minutos incluso en el caso más lento observado.
-* `pytest afp_lab/riesgo_cese_cotizacion/tests`: **20 tests, ~15 s** (subió de 16 a 20 tests
-  en la ronda 3: cobertura de cesantía que se apaga con reingreso conocido, regresión de
-  `emp_sin_planilla_conocida` no-idénticamente-cero, cobertura/diagnóstico de cartera
-  completa, ECE/monotonía de calibración). Muy por debajo del límite de 2 minutos.
+  Con el addendum de ronda 2 (§11: perfil + ablation de planilla, que entrena un LightGBM
+  extra por target) se midió **67,9–76,7 s** por perfil a 20 000 afiliados; `--perfil ambos`
+  (los dos perfiles seguidos) tomó **~146 s**, todavía muy por debajo de los 5 minutos.
+* `pytest afp_lab/riesgo_cese_cotizacion/tests`: **25 tests, ~21 s** (25 desde la ronda 2 de
+  proceso, ver §11; 20 tests, ~15 s hasta la ronda 3 de revisión: cobertura de cesantía que
+  se apaga con reingreso conocido, regresión de `emp_sin_planilla_conocida`
+  no-idénticamente-cero, cobertura/diagnóstico de cartera completa, ECE/monotonía de
+  calibración). Muy por debajo del límite de 2 minutos.
 * Semilla fija (`seed=42` por defecto) y generación determinista: se verificó que dos
   corridas de `run.py` con los mismos parámetros producen exactamente las mismas métricas
   (incluidas las nuevas tablas de cartera completa y diagnóstico).
-* `--salida` (por defecto `salidas/riesgo_cese_cotizacion/`, en `.gitignore`):
-  `dataset_features.parquet` (465 160 filas × 81 columnas),
-  `modelos/modelo_{y3,y6,y_reingreso}.joblib` y `reportes/*.csv` (métricas por segmento
-  para los 3 predictores, calibración, negocio —incluida la vista de cartera completa para
-  cese—, importancias, ejemplos, cobertura de población A y diagnóstico por tipo de
-  afiliado).
+* `--salida` (por defecto, desde la ronda 2, `salidas/riesgo_cese_cotizacion/<perfil>/`, en
+  `.gitignore`; antes era `salidas/riesgo_cese_cotizacion/` a secas — el cambio es para que
+  `sistema` y `cuprum` no se pisen entre sí y se puedan comparar):
+  `dataset_features.parquet` (465 160 filas × 91 columnas desde la ronda 2: 10 más por las
+  features de planilla, §11), `modelos/modelo_{y3,y6,y_reingreso}.joblib` y `reportes/*.csv`
+  (métricas por segmento para los 3 predictores, calibración, negocio —incluida la vista de
+  cartera completa para cese—, importancias, `aporte_planilla_*.csv` del ablation de §11,
+  ejemplos, cobertura de población A y diagnóstico por tipo de afiliado);
+  `comparacion_perfiles.csv` (un nivel arriba, `salidas/riesgo_cese_cotizacion/`) con
+  `--perfil ambos`.
 
 ## 10. Propuestas para `common/` y próximos pasos
 
@@ -679,3 +694,144 @@ propuesta para el gerente):
 * Grilla de umbrales/costos por segmento para la asesoría (hoy la priorización es un único
   ranking por probabilidad calibrada; una AFP real distinguiría el costo de contactar a un
   afiliado de alto valor vs. uno de bajo saldo).
+
+## 11. Ronda 2 (addendum post-aprobación, `BRIEF_RONDA2.md`)
+
+Nota de nomenclatura: esta sección numera la ronda de trabajo del **proceso general** del
+laboratorio (después de que el cliente aprobó la ronda 3 del brief original e integró este
+proyecto a `main`), no una ronda de revisión del gerente — esas son las secciones "Correcciones
+de la ronda 2/3" de más arriba. Dos encargos, en el orden del brief: **(1)** `--perfil
+{sistema,cuprum}`, correr ambos y comparar; **(2)** usar los códigos de movimiento de personal
+de `afp_lab/common/planilla.py` (aditivo, construido en el mismo encargo por el mismo DS) como
+features, con el mismo desfase que la RIM, y medir cuánto aportan frente a los eventos AFC. No
+se tocó nada fuera de esta carpeta.
+
+### 11.1 `--perfil {sistema,cuprum}`: sistema vs. cartera propia
+
+`synthetic.generar_datos(..., perfil="sistema"|"cuprum")` pasa el parámetro tal cual a
+`afp_lab.common.synth_base.generar_universo` (que ya lo soporta desde antes de este encargo);
+nada más del proyecto cambia. `run.py` agrega `--perfil` (`sistema` por defecto, para no romper
+ninguna corrida existente) y una tercera opción de conveniencia, `--perfil ambos`, que corre los
+dos perfiles con la misma semilla/horizonte y guarda la comparación
+(`comparar_perfiles()` → `salidas/riesgo_cese_cotizacion/comparacion_perfiles.csv`). Cada perfil
+escribe en su propia subcarpeta (`.../<perfil>/`, ver §9) para no pisarse.
+
+Corrida de referencia: `n_afiliados=20 000`, `seed=42`, mismo horizonte y cortes de test
+(202601–202603) para ambos perfiles.
+
+| Perfil | Target | Tasa real (test) | AUC modelo | Brier modelo | AUC regla de negocio | Error relativo del agregado (prom. 3 meses de test) |
+|---|---|---:|---:|---:|---:|---:|
+| sistema | Cese 3 m (y3) | 6,75 % | 0,868 | 0,0458 | 0,798 | +2,6 % |
+| sistema | Cese 6 m (y6) | 4,32 % | 0,859 | 0,0343 | 0,795 | −2,6 % |
+| sistema | Reingreso | 66,2 %¹ | 0,720 | 0,1924 | 0,575 | +3,0 % |
+| cuprum | Cese 3 m (y3) | 7,37 % | 0,885 | 0,0413 | 0,820 | −3,7 % |
+| cuprum | Cese 6 m (y6) | 5,71 % | 0,875 | 0,0387 | 0,811 | −8,9 % |
+| cuprum | Reingreso | 50,3 %¹ | 0,641 | 0,2385 | 0,526 | +2,8 % |
+
+¹ Tasa dentro de la población de reingreso (dependientes sin RIM conocida en `corte-2` **ni**
+`corte-3`, §3), no del total de la cartera. El "error relativo del agregado" de cese es el de la
+vista de **cartera completa** (`negocio_agregado_total`, §7); el de reingreso es el simple
+(no se proyecta cartera completa para ese target).
+
+Lectura, contrastada contra lo que adelantaba el brief ("Cuprum: contratos más estables, más
+rotación ejecutiva y jubilación, densidad 67 %"):
+
+* **AUC y Brier de cese mejoran en Cuprum** en los dos horizontes (0,885 vs. 0,868 a 3 m; 0,875
+  vs. 0,859 a 6 m) salvo el Brier a 6 m, levemente peor (0,0387 vs. 0,0343) — coherente con
+  "contratos más estables": con menos ruido mes a mes, la historia de RIM y los eventos AFC
+  discriminan mejor quién va a cesar, aunque la tasa base más alta de Cuprum a 6 m (5,71 % vs.
+  4,32 %) deja más margen para error de calibración en términos absolutos.
+* **La tasa base de cese es más alta en Cuprum, no más baja**, pese a "contratos más
+  estables": el diagnóstico por tipo de afiliado (§6) ya mostraba que una fracción del cese
+  es jubilación real, no rotación laboral; el propio brief lo anticipa ("más rotación
+  ejecutiva y jubilación"), así que una cartera con esa composición puede tener **más** cese
+  agregado aunque cada contrato individual sea más estable en el tiempo. No se desagregó un
+  modelo separado por edad para aislar ambos efectos (ver "próximos pasos", §10, ítem del
+  segundo modelo de reingreso restringido a edad laboral — el mismo argumento aplica aquí).
+* **La tasa de reingreso es mucho más baja en Cuprum** (50,3 % vs. 66,2 %) y su AUC también es
+  más bajo (0,641 vs. 0,720): con una densidad más alta (~67 % vs. ~53,5 % del sistema,
+  `docs/contexto_afp_cuprum.md` §0), un afiliado que **de verdad** deja de cotizar 2 meses
+  seguidos es, proporcionalmente, más probable que sea una salida permanente (jubilación,
+  cambio a independiente, fallecimiento) que un hueco temporal entre empleos — hay menos
+  reingresos que predecir y el patrón es menos regular. Es la misma dinámica que en §10
+  motiva un modelo de reingreso separado por tramo de edad; con Cuprum se vuelve más visible.
+* **El error del agregado de negocio es más ruidoso en Cuprum, sobre todo a 6 m** (hasta −28 %
+  en un mes de test): la proyección de independientes/voluntarios (`_negocio_agregado_
+  cartera_completa`, un baseline `tipo_afiliado × mes_corte` sin features de historia, §10)
+  tropieza más con la composición distinta de esa cola en la cartera de Cuprum; no es un
+  problema del modelo de dependientes, que es el que de verdad se usaría en producción.
+
+Limitación conocida (no nueva de esta ronda, pero relevante para leer la tabla): `churn_
+traspaso` y `propension_apv` generan su propio universo "sistema" internamente y no aceptan
+`perfil` (ver §11.3 y el README de `segmentacion_afiliados`); esta comparación es autocontenida
+dentro de `riesgo_cese_cotizacion` y no mezcla esas tablas, así que no la hereda.
+
+### 11.2 Features de movimiento de personal de la planilla vs. eventos AFC
+
+`synthetic.generar_datos` ahora construye también `tablas["planilla"]` con
+`afp_lab.common.planilla.generar_planilla(universo, seed)` (import defensivo: si el módulo no
+existiera, `tablas["planilla"]` queda en `None` y el resto del proyecto sigue funcionando
+exactamente como en la ronda 3 de revisión — ningún test depende de que exista).
+`features._features_planilla` deriva, **con el mismo desfase que la RIM** (ancla en
+`corte_rim = corte-2`, conocido hasta `corte-1`; no el desfase más laxo de los eventos AFC,
+conocidos hasta `corte-1` pero anclados en `corte-1` mismo — ver §3), 10 columnas nuevas
+(`FEATURES_PLANILLA`, separadas de `FEATURES_NUMERICAS`): dos lags (`l1`=`corte-2`,
+`l2`=`corte-3`) para cada uno de los 5 códigos que pide el brief: 2 (retiro), 3 (subsidio), 4
+(permiso sin goce) y 7/8 (contrato nuevo a plazo fijo / cambio a indefinido).
+
+**Por qué quedan separadas de `COLUMNAS` (el modelo de producción no cambia) y cómo se midió el
+aporte**: `model.ModeloCese.fit` acepta ahora un `columnas` explícito (por defecto sigue siendo
+`COLUMNAS`, sin planilla); `run._aporte_planilla` entrena, para cada target y perfil, un segundo
+modelo con `COLUMNAS + FEATURES_PLANILLA` sobre el **mismo** train/val/test que el modelo de
+producción, y compara AUC/Brier y la ganancia de cada feature (`reportes/aporte_planilla_
+{target}.csv`). Resultado (mismas corridas de 20 000 afiliados de la tabla anterior):
+
+| Perfil | Target | ΔAUC | ΔBrier | Features de planilla con ganancia > 0 |
+|---|---|---:|---:|---:|
+| sistema | y3 | +0,0003 | −0,0002 | 9/10 |
+| sistema | y6 | +0,0016 | −0,0002 | 6/10 |
+| sistema | y_reingreso | −0,0036 | +0,0015 | 0/10 |
+| cuprum | y3 | +0,0021 | −0,0003 | 9/10 |
+| cuprum | y6 | −0,0004 | −0,0002 | 6/10 |
+| cuprum | y_reingreso | +0,0003 | −0,0003 | 0/10 |
+
+**Conclusión: el aporte es marginal e inconsistente en signo (mejora en 4 de 6 combinaciones,
+empeora en 2), y en ningún caso se aleja de ±0,004 de AUC ni de ±0,002 de Brier — dentro del
+ruido de entrenamiento, no una mejora real.** Decisión: **no** se incorporan `FEATURES_PLANILLA`
+a `COLUMNAS` (el modelo de producción no cambia); quedan disponibles solo para este ablation.
+`test_columnas_produccion_no_incluyen_planilla` fija la decisión (si se revierte, debe ser
+deliberado y este README debe actualizarse). Por qué el aporte es tan chico, mirando la tabla de
+importancias:
+
+* **`mov_retiro_l1` (código 2) sí capta ganancia, y bastante** (p. ej. rank 8-23 de 81
+  columnas) — pero a costa de `afc_termino_l1`/`afc_termino_l2`, cuya ganancia colapsa casi a
+  cero en el modelo extendido. Es la explicación esperada: un retiro en `corte-2` es
+  **exactamente el mismo evento** que un término AFC en `corte-2` (`afc_termino_l2`), solo que
+  observado por una vía distinta (la propia declaración de la RIM, no el aviso AFC); LightGBM
+  reparte la ganancia entre ambas columnas casi colineales sin que el poder predictivo total
+  suba — es información duplicada, no nueva.
+* **`mov_subsidio_*` (código 3) y `mov_contrato_nuevo_*` (código 7) son, por construcción, casi
+  la misma señal que `dias_licencia_*` y `afc_inicio_*` respectivamente** (`_movimiento_y_dias`
+  deriva el código 3 de `dias_licencia > 0` y el 7 del mismo `evento_afc == "INICIO"` que arma
+  `afc_inicio`); su ganancia, cuando aparece, es igual de redundante.
+* **`mov_permiso_*` (código 4) y `mov_cambio_indefinido_*` (código 8) son las dos señales
+  genuinamente nuevas** (no derivables de ninguna feature existente) — y son, justamente, las
+  que casi nunca aportan ganancia (0 en la mayoría de las combinaciones, y como máximo ~92 de
+  miles de puntos de ganancia total): con probabilidades mensuales de 0,003 (código 4) y
+  ≈0,20 anual sobre elegibles (código 8, `planilla.P_ANUAL_CAMBIO_CONTRATO`), incluso con
+  20 000 afiliados y 24 cortes hay muy pocos casos positivos para que el árbol los use. Si se
+  quisiera revisar esta conclusión, el camino más directo es subir esas probabilidades en
+  `planilla.py` (documentado ahí) o correr con más afiliados, no cambiar `features.py`.
+* La población de reingreso (`pop_reingreso`: sin RIM conocida en `corte-2` **ni** `corte-3`)
+  no tiene, por definición, líneas de planilla propias en esos dos meses (la planilla solo
+  declara RIM > 0), así que sus 10 columnas de planilla son 0 en el 100 % de las filas y el
+  ΔAUC/ΔBrier de esa fila son ruido puro de re-entrenar con columnas constantes (LightGBM
+  vuelve a muestrear `colsample_bytree=0,8` sobre un set de columnas distinto), no señal.
+
+### 11.3 Qué no se tocó
+
+Nada fuera de `afp_lab/riesgo_cese_cotizacion/`. `afp_lab/common/planilla.py` y
+`afp_lab/common/tablas_equivalencia.py` se construyeron en el encargo 1 de esta misma ronda de
+proceso (ver el informe de ese encargo); este proyecto solo los **usa**, sin modificarlos.
+`afp_lab.common.synth_base.generar_universo` tampoco se tocó: `perfil` ya existía. Tests:
+25 (subieron de 20), ~21 s (ver §9).

@@ -89,7 +89,7 @@ Perfil `cuprum` en `afp_lab.common.synth_base.generar_universo(perfil="cuprum")`
 
 | Dimensión | Sistema | Cuprum (objetivo) | Cómo se implementa |
 |---|---|---|---|
-| Ingreso imponible promedio | $1,35 M (SP jun-26) | $2,33 M (1,73×), más masa cerca del tope (90 UF ≈ $3,6 M) | Desplazamiento de `lat_productividad` (+0,40 en log); la simulación da 1,74× |
+| Ingreso imponible promedio | $1,35 M (SP jun-26) | $2,33 M (1,73×), más masa cerca del tope (90 UF ≈ $3,6 M) | Desplazamiento de `lat_productividad` (+0,40 en log); la simulación da 1,74× en el promedio de cotizantes del universo común y ~2,0× en la mediana de la ventana 2027 del proyecto 02 (el perfil Cuprum envejece y reajusta más) |
 | Densidad (afiliados que cotizan en el mes) | 47 % sistema (SP) | 66 % Cuprum | `p_activo_inicial` 0,68 y `factor_contratacion` 0,60 (la simulación da ~71 %; el perfil `sistema` queda en ~79 %, optimista frente al 47 % real, para no alterar la ronda 1) |
 | Afiliados en el mínimo | ~15 % | ~3 % | `lat_masa_imm` |
 | Educación | 20 % universitaria | 45 % universitaria, 25 % técnica | Mezcla de `nivel_educacional` |

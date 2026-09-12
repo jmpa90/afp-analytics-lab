@@ -12,12 +12,13 @@ from afp_lab.riesgo_cese_cotizacion.evaluate import (cobertura_poblacion_cese, c
                                                       diagnostico_cese_por_tipo_afiliado, ece,
                                                       es_calibracion_monotona, evaluar,
                                                       metrica_negocio_agregado, metrica_negocio_captura)
-from afp_lab.riesgo_cese_cotizacion.features import (FEATURES_CATEGORICAS, FEATURES_NUMERICAS,
+from afp_lab.riesgo_cese_cotizacion.features import (CODIGOS_PLANILLA_FEATURES, FEATURES_CATEGORICAS,
+                                                      FEATURES_NUMERICAS, FEATURES_PLANILLA,
                                                       TIPOS_DEPENDENCIA, VENTANA_HISTORIA,
                                                       agregar_targets, construir_features)
-from afp_lab.riesgo_cese_cotizacion.model import ModeloCese, baseline_tasa_base, predecir_tasa_base
-from afp_lab.riesgo_cese_cotizacion.run import (_cortes_validos, _negocio_agregado_cartera_completa,
-                                                _split_temporal)
+from afp_lab.riesgo_cese_cotizacion.model import COLUMNAS, ModeloCese, baseline_tasa_base, predecir_tasa_base
+from afp_lab.riesgo_cese_cotizacion.run import (_aporte_planilla, _cortes_validos,
+                                                _negocio_agregado_cartera_completa, _split_temporal)
 from afp_lab.riesgo_cese_cotizacion.synthetic import add_months, generar_datos, periodo_to_idx
 
 N_AFILIADOS = 1500
@@ -453,3 +454,88 @@ def test_modelo_entrena_y_supera_tasa_base():
     assert (negocio["n_filas"] > 0).all()
     captura = metrica_negocio_captura(test.assign(pred=pred), "y3", "pred", frac=0.10)
     assert 0 <= captura["pct_capturado"] <= 1
+
+
+# ============================================================================== Ronda 2 ===
+# BRIEF_RONDA2.md: (1) --perfil {sistema,cuprum}; (2) features de movimiento de personal de
+# la planilla (afp_lab/common/planilla.py), con el mismo desfase que la RIM, midiendo su
+# aporte frente a los eventos AFC.
+
+@pytest.fixture(scope="module")
+def split_chico():
+    """Split temporal chico (mismo patron que `test_modelo_entrena_y_supera_tasa_base`) para
+    testear el ablation de planilla sin pagar el costo de generar otro universo grande."""
+    tablas_ = generar_datos(n_afiliados=2000, periodo_inicio=202201, periodo_fin=202512, seed=77)
+    cortes = [int(add_months(202506, -k)) for k in range(10)][::-1]
+    filas = [construir_features(tablas_, c) for c in cortes]
+    dataset = agregar_targets(pd.concat(filas, ignore_index=True), tablas_["panel_mensual"], 202512)
+    pob = dataset[(dataset["pop_cese"] == 1) & dataset["horizonte3_completo"]]
+    train = pob[pob["periodo_corte"].isin(cortes[:6])]
+    val = pob[pob["periodo_corte"].isin(cortes[6:8])]
+    test = pob[pob["periodo_corte"].isin(cortes[8:])]
+    assert len(train) > 100 and len(val) > 30 and len(test) > 30
+    return tablas_, train, val, test
+
+
+def test_generar_datos_admite_perfil():
+    """BRIEF_RONDA2.md #1: `run.py --perfil {sistema,cuprum}`. `generar_datos` debe aceptar
+    el parametro y producir un universo distinto (perfil de synth_base.PERFILES), sin romper
+    la forma de las tablas propias del proyecto."""
+    t_sistema = generar_datos(n_afiliados=400, periodo_inicio=202201, periodo_fin=202312, seed=9,
+                              perfil="sistema")
+    t_cuprum = generar_datos(n_afiliados=400, periodo_inicio=202201, periodo_fin=202312, seed=9,
+                             perfil="cuprum")
+    assert set(t_sistema) == set(t_cuprum)
+    assert not t_sistema["afiliados"].equals(t_cuprum["afiliados"])
+    for t in (t_sistema, t_cuprum):
+        assert t["planilla"] is not None and len(t["planilla"]) > 0
+
+
+def test_planilla_disponible_y_features_sin_nulos(tablas, features):
+    """BRIEF_RONDA2.md #2: si `afp_lab/common/planilla.py` existe (es el caso), sus features
+    deben estar en el dataset, sin nulos, y como banderas 0/1 (una fila por afiliado)."""
+    assert tablas["planilla"] is not None
+    assert set(FEATURES_PLANILLA) <= set(features.columns)
+    assert not features[FEATURES_PLANILLA].isna().any().any()
+    assert features[FEATURES_PLANILLA].isin([0.0, 1.0]).all().all()
+    assert set(CODIGOS_PLANILLA_FEATURES) == {2, 3, 4, 7, 8}
+
+
+def test_features_planilla_mismo_desfase_que_rim(tablas, features):
+    """Los codigos de movimiento de personal deben calzar con `corte-2` (igual que
+    `rim_l1`), NO con `corte-1` (el desfase de los eventos AFC): para cada afiliado marcado
+    `mov_retiro_l1=1` debe existir, en la planilla, una linea DECLARACION con codigo 2
+    (retiro) justo en el periodo `corte-2`."""
+    planilla = tablas["planilla"]
+    corte_rim = add_months(CORTE, -2)
+    con_retiro = set(features.loc[features["mov_retiro_l1"] == 1, "afiliado_id"])
+    assert len(con_retiro) > 0
+    decl = planilla[(planilla["tipo_movimiento"] == "DECLARACION")
+                    & (planilla["periodo"] == corte_rim)
+                    & (planilla["codigo_movimiento_personal"] == 2)]
+    assert con_retiro <= set(decl["rut_trabajador"])
+
+
+def test_columnas_produccion_no_incluyen_planilla():
+    """Decision de ronda 2 (ver README "Ronda 2"): el aporte medido de las features de
+    planilla es marginal/inconsistente frente a AFC (ver `_aporte_planilla` y el README), asi
+    que NO se incorporan al modelo de produccion (`COLUMNAS`); quedan solo para el ablation.
+    Este test fija esa decision: cambiarla debe ser deliberado (y el README, actualizado)."""
+    assert not (set(COLUMNAS) & set(FEATURES_PLANILLA))
+
+
+def test_aporte_planilla_ablation(split_chico):
+    _, train, val, test = split_chico
+    modelo_base = ModeloCese.fit(train, val, "y3", params={"n_estimators": 60, "num_leaves": 15})
+    test = test.copy()
+    test["pred_modelo"] = modelo_base.predict_proba(test)
+    metricas_base = evaluar(test, "y3", "pred_modelo")
+
+    resultado = _aporte_planilla("y3", train, val, test, metricas_base)
+    for k in ("auc_base", "auc_ext", "delta_auc", "brier_base", "brier_ext", "delta_brier"):
+        assert np.isfinite(resultado[k])
+    assert resultado["auc_base"] == pytest.approx(metricas_base["auc"])
+    assert resultado["brier_base"] == pytest.approx(metricas_base["brier"])
+    tabla = resultado["importancias_comparadas"]
+    assert set(FEATURES_PLANILLA) <= set(tabla["feature"])
+    assert 0 <= resultado["n_features_planilla_con_señal"] <= len(FEATURES_PLANILLA)

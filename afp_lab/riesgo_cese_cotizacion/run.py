@@ -19,8 +19,9 @@ import pandas as pd
 from .evaluate import (agregar_tramos, cobertura_poblacion_cese, curva_calibracion,
                        diagnostico_cese_por_tipo_afiliado, ece, es_calibracion_monotona, evaluar,
                        evaluar_segmentos_multi, metrica_negocio_agregado, metrica_negocio_captura)
-from .features import TIPOS_DEPENDENCIA, TIPOS_EXCLUIDOS, VENTANA_HISTORIA, agregar_targets, construir_features
-from .model import (ModeloCese, baseline_tasa_base, predecir_regla_negocio_cese,
+from .features import (CODIGOS_PLANILLA_FEATURES, FEATURES_PLANILLA, TIPOS_DEPENDENCIA,
+                       TIPOS_EXCLUIDOS, VENTANA_HISTORIA, agregar_targets, construir_features)
+from .model import (COLUMNAS, ModeloCese, baseline_tasa_base, predecir_regla_negocio_cese,
                     predecir_regla_negocio_reingreso, predecir_tasa_base)
 from .synthetic import add_months, generar_datos, idx_to_periodo, periodo_to_idx
 
@@ -91,8 +92,40 @@ def _regla_negocio(target: str, df: pd.DataFrame) -> np.ndarray:
     return predecir_regla_negocio_cese(df) if target != "y_reingreso" else predecir_regla_negocio_reingreso(df)
 
 
+def _aporte_planilla(target: str, train: pd.DataFrame, val: pd.DataFrame, test: pd.DataFrame,
+                     metricas_base: dict[str, float]) -> dict:
+    """Ronda 2, BRIEF_RONDA2.md #2: ablation que mide cuanto aportan los codigos de
+    movimiento de personal de la planilla (`FEATURES_PLANILLA`) frente a lo que ya aportan
+    los eventos AFC (`afc_*`), entrenando un segundo modelo con el mismo train/val/test que
+    el de produccion (`COLUMNAS`) mas esas columnas, y comparando AUC/Brier y la posicion de
+    esas features en la importancia por ganancia."""
+    columnas_ext = list(COLUMNAS) + list(FEATURES_PLANILLA)
+    modelo_ext = ModeloCese.fit(train, val, target, columnas=columnas_ext)
+    test = test.copy()
+    test["pred_modelo_ext"] = modelo_ext.predict_proba(test)
+    metricas_ext = evaluar(test, target, "pred_modelo_ext")
+
+    imp = modelo_ext.importancias(len(columnas_ext))
+    cols_comparar = list(FEATURES_PLANILLA) + ["afc_termino_l1", "afc_termino_l2", "afc_inicio_l1",
+                                               "afc_inicio_l2", "dias_licencia_l1", "dias_licencia_l2"]
+    imp = imp.set_index("feature")
+    imp["rank"] = range(1, len(imp) + 1)
+    tabla_comparativa = imp.reindex(cols_comparar).reset_index().rename(columns={"index": "feature"})
+
+    return {
+        "target": target,
+        "auc_base": metricas_base["auc"], "auc_ext": metricas_ext["auc"],
+        "delta_auc": metricas_ext["auc"] - metricas_base["auc"],
+        "brier_base": metricas_base["brier"], "brier_ext": metricas_ext["brier"],
+        "delta_brier": metricas_ext["brier"] - metricas_base["brier"],
+        "importancias_comparadas": tabla_comparativa,
+        "n_features_planilla_con_señal": int((tabla_comparativa.loc[
+            tabla_comparativa["feature"].isin(FEATURES_PLANILLA), "ganancia"].fillna(0) > 0).sum()),
+    }
+
+
 def _entrenar_y_evaluar(target: str, cfg: dict, dataset: pd.DataFrame, cortes: list[int],
-                        salida: Path) -> dict:
+                        salida: Path, medir_aporte_planilla: bool = True) -> dict:
     horiz_col = "horizonte3_completo" if cfg["horizonte"] == 3 else "horizonte6_completo"
     pob = dataset[(dataset[cfg["poblacion"]] == 1) & dataset[horiz_col]].copy()
     pob = agregar_tramos(pob)
@@ -130,6 +163,9 @@ def _entrenar_y_evaluar(target: str, cfg: dict, dataset: pd.DataFrame, cortes: l
     negocio_captura = metrica_negocio_captura(test, target, "pred_modelo", frac=0.10)
     importancias = modelo.importancias(20)
 
+    aporte_planilla = (_aporte_planilla(target, train, val, test, metricas["modelo"])
+                       if medir_aporte_planilla else None)
+
     n_por_split = {k: len(v) for k, v in splits.items() if k != "cortes"}
     return {
         "target": target, "nombre": cfg["nombre"], "tabla_metricas": tabla_metricas,
@@ -137,6 +173,7 @@ def _entrenar_y_evaluar(target: str, cfg: dict, dataset: pd.DataFrame, cortes: l
         "negocio_agregado": negocio_agregado,
         "negocio_captura": negocio_captura, "importancias": importancias, "n_por_split": n_por_split,
         "cortes_split": splits["cortes"], "test_df": test, "modelo": modelo, "horiz_col": horiz_col,
+        "aporte_planilla": aporte_planilla,
     }
 
 
@@ -218,15 +255,21 @@ def _ejemplos_por_rubro(resultado_y3: dict, top: int = 5) -> pd.DataFrame:
 
 
 def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int = 202609,
-        seed: int = 42, salida: str = "salidas/riesgo_cese_cotizacion") -> dict:
+        seed: int = 42, salida: str | None = None, perfil: str = "sistema") -> dict:
+    """`perfil` (ronda 2, BRIEF_RONDA2.md #1): "sistema" o "cuprum". Si `salida` es `None`
+    (por defecto), cada perfil escribe en su propia subcarpeta
+    (`salidas/riesgo_cese_cotizacion/<perfil>/`) para poder correr ambos sin pisarse y
+    comparar despues (ver `comparar_perfiles`)."""
     t0 = time.time()
+    if salida is None:
+        salida = f"salidas/riesgo_cese_cotizacion/{perfil}"
     salida_dir = Path(salida)
     (salida_dir / "reportes").mkdir(parents=True, exist_ok=True)
     (salida_dir / "modelos").mkdir(parents=True, exist_ok=True)
 
-    print(f"Generando universo sintetico (n_afiliados={n_afiliados}, seed={seed})...")
+    print(f"Generando universo sintetico (n_afiliados={n_afiliados}, seed={seed}, perfil={perfil})...")
     tablas = generar_datos(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                           periodo_fin=periodo_fin, seed=seed)
+                           periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     print(f"  listo en {time.time() - t0:.1f}s")
 
     t1 = time.time()
@@ -252,6 +295,16 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
         print("Negocio - agregado por corte (test, solo poblacion del modelo):")
         print(r["negocio_agregado"].to_string(index=False))
         print(f"Negocio - top 10% de riesgo: {r['negocio_captura']}")
+
+        if r["aporte_planilla"] is not None:
+            ap = r["aporte_planilla"]
+            ap["importancias_comparadas"].to_csv(
+                salida_dir / "reportes" / f"aporte_planilla_{target}.csv", index=False)
+            print(f"Aporte de la planilla (BRIEF_RONDA2 #2) frente a AFC: "
+                 f"AUC {ap['auc_base']:.4f} -> {ap['auc_ext']:.4f} (delta {ap['delta_auc']:+.4f}), "
+                 f"Brier {ap['brier_base']:.4f} -> {ap['brier_ext']:.4f} (delta {ap['delta_brier']:+.4f}), "
+                 f"features de planilla con ganancia > 0: {ap['n_features_planilla_con_señal']}/{len(FEATURES_PLANILLA)}")
+            print(ap["importancias_comparadas"].to_string(index=False))
 
         if cfg["poblacion"] == "pop_cese":
             # mayor A (ronda 2): agregado extendido a toda la cartera (+ independientes/voluntarios)
@@ -287,7 +340,41 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
     dataset.to_parquet(salida_dir / "dataset_features.parquet", index=False)
     total = time.time() - t0
     print(f"\nRuntime total: {total:.1f}s. Salidas en {salida_dir.resolve()}")
+    resultados["perfil"] = perfil
     return resultados
+
+
+def comparar_perfiles(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int = 202609,
+                      seed: int = 42, salida_base: str = "salidas/riesgo_cese_cotizacion") -> pd.DataFrame:
+    """Ronda 2, BRIEF_RONDA2.md #1: corre el pipeline completo para `perfil="sistema"` y
+    `perfil="cuprum"` con la MISMA semilla/horizonte y arma la tabla comparativa (tasas de
+    cese/reingreso, AUC, Brier, error del agregado de negocio) para la seccion "Ronda 2" del
+    README. Cada perfil se guarda en su propia subcarpeta (ver `main`)."""
+    filas = []
+    resultados_por_perfil = {}
+    for perfil in ("sistema", "cuprum"):
+        print(f"\n{'=' * 20} PERFIL: {perfil} {'=' * 20}")
+        r = main(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio, periodo_fin=periodo_fin,
+                seed=seed, salida=f"{salida_base}/{perfil}", perfil=perfil)
+        resultados_por_perfil[perfil] = r
+        for target, cfg in TARGETS.items():
+            res = r[target]
+            tm = res["tabla_metricas"].set_index("predictor")
+            neg = res.get("negocio_agregado_total", res["negocio_agregado"])
+            filas.append({
+                "perfil": perfil, "target": target, "nombre": cfg["nombre"],
+                "tasa_real_test": float(res["test_df"][target].mean()),
+                "auc_modelo": tm.loc["modelo", "auc"], "brier_modelo": tm.loc["modelo", "brier"],
+                "auc_baseline_tasa": tm.loc["baseline_tasa_base", "auc"],
+                "error_relativo_agregado_medio": float(neg["error_relativo" if "error_relativo" in neg
+                                                         else "error_relativo_total"].mean()),
+            })
+    comp = pd.DataFrame(filas)
+    Path(salida_base).mkdir(parents=True, exist_ok=True)
+    comp.to_csv(f"{salida_base}/comparacion_perfiles.csv", index=False)
+    print(f"\n{'=' * 20} COMPARACION sistema vs. cuprum {'=' * 20}")
+    print(comp.to_string(index=False))
+    return comp
 
 
 def _parse_args() -> argparse.Namespace:
@@ -296,11 +383,18 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--periodo-inicio", type=int, default=202201)
     p.add_argument("--periodo-fin", type=int, default=202609)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--salida", type=str, default="salidas/riesgo_cese_cotizacion")
+    p.add_argument("--salida", type=str, default=None)
+    p.add_argument("--perfil", type=str, default="sistema", choices=["sistema", "cuprum", "ambos"],
+                   help="'sistema' o 'cuprum' corren un perfil (BRIEF_RONDA2.md #1); "
+                        "'ambos' corre los dos y guarda la comparacion.")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    main(n_afiliados=args.n_afiliados, periodo_inicio=args.periodo_inicio, periodo_fin=args.periodo_fin,
-        seed=args.seed, salida=args.salida)
+    if args.perfil == "ambos":
+        comparar_perfiles(n_afiliados=args.n_afiliados, periodo_inicio=args.periodo_inicio,
+                          periodo_fin=args.periodo_fin, seed=args.seed)
+    else:
+        main(n_afiliados=args.n_afiliados, periodo_inicio=args.periodo_inicio, periodo_fin=args.periodo_fin,
+            seed=args.seed, salida=args.salida, perfil=args.perfil)

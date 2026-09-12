@@ -39,10 +39,12 @@ PARAMS_LGBM = dict(
 )
 
 
-def _preparar_X(df: pd.DataFrame) -> pd.DataFrame:
-    X = df[COLUMNAS].copy()
+def _preparar_X(df: pd.DataFrame, columnas: list[str] | None = None) -> pd.DataFrame:
+    cols = list(columnas) if columnas is not None else COLUMNAS
+    X = df[cols].copy()
     for c in FEATURES_CATEGORICAS:
-        X[c] = X[c].astype("category")
+        if c in X.columns:
+            X[c] = X[c].astype("category")
     return X
 
 
@@ -57,20 +59,26 @@ class ModeloCese:
 
     @classmethod
     def fit(cls, train: pd.DataFrame, val: pd.DataFrame, target: str,
-           params: dict | None = None) -> "ModeloCese":
+           params: dict | None = None, columnas: list[str] | None = None) -> "ModeloCese":
+        """`columnas` (ronda 2, BRIEF_RONDA2.md #2): por defecto `None` usa el set de
+        produccion (`COLUMNAS`, sin las features de planilla); `run.py` pasa
+        `COLUMNAS + FEATURES_PLANILLA` para el modelo "extendido" del ablation que mide
+        cuanto aportan los codigos de movimiento de personal frente a los eventos AFC."""
         p = dict(PARAMS_LGBM)
         if params:
             p.update(params)
+        cols = list(columnas) if columnas is not None else list(COLUMNAS)
+        cat_cols = [c for c in FEATURES_CATEGORICAS if c in cols]
         clf = lgb.LGBMClassifier(**p)
-        clf.fit(_preparar_X(train), train[target].to_numpy(), categorical_feature=FEATURES_CATEGORICAS)
+        clf.fit(_preparar_X(train, cols), train[target].to_numpy(), categorical_feature=cat_cols)
 
-        raw_val = clf.predict_proba(_preparar_X(val))[:, 1]
+        raw_val = clf.predict_proba(_preparar_X(val, cols))[:, 1]
         iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
         iso.fit(raw_val, val[target].to_numpy())
-        return cls(target=target, clasificador=clf, calibrador=iso)
+        return cls(target=target, clasificador=clf, calibrador=iso, columnas=cols)
 
     def predict_proba_cruda(self, df: pd.DataFrame) -> np.ndarray:
-        return self.clasificador.predict_proba(_preparar_X(df))[:, 1]
+        return self.clasificador.predict_proba(_preparar_X(df, self.columnas))[:, 1]
 
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
         """Probabilidad calibrada (isotonica sobre validacion): la que se agrega."""

@@ -34,6 +34,14 @@ import pandas as pd
 
 from afp_lab.common.synth_base import generar_universo
 
+try:  # ronda 2 (BRIEF_RONDA2.md #2): "si afp_lab/common/planilla.py ya existe, usar sus
+    # codigos de movimiento de personal como features". Import defensivo: si el modulo no
+    # estuviera disponible (backlog no resuelto), el proyecto sigue funcionando exactamente
+    # como en la ronda 1, sin esas features (ver `features._features_planilla`).
+    from afp_lab.common.planilla import generar_planilla
+except ImportError:  # pragma: no cover - solo si common/planilla.py no existe
+    generar_planilla = None
+
 # --------------------------------------------------------------- periodos ----
 # Aritmetica de periodos yyyymm vectorizada con numpy (evita llamar, fila a fila,
 # a las utilidades escalares de afp_lab.rim_nowcasting.calendario sobre cientos de
@@ -184,12 +192,25 @@ def construir_prestaciones_cesantia(panel: pd.DataFrame, afc_eventos: pd.DataFra
 
 
 def generar_datos(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int = 202609,
-                  seed: int = 42) -> dict[str, pd.DataFrame]:
-    """Universo comun + las 4 tablas propias de este proyecto."""
+                  seed: int = 42, perfil: str = "sistema") -> dict[str, pd.DataFrame]:
+    """Universo comun + las 4 tablas propias de este proyecto.
+
+    `perfil` (ronda 2, BRIEF_RONDA2.md #1): "sistema" (promedio del mercado) o "cuprum"
+    (nuestra propia cartera: contratos mas estables, mas rotacion ejecutiva y jubilacion,
+    densidad ~67%; ver `afp_lab/common/synth_base.PERFILES` y `docs/contexto_afp_cuprum.md`).
+    Se pasa tal cual a `generar_universo`; no cambia nada mas de este modulo.
+    """
     universo = generar_universo(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                                periodo_fin=periodo_fin, seed=seed)
+                                periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     panel = universo["panel_mensual"]
     afc = construir_afc_eventos(panel, universo["empleadores"], universo["afiliados"])
+    # ronda 2 (BRIEF_RONDA2.md #2): planilla Previred sintetica (afp_lab/common/planilla.py),
+    # de donde `features._features_planilla` deriva los codigos de movimiento de personal
+    # (2 retiro, 3 subsidio, 4 permiso sin goce, 7/8 contrato) con el mismo desfase que la
+    # RIM (misma tabla fuente: la planilla ES la declaracion de la RIM). `None` si el modulo
+    # no esta disponible (import defensivo arriba): el resto del proyecto sigue funcionando
+    # igual que en la ronda 1.
+    planilla = generar_planilla(universo, seed) if generar_planilla is not None else None
     return {
         "afiliados": universo["afiliados"],
         "empleadores": universo["empleadores"],
@@ -199,4 +220,5 @@ def generar_datos(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo
         "afc_eventos": afc,
         "licencias": construir_licencias(panel),
         "prestaciones_cesantia": construir_prestaciones_cesantia(panel, afc, periodo_fin),
+        "planilla": planilla,
     }

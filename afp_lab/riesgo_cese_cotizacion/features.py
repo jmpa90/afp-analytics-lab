@@ -76,6 +76,17 @@ FEATURES_NUMERICAS = (
 FEATURES_CATEGORICAS = ["tipo_afiliado", "sexo", "nivel_educacional", "region", "rubro", "tamano_empleador",
                         "tipo_contrato"]
 
+# ronda 2 (BRIEF_RONDA2.md #2): codigos de movimiento de personal de la planilla Previred
+# sintetica (afp_lab/common/planilla.py), con el MISMO desfase que la RIM (l1 = corte-2,
+# l2 = corte-3: la planilla es la propia declaracion de la RIM, no llega mas rapido que ella
+# como los eventos AFC, que se conocen hasta corte-1). Se mantienen SEPARADAS de
+# FEATURES_NUMERICAS (no entran al modelo por defecto) para poder medir su aporte marginal
+# por ablation en `run.py` sin cambiar el modelo de la ronda 1; ver README "Ronda 2" para el
+# resultado y la decision tomada sobre si se incorporan o no al modelo de produccion.
+CODIGOS_PLANILLA_FEATURES = {2: "retiro", 3: "subsidio", 4: "permiso", 7: "contrato_nuevo",
+                             8: "cambio_indefinido"}
+FEATURES_PLANILLA = [f"mov_{nombre}_l{k}" for nombre in CODIGOS_PLANILLA_FEATURES.values() for k in (1, 2)]
+
 
 # --------------------------------------------------------------- RIM as-of ----
 def _rim_conocida_asof(cot: pd.DataFrame, hasta_recepcion: int, periodo_min: int) -> pd.DataFrame:
@@ -339,6 +350,38 @@ def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, afiliados: pd.
     return out.reset_index()
 
 
+def _features_planilla(planilla: pd.DataFrame | None, af_ids: np.ndarray, corte: int) -> pd.DataFrame:
+    """Codigos de movimiento de personal de la planilla (`CODIGOS_PLANILLA_FEATURES`), con el
+    MISMO desfase que la RIM (ancla en `corte_rim = corte-2`, conocidos hasta `corte-1`; ver
+    docstring del modulo y de `FEATURES_PLANILLA`). Devuelve 0 en todas las columnas si no hay
+    planilla disponible (integracion opcional, BRIEF_RONDA2.md #2: "si ya existe")."""
+    out = pd.DataFrame({"afiliado_id": af_ids}).set_index("afiliado_id")
+    for col in FEATURES_PLANILLA:
+        out[col] = 0.0
+    if planilla is None or planilla.empty:
+        return out.reset_index()
+
+    corte_rim = add_months(corte, -2)
+    hasta = add_months(corte, -1)
+    periodos_ok = [add_months(corte_rim, -1), corte_rim]   # corte-3 (l2), corte-2 (l1)
+    decl = planilla[(planilla["tipo_movimiento"] == "DECLARACION")
+                    & (planilla["periodo_recepcion"] <= hasta)
+                    & (planilla["periodo"].isin(periodos_ok))
+                    & (planilla["codigo_movimiento_personal"].isin(CODIGOS_PLANILLA_FEATURES))]
+    if decl.empty:
+        return out.reset_index()
+
+    _d = periodo_to_idx(corte_rim) - periodo_to_idx(decl["periodo"].to_numpy())   # 0->l1, 1->l2
+    marca = pd.DataFrame({"afiliado_id": decl["rut_trabajador"].to_numpy(),
+                          "codigo": decl["codigo_movimiento_personal"].to_numpy(), "_d": _d})
+    for codigo, nombre in CODIGOS_PLANILLA_FEATURES.items():
+        for dd, suf in ((0, "l1"), (1, "l2")):
+            sub = marca[(marca["codigo"] == codigo) & (marca["_d"] == dd)]
+            presente = sub.groupby("afiliado_id").size().clip(upper=1).reindex(out.index, fill_value=0)
+            out[f"mov_{nombre}_{suf}"] = presente.astype(float)
+    return out.reset_index()
+
+
 def _tipo_contrato_por_relacion(afc: pd.DataFrame, corte: int) -> pd.DataFrame:
     """Tipo de contrato del aviso INICIO mas reciente conocido, por cada (afiliado,
     empleador). Se une en `construir_features` contra el empleador de referencia VIGENTE
@@ -411,12 +454,14 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     f_emp = _features_empleador(tablas["cotizaciones_conocidas"], empleadores, corte)
     f_ev = _features_eventos(tablas["afc_eventos"], tablas["licencias"], activos, corte)
     f_tc = _tipo_contrato_por_relacion(tablas["afc_eventos"], corte)
+    f_mov = _features_planilla(tablas.get("planilla"), activos["afiliado_id"].to_numpy(), corte)
 
     dim_emp = empleadores[["empleador_id", "rubro", "tamano_empleador", "region_empleador"]] \
         .rename(columns={"empleador_id": "empleador_principal"})
 
     df = (activos.merge(f_rim, on="afiliado_id", how="left")
           .merge(f_ev, on="afiliado_id", how="left")
+          .merge(f_mov, on="afiliado_id", how="left")
           .merge(f_emp, on="empleador_principal", how="left")
           .merge(dim_emp, on="empleador_principal", how="left")
           # tipo de contrato atado a la relacion VIGENTE (afiliado + su empleador de
@@ -474,7 +519,8 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
                      "emp_sin_planilla_conocida",
                      "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
                      "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
-                     "cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual"])
+                     "cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual"]
+                  + FEATURES_PLANILLA)
     df[rellenos_0] = df[rellenos_0].fillna(0.0)
     df["meses_desde_ult_cotiza"] = df["meses_desde_ult_cotiza"].fillna(99).clip(upper=99)
     df["meses_desde_cambio"] = df["meses_desde_cambio"].fillna(99).clip(upper=99)
@@ -484,7 +530,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     df["periodo_corte"] = corte
     df["corte_rim"] = add_months(corte, -2)
 
-    for c in FEATURES_NUMERICAS:
+    for c in FEATURES_NUMERICAS + FEATURES_PLANILLA:
         df[c] = df[c].astype(float)
 
     # -------- poblaciones de los dos modelos (definicion 100% as-of, sin mirar el futuro) --
@@ -503,7 +549,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     cols = (["afiliado_id", "periodo_corte", "corte_rim", "pop_cese", "pop_reingreso",
              "tipo_afiliado", "sexo", "nivel_educacional", "region", "rubro", "tamano_empleador",
              "tipo_contrato"]
-            + FEATURES_NUMERICAS)
+            + FEATURES_NUMERICAS + FEATURES_PLANILLA)
     return df[cols].reset_index(drop=True)
 
 

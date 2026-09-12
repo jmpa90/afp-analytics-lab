@@ -65,6 +65,49 @@ imponible, plan en UF), CCAF, mutual, etc.
    para que los datos sintéticos "parezcan" los de una AFP real y los modelos se puedan portar sin
    renombrar columnas.
 
+### Implementado (ronda 2, DS-3): `afp_lab/common/planilla.py` — mapeo columna → norma
+
+El punto 1 y el punto 3 de arriba ya no son backlog: `afp_lab/common/planilla.py` genera, a partir
+de `synth_base.generar_universo` (sin modificarlo — es aditivo), una tabla con el grano y los
+códigos de la planilla Previred real. `afp_lab/common/tablas_equivalencia.py` trae los diccionarios
+de códigos y glosas (fuente: Previred, tablas de equivalencia septiembre 2025). Mapeo de cada
+columna de `generar_planilla(...)` a la norma que la origina:
+
+| Columna | Norma / fuente | Nota de la implementación |
+|---|---|---|
+| `rut_trabajador` | Planilla Previred, campo RUT (Compendio Libro I, Archivo Previsional) | = `afiliado_id` del universo |
+| `empleador_id` | Planilla Previred, campo empleador/RUT empleador | tomado de `panel_mensual.empleador_id` / `empleador2_id` (segundo empleador, multiempleo) |
+| `periodo` | Planilla Previred, "período a declarar" | mes que se está declarando (no el de recepción) |
+| `tipo_pago` | Previred, tabla "Tipo de pago": 01 remuneraciones, 02 gratificación, 05 subsidio, 06 aguinaldo | sólo se generan 01/02/05/06 (03 asignación familiar y 04 diferencias no tienen regla propia en el brief) |
+| `dias_trabajados` | Previred, campo días trabajados del período | reducido en licencia (3), permiso sin goce (4) y ausentismo (11) |
+| `codigo_movimiento_personal` | Compendio / Previred, **Tabla N° 7** (movimiento de personal) | 0,1,2,3,4,7,8,11,12 generados; 5,6,13 documentados como no generados (`tablas_equivalencia.CODIGOS_NO_GENERADOS`) — ver más abajo |
+| `fecha_desde` / `fecha_hasta` | Previred, fechas del movimiento de personal | primer/último día calendario de `periodo` |
+| `tipo_trabajador` | Previred, tabla "Tipo de trabajador" (activo, activo mayor, pensionado que cotiza/no cotiza) | derivado de `tipo_afiliado` + edad/sexo, no toca `synth_base` |
+| `tipo_contrato_planilla` | Compendio, tipo de contrato (plazo fijo/indefinido) | copia de `panel_mensual.tipo_contrato` que sí refleja el cambio de contrato (código 8); columna propia para no tocar el panel (aditivo) |
+| `renta_imponible_afp` | Previred, "renta imponible AFP" (topada al tope imponible AFP) | ya viene topada desde `rim_nowcasting.synthetic` (`np.minimum(..., tope)`); planilla.py sólo reparte esa cifra entre las líneas 01/02/05 |
+| `renta_imponible_afc` | Ley 19.728 (Seguro de Cesantía) — excluye funcionarios públicos y pensionados que cotizan | misma regla que `rim_nowcasting.generar_afc_eventos`: excluye empleadores con `rubro == "O_ADMIN_PUBLICA"` y `tipo_trabajador == "PENSIONADO_COTIZA"` |
+| `cotizacion_obligatoria` | Compendio Libro I, 10 % de la renta imponible AFP (cuenta individual) | `tablas_equivalencia.TASA_COTIZACION_OBLIGATORIA` |
+| `sis` | Compendio, Seguro de Invalidez y Sobrevivencia (cargo empleador) | `tablas_equivalencia.TASA_SIS` |
+| `aporte_empleador` | **Ley 21.735** (reforma de pensiones, mar-2025): cotización adicional del empleador | `tablas_equivalencia.tasa_aporte_empleador`: 3,5 % desde 2025-08 (único escalón dentro del horizonte simulado; cronograma completo hasta 8,5 % no confirmado en las fuentes consultadas, documentado como supuesto) |
+| `periodo_recepcion` | Compendio Libro II, planilla de declaración y pago (anticipado/oportuno/tardío) | mismas probabilidades por tamaño de empleador que el proyecto 01 (`empleadores_latente.p_pago_*`) |
+| `estado_pago` | Compendio Libro II, **DNP** (declarada y no pagada) | `empleadores_latente.p_dnp` |
+| `tipo_movimiento` | Compendio Libro II: declaración original, rectificación, pago de una DNP | `RECTIFICACION` usa además el código 12 (reliquidación) de la Tabla N° 7 |
+
+Códigos de la Tabla N° 7 **no generados** (`CODIGOS_NO_GENERADOS = (5, 6, 13)`), documentado, no
+olvidado: 5 (incorporación en el lugar de trabajo) y 6 (accidente del trabajo) no tienen una regla
+propia en `BRIEF_PLANILLA.md`; 13 (Ley 21.227, suspensión de la relación laboral por acto de
+autoridad) es un mecanismo excepcional (pandemia) fuera del alcance de esta simulación.
+
+`construir_rezagos(planilla, seed)` implementa el punto 2 de arriba (Libro II: cotizaciones
+recibidas que no se pudieron imputar al RUT del trabajador): marca ~0,7 % de las líneas
+`DECLARACION`/`PAGADA` y las regulariza 2–6 meses después (`periodo_imputacion`).
+
+Limitación documentada: sólo declaran planilla los afiliados `DEPENDIENTE` o `PENSIONADO_ACTIVO`
+con empleador vigente ese mes — independientes (vía SII, Operación Renta) y voluntarios (aporte
+directo) no pasan por Previred y no aparecen en esta tabla. Ver el docstring de
+`afp_lab/common/planilla.py` para las demás simplificaciones (líneas 03/04 no generadas, código 8
+sólo afecta una columna propia `tipo_contrato_planilla`, etc.).
+
 ## Fuentes (los sitios están bloqueados para lectura directa desde la sandbox; se consultaron por buscador)
 - SP · Compendio de Normas: Libro I (Archivo Previsional; Registro de Afiliados; Traspaso electrónico entre
   AFP; Anexos de transmisión de archivos), Libro II (Cotizaciones), Libro V (Transferencia de información;

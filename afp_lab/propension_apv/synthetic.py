@@ -40,6 +40,33 @@ MESES_DESFASE = 2                # panel laboral / RIM: la cotizacion del mes m 
 MESES_DESFASE_LICENCIA = 1       # licencias medicas (feed COMPIN/ISAPRE) y eventos AFC
 MESES_DESFASE_OPERACIONAL = 0    # aportes voluntarios, campanas, saldos: sistemas propios
 HORIZONTE = 6                    # ventana del target: corte+1 .. corte+6
+PERFIL_DEFECTO = "sistema"       # perfil de cartera del universo comun ("sistema" | "cuprum")
+# Ajuste aditivo de los interceptos del hazard de aporte por perfil de cartera. Es 0 en los dos
+# perfiles: la mayor propension de la cartera Cuprum sale SOLA de los drivers observables del
+# score (renta 1,73x, tramo del IGC mas alto, 45 % de universitarios), sin tocar el mecanismo.
+# Se deja el gancho documentado por si la calibracion con datos reales exige moverlo.
+AJUSTE_INTERCEPTO_PERFIL = {"sistema": 0.0, "cuprum": 0.0}
+
+# --------------------------------------------------------------------------- anclas oficiales
+# Ficha Estadistica Previsional N 165 (Superintendencia de Pensiones, agosto 2026), §0 de
+# docs/contexto_afp_cuprum.md. Son las UNICAS cifras oficiales de APV disponibles y todas son de
+# nivel SISTEMA salvo la participacion de mercado de Cuprum, que es de STOCK (saldo), no de flujo.
+ANCLAS_FICHA_165 = {
+    "cotizantes_sistema": 5_775_070,
+    "afiliados_sistema": 12_201_632,
+    "cuentas_apv_en_afp": 1_840_000,
+    "saldo_apv_en_afp_clp": 3.97e12,
+    "share_apv_administrado_por_afp": 0.419,     # del APV total del pais
+    "deposito_promedio_clp": 130_716,
+    "share_depositos_regimen_a": 0.767,
+    "ingreso_imponible_promedio_sistema": 1_346_859,
+    "ingreso_imponible_promedio_cuprum": 2_331_030,
+    "share_cotizantes_cuprum": 0.063,
+    "share_saldo_apv_mercado_cuprum": 0.29,      # 29 % del APV del pais (stock, dic-2025)
+}
+# Techo implicito para la tasa de aportantes: cuentas APV en AFP por cotizante del sistema.
+CUENTAS_APV_POR_COTIZANTE_SISTEMA = (ANCLAS_FICHA_165["cuentas_apv_en_afp"]
+                                     / ANCLAS_FICHA_165["cotizantes_sistema"])   # 0,319
 # Rezago con el que se trunca cada tabla en los tests de leakage
 DESFASE_POR_TABLA = {"panel_mensual": MESES_DESFASE, "apvc_empleador": MESES_DESFASE,
                      "campanas": MESES_DESFASE_OPERACIONAL,
@@ -204,8 +231,8 @@ def _sigmoide(x: np.ndarray) -> np.ndarray:
 
 # probabilidad de elegir el regimen B (rebaja de la base imponible): crece con el tramo del IGC,
 # porque el beneficio del regimen B es la tasa marginal y el del regimen A es una bonificacion fija.
-P_REGIMEN_B_BASE = 0.12
-P_REGIMEN_B_POR_TRAMO = 0.20
+P_REGIMEN_B_BASE = 0.055
+P_REGIMEN_B_POR_TRAMO = 0.13
 P_COTIZACION_VOLUNTARIA = 0.18   # entre quienes no eligen regimen B
 
 
@@ -243,7 +270,8 @@ def _generar_apvc(empleadores: pd.DataFrame, periodos: list[int], rng: np.random
 # =========================================================================== generador principal
 def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICIO,
                    periodo_fin: int = PERIODO_FIN, seed: int = 42,
-                   params: ParametrosAPV | None = None) -> dict[str, pd.DataFrame]:
+                   params: ParametrosAPV | None = None,
+                   perfil: str = PERFIL_DEFECTO) -> dict[str, pd.DataFrame]:
     """Universo comun + tablas de ahorro voluntario. Determinista dado `seed`.
 
     Devuelve un diccionario con `afiliados`, `empleadores`, `panel_mensual`, `macro`,
@@ -255,7 +283,8 @@ def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICI
     rng = np.random.default_rng(seed + 103)
 
     universo = generar_universo(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                                periodo_fin=periodo_fin, seed=seed)
+                                periodo_fin=periodo_fin, seed=seed, perfil=perfil)
+    ajuste = AJUSTE_INTERCEPTO_PERFIL.get(perfil, 0.0)
     afiliados = universo["afiliados"]
     afil_lat = universo["afiliados_latente"]
     empleadores = universo["empleadores"]
@@ -396,7 +425,7 @@ def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICI
         # ---------------------------------------------------- stock inicial de aportantes mensuales
         if j == 0:
             aportante_mensual = con_ingreso & dependiente & (
-                rng.random(n_af) < _sigmoide(z + params.intercepto_stock_inicial))
+                rng.random(n_af) < _sigmoide(z + params.intercepto_stock_inicial + ajuste))
             tipo_mensual = _elegir_tipo(tramo, rng.random(n_af)).astype(np.int8)
             canal_mensual = np.zeros(n_af, dtype=np.int8)
             ex_aportante = (~aportante_mensual) & (rng.random(n_af) < P_EX_APORTANTE_INICIAL)
@@ -416,7 +445,7 @@ def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICI
 
         # ---------------------------------------------------- entradas al aporte mensual
         candidato = con_ingreso & dependiente & ~aportante_mensual
-        entra = candidato & (rng.random(n_af) < _sigmoide(z + params.intercepto_mensual))
+        entra = candidato & (rng.random(n_af) < _sigmoide(z + params.intercepto_mensual + ajuste))
         if entra.any():
             ids = np.where(entra)[0]
             t = _elegir_tipo(tramo[ids], rng.random(len(ids)))
@@ -428,7 +457,7 @@ def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICI
         # ---------------------------------------------------- aportes mensuales del mes
         paga_mensual = aportante_mensual & con_ingreso
         # ---------------------------------------------------- aportes esporadicos del mes
-        z_esp = z + params.intercepto_esporadico + ESTACIONALIDAD_ESPORADICO.get(int(mes), 0.0)
+        z_esp = z + params.intercepto_esporadico + ajuste + ESTACIONALIDAD_ESPORADICO.get(int(mes), 0.0)
         esporadico = con_ingreso & ~aportante_mensual & (rng.random(n_af) < _sigmoide(z_esp))
 
         tope_mes = TOPE_APORTE_UF * uf

@@ -5,7 +5,7 @@ un aporte voluntario en los próximos 6 meses** y **cuánto aportará**, para pr
 asesoría y proyectar el flujo de ahorro voluntario.
 
 ```bash
-python -m afp_lab.propension_apv.run --n-afiliados 20000      # corrida de referencia
+python -m afp_lab.propension_apv.run --n-afiliados 20000 --perfil ambos   # sistema + cuprum
 python -m pytest afp_lab/propension_apv/tests -q              # 26 tests, ~9 s
 ```
 
@@ -725,3 +725,151 @@ cortes con todos los gaps y sin nada del target observado.
 | Runtime con 20.000 afiliados | 39 s | 86–245 s según la carga de la máquina (4 modelos en vez de 1, y 63 cortes en vez de 41) |
 | Modelos persistidos | 1 | **4** (uno por origen) |
 | Tests | 20 | **26** |
+
+
+---
+
+## 12. Ronda 2: perfil Cuprum
+
+`BRIEF_RONDA2.md`. El universo comun ahora tiene dos carteras
+(`synth_base.generar_universo(perfil=...)`, ver `docs/contexto_afp_cuprum.md` §4) y el proyecto las
+corre con `--perfil {sistema,cuprum,ambos}`; `ambos` escribe
+`salidas/propension_apv/comparacion_perfiles.csv`. Cada perfil deja sus salidas en
+`salidas/propension_apv/<perfil>/`.
+
+### 12.1 Cómo se calibró la tasa de aportantes del perfil Cuprum
+
+El punto de partida es qué dice y qué **no** dice la Ficha Estadística Previsional N° 165 (SP,
+agosto 2026). Las cifras de APV de la Ficha son:
+
+| Cifra | Valor | Nivel |
+|---|---|---|
+| cuentas APV en AFP | 1,84 millones | **sistema** |
+| saldo APV en AFP | $3,97 billones (41,9 % del APV del país) | **sistema** |
+| depósito promedio | $130.716 | **sistema** |
+| depósitos en régimen A | 76,7 % | **sistema** |
+| cotizantes | 5.775.070 | sistema (Cuprum 6,3 % = ~364 mil) |
+| ingreso imponible promedio | $1.346.859 sistema / $2.331.030 Cuprum (1,73×) | por AFP |
+| participación de Cuprum en el APV del país | 29 % (≈ 69 % del APV administrado por AFP) | Cuprum, **stock** |
+
+**La Ficha no publica aportantes de APV por AFP**, así que la tasa de aportantes de Cuprum no se
+puede leer directamente. Y el 29 % / 69 % de participación **no sirve** para calibrarla porque es un
+**stock de saldo**, no un flujo: con 6,3 % de los cotizantes, para explicar 69 % del saldo de flujo
+haría falta una intensidad 33× la del sistema, y descontando el efecto monto (1,73× de renta y más
+régimen B ≈ 2,2×) quedaría una tasa de aportantes de ~225 %, imposible. La diferencia es
+acumulación: la cartera APV de Cuprum lleva capitalizando desde 1981 y lidera la rentabilidad a
+36 meses. Se documenta para que nadie vuelva a usar ese 29 % como si fuera un flujo.
+
+Lo que sí se hizo, en tres pasos:
+
+1. **No se tocó ningún parámetro del mecanismo de APV.** El gancho existe
+   (`AJUSTE_INTERCEPTO_PERFIL`) y está en **0,0 en los dos perfiles**. La mayor propensión de Cuprum
+   sale sola de los drivers observables del score ya documentados en §2.2 al cambiar la cartera:
+   renta 1,68× (→ `0,90 × ln 1,68` = **+0,49** de logit), tramos del IGC más altos (media de tramo
+   0,56 → 1,12: **+0,17**), 44 % de universitarios en vez de 20 % (**≈ +0,11** en media) y menos
+   gente en el mínimo (3 % vs 15 %). Resultado: **27,2 % de los cotizantes con algún aporte en el
+   año** y **14,1 % con aporte mensual**, frente a 15,2 % y 7,0 % del perfil sistema (1,79× y 2,02×).
+2. **Techo de cordura con la Ficha**: 1,84 M de cuentas APV en AFP / 5,78 M de cotizantes = **0,319
+   cuentas por cotizante en el sistema**. Los 27,2 % de aportantes activos de Cuprum quedan por
+   debajo de ese número de *cuentas* del sistema, y por encima de la tasa del sistema, que es lo que
+   corresponde al líder del mercado. Hay test (`test_perfil_cuprum_tiene_mas_renta_y_mas_apv`) que
+   fija las dos condiciones.
+3. **La mezcla régimen A / B sí se recalibró con la Ficha** (76,7 % de los depósitos en régimen A).
+   `P_REGIMEN_B_BASE` 0,12 → **0,055** y `P_REGIMEN_B_POR_TRAMO` 0,20 → **0,13**. Con eso el perfil
+   sistema da **74,7 %** de depósitos en régimen A (antes 59,0 %, muy lejos del dato) y el perfil
+   Cuprum **68,1 %**: menos régimen A porque su cartera está en tramos más altos del IGC, donde el
+   beneficio del régimen B (rebajar la base imponible a la tasa marginal) domina al 15 % de
+   bonificación del régimen A. Es exactamente el efecto que anticipaba el punto 2 del brief.
+
+`reportes/calibracion_ficha_165.csv` deja la comparación auditable en cada corrida.
+
+**Brecha conocida**: el depósito promedio simulado del perfil sistema es **$194.108** frente a los
+**$130.716** de la Ficha (+48 %); la mediana simulada es $97.983. La causa está identificada: los
+aportes esporádicos son el 20 % de los depósitos con una media 6,1× la de los mensuales. Cerrarla
+requiere escalar `FACTOR_ESPORADICO` por ≈ 0,53 o subir la proporción de depósitos mensuales al
+~90 %. No se hizo en esta ronda para no mover el nivel de los montos del perfil sistema, que es la
+línea base ya integrada; queda como primer punto de la próxima calibración. En el perfil Cuprum la
+**mediana** ($136.164) coincide con el promedio del sistema, lo que es consistente con una cartera
+de mayores ingresos.
+
+### 12.2 Comparación de los dos perfiles (20.000 afiliados, 12 cortes de test)
+
+| Indicador | sistema | cuprum | Lectura |
+|---|---|---|---|
+| RIM media de cotizantes | $1.325.854 | $2.235.662 | 1,69×; Ficha 1,73× |
+| Cotizantes con aporte en el año | 15,2 % | **27,2 %** | 1,79× |
+| Cotizantes con aporte mensual | 7,0 % | **14,1 %** | 2,02× |
+| Depósitos en régimen A | 74,7 % | 68,1 % | el tramo tributario pesa más |
+| Filas de test / aportantes | 192.557 / 9.612 | 164.234 / 13.672 | menos elegibles (más gente ya aporta) y más positivos |
+| Tasa base de test | 4,99 % | **8,32 %** | |
+| **AUC** | **0,835** | **0,821** | rango por corte 0,798–0,851 vs 0,794–0,832 |
+| AUC de la regla de negocio | 0,710 | 0,706 | el modelo gana en los dos |
+| **Lift decil 1** | **5,11** | **4,37** | menor en Cuprum: con 8,3 % de base hay menos techo |
+| Average precision | 0,296 | **0,355** | mejor en Cuprum (base más alta) |
+| WAPE del monto condicional | 0,560 | **0,533** | |
+| Sesgo del monto esperado | +0,9 % | +0,8 % | |
+| Brier / ECE | 0,0405 / 0,0016 | 0,0639 / 0,0033 | Brier sube con la base; ECE sigue bajo |
+| Sesgo agregado de la probabilidad | −1,1 % | +0,1 % | |
+| **Captura de monto al 10 %** | **67,5 %** | **55,1 %** | |
+| Captura al 10 % por renta | 49,1 % | 32,7 % | la ventaja del modelo **crece**: +18,4 pp → **+22,4 pp** |
+| Conversión de los contactados al 10 % | 23,7 % | **34,4 %** | 1 de cada 3 contactados abre APV |
+| Adquisición sobre el flujo total de APV | 38,6 % | 32,0 % | en Cuprum pesa más el mantenimiento |
+| Runtime | 98 s | 81 s | |
+
+### 12.3 ¿Se mantienen los criterios de aceptación con Cuprum?
+
+Sí, los cuatro, y con margen:
+
+| Criterio | Umbral | sistema | cuprum |
+|---|---|---|---|
+| AUC de test | ≥ 0,75 | 0,835 | **0,821** |
+| Lift decil 1 | ≥ 3 | 5,11 | **4,37** |
+| WAPE del monto en aportantes | ≤ 0,6 | 0,560 | **0,533** |
+| Captura al 10 % > orden por renta | > | 67,5 vs 49,1 | **55,1 vs 32,7** |
+| AUC en el rango pedido a la simulación | 0,75–0,88 | 0,835 | 0,821 |
+
+Qué cambia y por qué:
+
+* **El AUC y el lift bajan un poco** (0,835 → 0,821 y 5,11 → 4,37) aunque el modelo es "mejor" en
+  average precision. Dos razones: (a) la tasa base sube de 5,0 % a 8,3 %, y el lift del decil 1 está
+  acotado por `1/tasa_base` (máximo 12,0 en Cuprum vs 20,0 en sistema); (b) la cartera es más
+  homogénea — todos son de renta alta —, así que la renta discrimina menos dentro de la cartera.
+* **El tramo tributario pesa más**, como anticipaba el brief: la media del tramo del IGC pasa de
+  0,56 a 1,12 (2025), `tramo_igc_12m` sube en la importancia del clasificador y la mezcla de régimen se
+  corre de A a B (74,7 % → 68,1 % en A).
+* **La métrica de negocio mejora en términos relativos**: la ventaja sobre ordenar por renta crece
+  de +18,4 pp a **+22,4 pp**, y la conversión de los contactados sube de 23,7 % a 34,4 %. La captura
+  absoluta baja (67,5 % → 55,1 %) porque con 8,3 % de base rate el monto está menos concentrado en
+  el decil superior: hay más aportantes repartidos por toda la cartera.
+* **La población elegible se encoge** (192.557 → 164.234 filas): en Cuprum hay más afiliados que ya
+  aportan mensualmente, y esos quedan excluidos por definición del problema. Es la señal cuantitativa
+  de lo que dice `docs/contexto_afp_cuprum.md` §4: en nuestra cartera el problema relevante es tanto
+  la adquisición como el **mantenimiento**, y este proyecto sólo cubre la primera (32,0 % del flujo
+  de APV frente a 38,6 % en el sistema).
+
+### 12.4 Efecto de la recalibración A/B sobre el perfil sistema
+
+Cambiar `P_REGIMEN_B_BASE` / `P_REGIMEN_B_POR_TRAMO` mueve los montos (el régimen B lleva un factor
+×1,25), así que los números del perfil sistema se desplazaron un poco respecto de la ronda 2
+integrada. Las diferencias son pequeñas y van en las dos direcciones:
+
+| Métrica | Ronda 2 integrada | Ahora (perfil sistema) |
+|---|---|---|
+| AUC | 0,8357 | 0,8354 |
+| Lift decil 1 | 5,13 | 5,11 |
+| WAPE del monto condicional | 0,5549 | 0,5596 |
+| Captura al 10 % | 67,76 % | 67,48 % |
+| ECE | 0,0018 | 0,0016 |
+| Depósitos en régimen A | 59,0 % | **74,7 %** (el objetivo del cambio) |
+
+### 12.5 Cómo correr
+
+```bash
+python -m afp_lab.propension_apv.run --n-afiliados 20000 --perfil sistema
+python -m afp_lab.propension_apv.run --n-afiliados 20000 --perfil cuprum
+python -m afp_lab.propension_apv.run --n-afiliados 20000 --perfil ambos    # + comparacion
+```
+
+Runtime con 20.000 afiliados: **98 s** el perfil sistema, **81 s** el perfil Cuprum (menos filas
+elegibles), **185 s** los dos juntos con `--perfil ambos`. Tests: **30** (4 nuevos de perfil) en
+**20 s**.

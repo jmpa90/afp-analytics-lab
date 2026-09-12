@@ -23,7 +23,11 @@ Convencion de tiempos de este proyecto (ver README, seccion 3 y 8):
     corte a traves de `cesantia_giro_actual`/`cesantia_n_giros_recibidos` (bloqueante #1 de
     la revision de ronda 1, ver README §8). La cobertura analitica de este modulo asume
     "sigue cesante mientras no se demuestre lo contrario con datos ya conocidos" (RIM
-    conocida, eventos AFC), exactamente el mismo principio as-of que el resto del proyecto.
+    conocida, eventos AFC), exactamente el mismo principio as-of que el resto del proyecto:
+    `construir_features` apaga `cesantia_en_curso`/`cesantia_giros_restantes`/
+    `cesantia_tasa_actual` si hay un INICIO AFC conocido posterior al termino, o RIM
+    conocida > 0 en algun mes estrictamente posterior al termino (menor G, ronda 2 de
+    revision: antes esto quedaba solo como intencion en este parrafo, sin implementarse).
 
 Todas las funciones de esta seccion filtran por `periodo_recepcion` antes de agregar: un
 registro nunca se usa antes de estar "recibido" segun estas reglas. `construir_features`
@@ -238,13 +242,18 @@ def _features_empleador(cot: pd.DataFrame, empleadores: pd.DataFrame, corte: int
     # bug de ronda 1: `reindex(..., fill_value=0)` solo rellena columnas/filas AUSENTES del
     # index, no los NaN que `unstack` ya deja cuando un empleador conocido no tiene planilla
     # conocida en un mes puntual de la ventana (quedaban como NaN y arrastraban NaN a
-    # emp_crecimiento_12/emp_tasa_salida_12 para esos empleadores). Se captura ese NaN ANTES
-    # de rellenarlo (bandera `emp_sin_planilla_conocida`, para el mes de referencia) y luego
-    # se rellena explicitamente con `.fillna(0)`.
+    # emp_crecimiento_12/emp_tasa_salida_12 para esos empleadores). Se rellena
+    # explicitamente con `.fillna(0)`.
     hc_raw = (vis.dropna(subset=["empleador_id"])
               .groupby(["empleador_id", "periodo"])["afiliado_id"].nunique()
               .unstack("periodo").reindex(columns=periodos_13))
-    sin_planilla_corte = hc_raw[corte_rim].isna()
+    # bug de ronda 2: `hc_raw[corte_rim]` NUNCA es NaN para un empleador que llega hasta
+    # aca, porque `empleador_principal` (la clave de join) se define, mas arriba, como el
+    # empleador con RIM > 0 EN corte_rim para el propio afiliado — asi que ese empleador
+    # SIEMPRE tiene planilla conocida justo en corte_rim (es circular). La bandera util es
+    # si falta planilla conocida en ALGUN OTRO mes de la ventana de 13 meses (indicio de
+    # que la cobertura de la RIM conocida de ese empleador es incompleta, no solo hoy).
+    sin_planilla_alguna = hc_raw.isna().any(axis=1)
     hc = hc_raw.fillna(0.0)
 
     elapsed = periodo_to_idx(hasta) - periodo_to_idx(np.array(periodos_13))
@@ -258,7 +267,7 @@ def _features_empleador(cot: pd.DataFrame, empleadores: pd.DataFrame, corte: int
         "emp_n_trabajadores": hc_corr[corte_rim],
         "emp_crecimiento_12": hc_corr[corte_rim] / (hc_corr[periodos_13[0]] + 1.0),
         "emp_tasa_salida_12": tasa_mensual.iloc[:, 1:].mean(axis=1),
-        "emp_sin_planilla_conocida": sin_planilla_corte.astype(int),
+        "emp_sin_planilla_conocida": sin_planilla_alguna.astype(int),
     }).reset_index().rename(columns={"empleador_id": "empleador_principal"})
     return emp
 
@@ -295,7 +304,11 @@ def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, afiliados: pd.
     # Cobertura del seguro de cesantia, 100% analitica: max_giros segun el tipo de contrato
     # DEL TERMINO mas reciente conocido (no del INICIO: la relacion terminada puede ser
     # distinta de la vigente) y `meses_desde_termino` (ya calculado arriba). No se lee RIM
-    # futura ni la tabla `prestaciones_cesantia` (ver docstring del modulo).
+    # futura ni la tabla `prestaciones_cesantia` (ver docstring del modulo). Asume "sigue
+    # cesante" salvo evidencia YA CONOCIDA de reingreso (un INICIO posterior al termino, o
+    # RIM conocida > 0 en un mes posterior al termino): esa correccion se aplica mas abajo,
+    # en `construir_features`, porque necesita `rim_l1..rim_l3` (calculadas en
+    # `_features_historia_rim`, no disponibles en esta funcion).
     ult_termino = marcas_termino.sort_values("_d").groupby("afiliado_id").first() if marcas_termino is not None else None
     d_termino = (ult_termino["_d"].reindex(out.index) if ult_termino is not None
                 else pd.Series(np.nan, index=out.index))
@@ -374,6 +387,12 @@ def _estacionalidad_rubro(afc: pd.DataFrame, empleadores: pd.DataFrame, corte: i
 # ellos, un fenomeno distinto (un sorteo anual o mensual, no una perdida de empleo) que un
 # baseline ingenuo por rubro x mes replica mejor que cualquier feature de historia laboral.
 TIPOS_DEPENDENCIA = ["DEPENDIENTE", "PENSIONADO_ACTIVO"]
+# Los que quedan fuera de ambos modelos (ver comentario de arriba). Se exponen aca (y no
+# solo como el complemento implicito) porque `run._negocio_agregado_cartera_completa`
+# necesita proyectarlos por separado con un baseline propio (mayor A, ronda 2 de revision:
+# el agregado de negocio del modelo solo, sin ellos, cubre ~88% de los ceses reales de la
+# cartera completa).
+TIPOS_EXCLUIDOS = ["INDEPENDIENTE", "VOLUNTARIO"]
 
 
 def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> pd.DataFrame:
@@ -404,6 +423,25 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
           # referencia), no a cualquier inicio pasado del afiliado (menor #8, ronda 1)
           .merge(f_tc.rename(columns={"empleador_id": "empleador_principal"}),
                  on=["afiliado_id", "empleador_principal"], how="left"))
+
+    # Menor G (ronda 2 de revision): la cobertura de cesantia (punto 1, "sin leer RIM
+    # futura") asume que el afiliado sigue cesante mientras no haya evidencia YA CONOCIDA
+    # de lo contrario. Esa evidencia son dos: (a) un aviso AFC de INICIO conocido con
+    # periodo posterior al del ultimo TERMINO (reingreso a cualquier empleador), o (b) RIM
+    # conocida > 0 en algun mes ESTRICTAMENTE POSTERIOR al termino y anterior o igual a
+    # `corte-2` (el propio `rim_l1` solo cae en ese rango si el termino fue hace >= 3
+    # meses: para un termino en `corte-1` o `corte-2`, `rim_l1` describe el sueldo ANTES
+    # de terminar, no una senal de reingreso, y no debe apagar nada). Ambas usan solo
+    # columnas ya conocidas a `corte-1` (eventos) o `corte-2` (RIM): no leen el futuro.
+    d_term = df["meses_desde_afc_termino"]     # NaN si nunca hubo termino conocido
+    d_inicio = df["meses_desde_afc_inicio"]
+    hay_inicio_posterior = d_inicio.notna() & d_term.notna() & (d_inicio < d_term)
+    rim_tras_termino = pd.Series(False, index=df.index)
+    for k in (1, 2, 3):                        # rim_lk cae despues del termino solo si k <= d_term-2
+        aplica = d_term.notna() & ((d_term - 2) >= k)
+        rim_tras_termino |= aplica & (df[f"rim_l{k}"] > 0)
+    ya_reingreso_conocido = hay_inicio_posterior.fillna(False) | rim_tras_termino
+    df.loc[ya_reingreso_conocido, ["cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual"]] = 0.0
 
     mes_corte = corte % 100
     m_corte = macro.set_index("periodo").loc[corte]

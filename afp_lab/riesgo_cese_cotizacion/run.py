@@ -16,9 +16,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .evaluate import (agregar_tramos, cobertura_poblacion_cese, curva_calibracion, evaluar,
+from .evaluate import (agregar_tramos, cobertura_poblacion_cese, curva_calibracion,
+                       diagnostico_cese_por_tipo_afiliado, ece, es_calibracion_monotona, evaluar,
                        evaluar_segmentos_multi, metrica_negocio_agregado, metrica_negocio_captura)
-from .features import TIPOS_DEPENDENCIA, VENTANA_HISTORIA, agregar_targets, construir_features
+from .features import TIPOS_DEPENDENCIA, TIPOS_EXCLUIDOS, VENTANA_HISTORIA, agregar_targets, construir_features
 from .model import (ModeloCese, baseline_tasa_base, predecir_regla_negocio_cese,
                     predecir_regla_negocio_reingreso, predecir_tasa_base)
 from .synthetic import add_months, generar_datos, idx_to_periodo, periodo_to_idx
@@ -117,6 +118,12 @@ def _entrenar_y_evaluar(target: str, cfg: dict, dataset: pd.DataFrame, cortes: l
     # para poder verificar "no perder en ningun segmento grande" contra AMBOS baselines.
     segmentos = evaluar_segmentos_multi(test, target, predictores)
     calib = curva_calibracion(test, target, "pred_modelo")
+    # Documentacion (ronda 2 de revision, C/D): el ECE resume la calibracion en un numero,
+    # pero no dice si la curva es monotona por decil; si NO lo es (reingreso), la
+    # probabilidad calibrada sirve para agregar y para rankear, no como lectura literal
+    # por individuo (se documenta en README, no se fuerza una recalibracion en esta ronda).
+    calib_ece = ece(calib)
+    calib_monotona = es_calibracion_monotona(calib)
     # metrica de negocio: el brief pide el error MENSUAL (uno por corte de test), no un
     # promedio/total trimestral (menor #11, ronda 1); `negocio_agregado` ya es por corte.
     negocio_agregado = metrica_negocio_agregado(test, target, "pred_modelo")
@@ -126,10 +133,48 @@ def _entrenar_y_evaluar(target: str, cfg: dict, dataset: pd.DataFrame, cortes: l
     n_por_split = {k: len(v) for k, v in splits.items() if k != "cortes"}
     return {
         "target": target, "nombre": cfg["nombre"], "tabla_metricas": tabla_metricas,
-        "segmentos": segmentos, "calibracion": calib, "negocio_agregado": negocio_agregado,
+        "segmentos": segmentos, "calibracion": calib, "ece": calib_ece, "calibracion_monotona": calib_monotona,
+        "negocio_agregado": negocio_agregado,
         "negocio_captura": negocio_captura, "importancias": importancias, "n_por_split": n_por_split,
-        "cortes_split": splits["cortes"], "test_df": test, "modelo": modelo,
+        "cortes_split": splits["cortes"], "test_df": test, "modelo": modelo, "horiz_col": horiz_col,
     }
+
+
+def _negocio_agregado_cartera_completa(dataset: pd.DataFrame, r: dict, target: str, horiz_col: str) -> pd.DataFrame:
+    """Extiende `r["negocio_agregado"]` (solo dependientes/pensionados activos, la
+    poblacion del modelo) sumando una proyeccion simple de independientes y voluntarios
+    (excluidos del modelo: ver `TIPOS_EXCLUIDOS`) con un baseline de tasa base por
+    `tipo_afiliado x mes_corte` (no por rubro: para ellos `rubro` es siempre
+    "SIN_EMPLEADOR"), entrenado y evaluado con los MISMOS cortes de train/val/test que el
+    modelo (`r["cortes_split"]`, sin gap extra: son solo un baseline, no un modelo que
+    pueda sobreajustar).
+
+    Mayor A (ronda 2 de revision): sin esto, el agregado de negocio solo describe el
+    ~88% de los ceses reales de la cartera completa (dependientes/pensionados son ~92,5%
+    de los cotizantes activos pero solo ~88% de quienes de verdad cesan, porque los
+    voluntarios cesan con tasa mucho mas alta que su peso poblacional)."""
+    cortes = r["cortes_split"]
+    excluidos = dataset[dataset["tipo_afiliado"].isin(TIPOS_EXCLUIDOS) & (dataset["rim_l1"] > 0)
+                        & dataset[horiz_col]]
+    train_val_cortes = cortes["train"] + cortes["val"]
+    train_ex = excluidos[excluidos["periodo_corte"].isin(train_val_cortes)]
+    test_ex = excluidos[excluidos["periodo_corte"].isin(cortes["test"])].copy()
+
+    cols_grupo = ["tipo_afiliado", "mes_corte"]
+    tasas, tasa_global = baseline_tasa_base(train_ex, target, cols=cols_grupo)
+    test_ex["pred_base"] = predecir_tasa_base(tasas, tasa_global, test_ex, cols=cols_grupo)
+
+    dep = r["negocio_agregado"].set_index("periodo_corte")
+    ex_agg = (test_ex.groupby("periodo_corte")
+             .agg(n_esperado_excluidos=("pred_base", "sum"), n_real_excluidos=(target, "sum"),
+                  n_filas_excluidos=(target, "size")))
+    out = dep.join(ex_agg, how="left").fillna(0.0)
+    out["n_esperado_total"] = out["n_esperado"] + out["n_esperado_excluidos"]
+    out["n_real_total"] = out["n_real"] + out["n_real_excluidos"]
+    out["error_relativo_total"] = ((out["n_esperado_total"] - out["n_real_total"])
+                                   / out["n_real_total"].clip(lower=1e-9))
+    out["cobertura_dependientes"] = out["n_real"] / out["n_real_total"].clip(lower=1e-9)
+    return out.reset_index()
 
 
 def _ejemplos_por_rubro(resultado_y3: dict, top: int = 5) -> pd.DataFrame:
@@ -203,9 +248,27 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
         print(f"\n=== {cfg['nombre']} ({target}) === filas train/val/test: {r['n_por_split']} "
              f"[{time.time() - t2:.1f}s]")
         print(r["tabla_metricas"].to_string(index=False))
-        print("Negocio - agregado por corte (test):")
+        print(f"Calibracion: ECE={r['ece']:.4f}, monotona por decil={r['calibracion_monotona']}")
+        print("Negocio - agregado por corte (test, solo poblacion del modelo):")
         print(r["negocio_agregado"].to_string(index=False))
         print(f"Negocio - top 10% de riesgo: {r['negocio_captura']}")
+
+        if cfg["poblacion"] == "pop_cese":
+            # mayor A (ronda 2): agregado extendido a toda la cartera (+ independientes/voluntarios)
+            neg_total = _negocio_agregado_cartera_completa(dataset, r, target, r["horiz_col"])
+            neg_total.to_csv(salida_dir / "reportes" / f"negocio_agregado_total_{target}.csv", index=False)
+            r["negocio_agregado_total"] = neg_total
+            print("Negocio - agregado por corte, CARTERA COMPLETA (+ independientes/voluntarios proyectados):")
+            print(neg_total.to_string(index=False))
+            n_dep_test = neg_total["n_real"].sum()
+            n_tot_test = neg_total["n_real_total"].sum()
+            print(f"Cobertura de dependientes/pensionados sobre el total de ceses reales (3 meses de "
+                 f"test, agregados): {n_dep_test / n_tot_test:.4f}")
+
+            diag = diagnostico_cese_por_tipo_afiliado(dataset, target, r["horiz_col"])
+            diag.to_csv(salida_dir / "reportes" / f"diagnostico_tipo_afiliado_{target}.csv", index=False)
+            print(f"Diagnostico por tipo_afiliado (dataset completo, {len(cortes)} cortes):")
+            print(diag.to_string(index=False))
 
     ejemplos = _ejemplos_por_rubro(resultados["y3"])
     if not ejemplos.empty:

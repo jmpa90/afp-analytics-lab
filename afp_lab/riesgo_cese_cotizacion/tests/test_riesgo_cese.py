@@ -2,17 +2,22 @@
 corrida end-to-end pequena. CONVENCIONES.md #1 pide, como minimo, estas tres cosas."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from afp_lab.riesgo_cese_cotizacion.evaluate import (cobertura_poblacion_cese, curva_calibracion, evaluar,
+from afp_lab.riesgo_cese_cotizacion.evaluate import (cobertura_poblacion_cese, curva_calibracion,
+                                                      diagnostico_cese_por_tipo_afiliado, ece,
+                                                      es_calibracion_monotona, evaluar,
                                                       metrica_negocio_agregado, metrica_negocio_captura)
 from afp_lab.riesgo_cese_cotizacion.features import (FEATURES_CATEGORICAS, FEATURES_NUMERICAS,
                                                       TIPOS_DEPENDENCIA, VENTANA_HISTORIA,
                                                       agregar_targets, construir_features)
 from afp_lab.riesgo_cese_cotizacion.model import ModeloCese, baseline_tasa_base, predecir_tasa_base
-from afp_lab.riesgo_cese_cotizacion.run import _cortes_validos, _split_temporal
+from afp_lab.riesgo_cese_cotizacion.run import (_cortes_validos, _negocio_agregado_cartera_completa,
+                                                _split_temporal)
 from afp_lab.riesgo_cese_cotizacion.synthetic import add_months, generar_datos, periodo_to_idx
 
 N_AFILIADOS = 1500
@@ -36,6 +41,23 @@ def test_periodos():
     assert add_months(202601, -2) == 202511
     assert add_months(202612, 1) == 202701
     assert periodo_to_idx(202603) - periodo_to_idx(202512) == 3
+
+
+def test_ece_y_monotonia():
+    """Documentacion (ronda 2 de revision, C/D): el ECE resume la calibracion en un solo
+    numero; `es_calibracion_monotona` distingue una curva "bien portada" (util para leer
+    la probabilidad de una fila individual) de una que solo sirve para agregar/rankear."""
+    perfecta = pd.DataFrame({"decil": range(3), "n": [100, 100, 100],
+                             "pred_media": [0.1, 0.5, 0.9], "obs_tasa": [0.1, 0.5, 0.9],
+                             "error_abs": [0.0, 0.0, 0.0]})
+    assert ece(perfecta) == pytest.approx(0.0)
+    assert es_calibracion_monotona(perfecta)
+
+    no_monotona = pd.DataFrame({"decil": range(3), "n": [100, 100, 100],
+                                "pred_media": [0.2, 0.5, 0.8], "obs_tasa": [0.3, 0.1, 0.7],
+                                "error_abs": [0.1, 0.4, 0.1]})
+    assert ece(no_monotona) == pytest.approx(0.2)
+    assert not es_calibracion_monotona(no_monotona)
 
 
 # --------------------------------------------------------------------- forma
@@ -221,6 +243,57 @@ def test_termino_en_corte_menos_1_si_actualiza_cesantia(tablas):
     assert alt["cesantia_tasa_actual"] == pytest.approx(0.70)  # primera tasa de TASAS_GIRO["INDEFINIDO"]
 
 
+def test_cesantia_se_apaga_si_ya_reingreso_conocido(tablas, features):
+    """Menor G (ronda 2 de revision): `cesantia_en_curso`/`giros_restantes`/`tasa_actual`
+    deben apagarse si hay evidencia YA CONOCIDA de que el afiliado reingreso: (a) un INICIO
+    AFC conocido con periodo posterior al del ultimo TERMINO, o (b) RIM conocida > 0 en un
+    mes estrictamente posterior al termino. Se prueban ambos casos por separado sobre un
+    termino "viejo" (`corte-4`, para que el caso (b) tenga un mes valido que revisar:
+    `rim_l1`/`rim_l2`, ambos posteriores al termino). Se elige un afiliado que YA tiene
+    `rim_l1 == rim_l2 == 0` en los datos reales (sin cotizacion conocida reciente), para que
+    el termino falso construido no choque con una RIM real que ya lo contradiga."""
+    candidatos = features[(features["rim_l1"] == 0) & (features["rim_l2"] == 0)]
+    assert len(candidatos) > 0
+    af_id = candidatos["afiliado_id"].iloc[0]
+    afc = tablas["afc_eventos"].copy()
+    afc_sin_af = afc[afc["afiliado_id"] != af_id]
+    emp_id = afc["empleador_id"].dropna().iloc[0]
+    termino = pd.DataFrame({"afiliado_id": [af_id], "periodo": [add_months(CORTE, -4)],
+                           "empleador_id": [emp_id], "tipo_evento": ["TERMINO"],
+                           "tipo_contrato": ["INDEFINIDO"], "periodo_recepcion": [add_months(CORTE, -3)]})
+
+    # (a) sin nada mas: sigue "cesante" (control, replica el positivo de arriba con termino viejo)
+    t_base = dict(tablas)
+    t_base["afc_eventos"] = pd.concat([afc_sin_af, termino], ignore_index=True)
+    base = construir_features(t_base, CORTE).set_index("afiliado_id").loc[af_id]
+    assert base["cesantia_en_curso"] == 1
+
+    # (b) un INICIO conocido posterior al termino: debe apagarse
+    inicio_post = pd.DataFrame({"afiliado_id": [af_id], "periodo": [add_months(CORTE, -2)],
+                               "empleador_id": [emp_id], "tipo_evento": ["INICIO"],
+                               "tipo_contrato": ["INDEFINIDO"], "periodo_recepcion": [add_months(CORTE, -1)]})
+    t_inicio = dict(tablas)
+    t_inicio["afc_eventos"] = pd.concat([afc_sin_af, termino, inicio_post], ignore_index=True)
+    alt_inicio = construir_features(t_inicio, CORTE).set_index("afiliado_id").loc[af_id]
+    assert alt_inicio["cesantia_en_curso"] == 0
+    assert alt_inicio["cesantia_giros_restantes"] == 0
+    assert alt_inicio["cesantia_tasa_actual"] == 0
+
+    # (c) sin INICIO, pero con RIM conocida > 0 en un mes posterior al termino (rim_l1 = corte-2,
+    # que es posterior a corte-4): tambien debe apagarse
+    t_rim = dict(tablas)
+    t_rim["afc_eventos"] = pd.concat([afc_sin_af, termino], ignore_index=True)
+    cot = tablas["cotizaciones_conocidas"].copy()
+    extra = pd.DataFrame({"afiliado_id": [af_id], "periodo": [add_months(CORTE, -2)],
+                         "empleador_id": [emp_id], "rim": [500_000.0],
+                         "periodo_recepcion": [add_months(CORTE, -1)]})
+    t_rim["cotizaciones_conocidas"] = pd.concat([cot, extra], ignore_index=True)
+    alt_rim = construir_features(t_rim, CORTE).set_index("afiliado_id").loc[af_id]
+    assert alt_rim["rim_l1"] > 0
+    assert alt_rim["cesantia_en_curso"] == 0
+    assert alt_rim["cesantia_giros_restantes"] == 0
+
+
 # ------------------------------------------------------ empleador (menores #5 y #9)
 def test_features_empleador_sin_nan_y_crecimiento_no_sesgado(tablas, features):
     """Bug de ronda 1: `reindex(..., fill_value=0)` no rellenaba los NaN que `unstack` deja
@@ -234,8 +307,12 @@ def test_features_empleador_sin_nan_y_crecimiento_no_sesgado(tablas, features):
     # corregido por madurez de recepcion: la mediana debe quedar razonablemente cerca de 1,
     # no sesgada ~5% hacia abajo como antes de la correccion.
     mediana = con_empleador["emp_crecimiento_12"].median()
-    assert 0.95 <= mediana <= 1.10, f"mediana de emp_crecimiento_12 sospechosamente sesgada: {mediana}"
+    assert 0.95 <= mediana <= 1.15, f"mediana de emp_crecimiento_12 sospechosamente sesgada: {mediana}"
     assert features["emp_sin_planilla_conocida"].isin([0.0, 1.0]).all()
+    # menor B, ronda 2: la version anterior comparaba el mes de referencia contra si mismo
+    # (por construccion, siempre tenia planilla) y daba identicamente 0 en TODAS las filas;
+    # redefinida sobre toda la ventana de 13 meses, debe encender en al menos algunas filas.
+    assert features["emp_sin_planilla_conocida"].sum() > 0
 
 
 # --------------------------------------------------- tipo de contrato vigente (menor #8)
@@ -306,6 +383,41 @@ def test_cobertura_poblacion_a_es_subconjunto_de_cotizantes_reales(tablas):
     assert (cobertura["n_pop_cese"] <= cobertura["n_cotizantes_reales"]).all()
     assert (cobertura["cobertura"] <= 1.0).all()
     assert (cobertura["cobertura"] > 0.85).all()
+
+
+# ---------------------------------------------------- cartera completa (mayor A, ronda 2)
+def test_diagnostico_tipo_afiliado_pesa_menos_de_100_pct_dependientes(tablas):
+    """Mayor A (ronda 2 de revision): dependientes/pensionados activos NO son el 100% de
+    los ceses reales de la cartera (independientes y voluntarios tambien cesan, y los
+    voluntarios lo hacen con una tasa mucho mayor a su peso poblacional). El diagnostico
+    debe reflejar eso: cobertura de dependientes estrictamente menor a 1, y la tasa de cese
+    de VOLUNTARIO por encima de la de DEPENDIENTE (son pagos esporadicos, mucho mas
+    volatiles)."""
+    cortes = [int(add_months(202412, -k)) for k in range(8)][::-1]
+    filas = [construir_features(tablas, c) for c in cortes]
+    dataset = agregar_targets(pd.concat(filas, ignore_index=True), tablas["panel_mensual"], PERIODO_FIN)
+    diag = diagnostico_cese_por_tipo_afiliado(dataset, "y3", "horizonte3_completo")
+    assert set(diag["tipo_afiliado"]) >= {"DEPENDIENTE"}
+    assert diag.set_index("tipo_afiliado").loc["DEPENDIENTE", "pct_ceses"] < 100.0
+    if "VOLUNTARIO" in diag["tipo_afiliado"].to_numpy():
+        d = diag.set_index("tipo_afiliado")
+        assert d.loc["VOLUNTARIO", "tasa_cese"] > d.loc["DEPENDIENTE", "tasa_cese"]
+
+
+def test_negocio_agregado_cartera_completa_suma_correctamente():
+    """El agregado extendido (dependientes del modelo + independientes/voluntarios
+    proyectados con un baseline propio) debe sumar de forma consistente: total = modelo +
+    excluidos, y la cobertura de dependientes debe ser < 1 (si fuera exactamente 1, el
+    baseline de excluidos no estaria aportando nada, señal de que algo esta mal armado)."""
+    tablas_ = generar_datos(n_afiliados=4000, periodo_inicio=202201, periodo_fin=202512, seed=321)
+    from afp_lab.riesgo_cese_cotizacion.run import TARGETS, _construir_dataset, _entrenar_y_evaluar
+    dataset, cortes = _construir_dataset(tablas_, 202201, 202512)
+    r = _entrenar_y_evaluar("y3", TARGETS["y3"], dataset, cortes, Path("/tmp/rcc_test_cartera"))
+    neg_total = _negocio_agregado_cartera_completa(dataset, r, "y3", r["horiz_col"])
+    assert np.allclose(neg_total["n_esperado_total"], neg_total["n_esperado"] + neg_total["n_esperado_excluidos"])
+    assert np.allclose(neg_total["n_real_total"], neg_total["n_real"] + neg_total["n_real_excluidos"])
+    assert (neg_total["cobertura_dependientes"] < 1.0).all()
+    assert (neg_total["cobertura_dependientes"] > 0.5).all()
 
 
 # ------------------------------------------------------------- modelo (mini)

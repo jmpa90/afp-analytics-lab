@@ -92,14 +92,21 @@ class ModeloCese:
 
 
 # --------------------------------------------------------------- baselines ----
-def baseline_tasa_base(train: pd.DataFrame, target: str) -> tuple[pd.Series, float]:
-    """Tasa base historica (train) por rubro x mes_corte; respaldo = tasa global de train."""
-    tasas = train.groupby(["rubro", "mes_corte"])[target].mean()
+def baseline_tasa_base(train: pd.DataFrame, target: str,
+                       cols: list[str] = ("rubro", "mes_corte")) -> tuple[pd.Series, float]:
+    """Tasa base historica (train) por `cols` (por defecto rubro x mes_corte); respaldo =
+    tasa global de train. `cols` es parametrizable (ronda 3, mayor A) para poder proyectar
+    tambien a independientes/voluntarios, que no tienen rubro (siempre "SIN_EMPLEADOR"): ahi
+    se agrupa por `tipo_afiliado x mes_corte` en su lugar (ver `run._negocio_agregado_cartera_completa`)."""
+    cols = list(cols)
+    tasas = train.groupby(cols)[target].mean()
     return tasas, float(train[target].mean())
 
 
-def predecir_tasa_base(tasas: pd.Series, tasa_global: float, df: pd.DataFrame) -> np.ndarray:
-    idx = pd.MultiIndex.from_arrays([df["rubro"], df["mes_corte"]])
+def predecir_tasa_base(tasas: pd.Series, tasa_global: float, df: pd.DataFrame,
+                       cols: list[str] = ("rubro", "mes_corte")) -> np.ndarray:
+    cols = list(cols)
+    idx = pd.MultiIndex.from_arrays([df[c] for c in cols])
     return tasas.reindex(idx).fillna(tasa_global).to_numpy()
 
 

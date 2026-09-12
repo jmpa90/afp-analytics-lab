@@ -71,6 +71,24 @@ def curva_calibracion(df: pd.DataFrame, col_y: str, col_pred: str, n_deciles: in
     return g.reset_index()
 
 
+def ece(calib: pd.DataFrame) -> float:
+    """Expected Calibration Error: promedio de `error_abs` por decil, ponderado por `n`.
+    Documentacion (ronda 2 de revision, punto C/D): un ECE bajo con una curva NO monotona
+    por decil (p. ej. reingreso, donde el error se concentra en deciles intermedios y no
+    crece ni decrece con el riesgo) sigue siendo util para agregados (sumar
+    probabilidades) y para rankear (ordenar por riesgo), pero NO garantiza que la
+    probabilidad de una fila individual sea fiable al pie de la letra en esa zona."""
+    return float(np.average(calib["error_abs"], weights=calib["n"]))
+
+
+def es_calibracion_monotona(calib: pd.DataFrame) -> bool:
+    """True si `obs_tasa` es no decreciente decil a decil (calibracion "bien portada").
+    Si es False (como en reingreso), la probabilidad calibrada solo debe usarse para
+    agregados y para rankear, no como una lectura literal por individuo (ver README)."""
+    obs = calib.sort_values("decil")["obs_tasa"].to_numpy()
+    return bool(np.all(np.diff(obs) >= -1e-9))
+
+
 def metrica_negocio_agregado(df: pd.DataFrame, col_y: str, col_pred: str,
                              col_corte: str = "periodo_corte") -> pd.DataFrame:
     """Numero esperado (suma de probabilidades calibradas) vs. real de casos positivos,
@@ -109,6 +127,21 @@ def cobertura_poblacion_cese(dataset: pd.DataFrame, panel: pd.DataFrame,
     out = pd.DataFrame(filas)
     out["factor_correccion"] = 1.0 / out["cobertura"]
     return out
+
+
+def diagnostico_cese_por_tipo_afiliado(dataset: pd.DataFrame, target: str, horiz_col: str) -> pd.DataFrame:
+    """Cuanto pesa cada `tipo_afiliado` en los ceses REALES de toda la cartera (activos hoy,
+    `rim_l1 > 0`), sobre el dataset COMPLETO (los 24 cortes, no solo los 3 de test: es un
+    diagnostico descriptivo de la poblacion, no depende del split y es mucho mas estable
+    que mirarlo solo en 3 meses de test). Mayor A, ronda 2 de revision: cuantifica por que
+    excluir independientes y voluntarios del modelo dejaba un agregado de negocio
+    incompleto (~88 % de cobertura en y3)."""
+    activos = dataset[(dataset["rim_l1"] > 0) & dataset[horiz_col]]
+    t = activos.groupby("tipo_afiliado").agg(n_cotizantes=(target, "size"), n_ceses=(target, "sum"))
+    t["pct_cotizantes"] = 100 * t["n_cotizantes"] / t["n_cotizantes"].sum()
+    t["pct_ceses"] = 100 * t["n_ceses"] / t["n_ceses"].sum()
+    t["tasa_cese"] = t["n_ceses"] / t["n_cotizantes"]
+    return t.reset_index()
 
 
 def metrica_negocio_captura(df: pd.DataFrame, col_y: str, col_pred: str, frac: float = 0.10) -> dict[str, float]:

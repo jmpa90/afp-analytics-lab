@@ -9,20 +9,21 @@ cambios de fondo, uso digital, contactos, reclamos, antiguedad en la AFP, aporte
 voluntarios. `evaluate.py` usa ademas las tablas `traspasos` (02) y `aportes_voluntarios`
 (03) para la validacion de utilidad de negocio (tasa de traspaso / aporte APV por segmento).
 
-**Limitacion documentada (no se puede evitar sin modificar 02/03, fuera de alcance)**:
-`churn_traspaso.generar_tablas` y `propension_apv.generar_tablas` llaman a
-`synth_base.generar_universo(..., seed=seed)` **sin** parametro `perfil` (siempre
-"sistema"), mientras que este proyecto usa `perfil="cuprum"` para su propio universo. Con
-el mismo `n_afiliados`, `periodo_inicio` y `seed`, el `afiliado_id` k-esimo existe en los
-tres universos y las features nucleo (de nuestro universo `cuprum`) describen al mismo
-afiliado en todos los cortes, pero el `afiliado_id` k-esimo de las tablas 02/03
-corresponde a una simulacion PARALELA con perfil `sistema` (otros sorteos de edad, renta,
-rubro, etc. desde el mismo punto del generador de numeros aleatorios) y no a la misma
-persona con exactitud demografica. Se documenta y se acota su uso a las features y a la
-validacion de negocio que el brief pide explicitamente sacar de esas tablas (no a las
-features nucleo del segmento, que son 100 % del universo `cuprum` propio). Ver README
-"Decisiones tomadas" y la propuesta a `common/` (que 02/03 acepten un `universo` inyectado
-o un parametro `perfil`) en "Propuestas para `common/`".
+**Limitacion de perfil, RESUELTA (ronda 2, seguimiento post-fusion a main)**: hasta la
+entrega anterior, `churn_traspaso.generar_tablas` y `propension_apv.generar_tablas` no
+aceptaban `perfil` y siempre construian su propio universo "sistema", distinto del
+`cuprum` propio de este proyecto (mismo `afiliado_id` k-esimo, pero NO la misma persona
+demografica). Ambos generadores ya aceptan `perfil` en `main` (fusionado de las rondas de
+churn_traspaso/propension_apv). Ninguno de los dos acepta ademas un `universo` inyectado
+(siguen llamando a `synth_base.generar_universo` por su cuenta), pero como esa funcion es
+determinista, pasarles el MISMO `n_afiliados`/`periodo_inicio`/`periodo_fin`/`seed` y
+`perfil="cuprum"` que usa `generar_datos` (mismos valores por defecto en ambos: no pisan
+`lote` ni `afiliados_por_empleador`) reconstruye el universo IDENTICO al propio, verificado
+con `afiliados.equals(...)` y `panel_mensual.equals(...)` (ver
+`tests/test_segmentacion.py::test_tablas_externas_mismo_universo_que_propio`). Costo: se
+recalcula el universo comun 3 veces (rapido, ~2 s cada uno a 20 000 afiliados) en vez de
+reusarlo — aceptable frente a modificar 02/03 para aceptarlo inyectado (que seguiria
+siendo la mejora ideal, ver "Propuestas para `common/`", ahora ya no bloqueante).
 """
 from __future__ import annotations
 
@@ -65,16 +66,19 @@ def generar_datos(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo
 
 
 def generar_tablas_externas(n_afiliados: int = 5000, periodo_inicio: int = 202201,
-                            periodo_fin: int = 202609, seed: int = 42) -> dict[str, pd.DataFrame]:
+                            periodo_fin: int = 202609, seed: int = 42,
+                            perfil: str = "cuprum") -> dict[str, pd.DataFrame]:
     """Tablas de los proyectos 02 y 03, importadas sin modificarlas, con el MISMO
-    `n_afiliados`/`periodo_inicio`/`seed` que `generar_datos` para que el `afiliado_id`
-    k-esimo exista en los tres universos (ver limitacion documentada arriba). Namespacing
-    con prefijo `churn_`/`apv_` para no confundir columnas homonimas (ambos proyectos
-    generan una tabla `saldos`, con columnas distintas)."""
+    `n_afiliados`/`periodo_inicio`/`periodo_fin`/`seed`/`perfil` que `generar_datos`: al ser
+    `generar_universo` determinista, esto reconstruye el universo IDENTICO al propio dentro
+    de 02 y 03 (ver limitacion RESUELTA en el docstring del modulo) — el `afiliado_id`
+    k-esimo es la misma persona en los tres. Namespacing con prefijo `churn_`/`apv_` para no
+    confundir columnas homonimas (ambos proyectos generan una tabla `saldos`, con columnas
+    distintas)."""
     churn = _generar_tablas_churn(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                                  periodo_fin=periodo_fin, seed=seed)
+                                  periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     apv = _generar_tablas_apv(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                              periodo_fin=periodo_fin, seed=seed)
+                              periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     return {
         "churn_saldos": churn["saldos"],
         "churn_cambios_fondo": churn["cambios_fondo"],

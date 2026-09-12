@@ -21,20 +21,15 @@ previsional — decisiones operativas mensuales, no un modelo de riesgo de un ev
   `afp_lab.propension_apv.synthetic.generar_tablas` (saldo voluntario, aportes voluntarios,
   campañas). Se llaman con el **mismo** `n_afiliados`/`periodo_inicio`/`seed` que el universo propio
   para que el `afiliado_id` k-ésimo exista en los tres universos.
-* **Limitación documentada (no evitable sin tocar 02/03, fuera de alcance de esta ronda)**:
-  `churn_traspaso.generar_tablas` y `propension_apv.generar_tablas` llaman a `generar_universo(...,
-  seed=seed)` **sin** `perfil` (siempre "sistema"), mientras este proyecto usa `perfil="cuprum"`. El
-  `afiliado_id` k-ésimo existe en los tres universos, pero en 02/03 corresponde a una simulación
-  PARALELA con perfil "sistema" (otros sorteos de edad, renta, rubro, etc. desde el mismo punto del
-  generador de números aleatorios), no a la misma persona con exactitud demográfica. Por eso:
-  * Las features **núcleo** del segmento (renta, densidad, estabilidad, edad, saldo aproximado,
-    §4) son 100 % del universo `cuprum` propio — internamente consistentes entre sí.
-  * Las features y la validación de negocio que usan 02/03 (saldo/fondo, cambios de fondo, uso
-    digital, contactos, reclamos, ahorro voluntario, tasa de traspaso y de aporte APV) heredan esta
-    limitación: describen "el afiliado con este número de índice" en una cartera paralela
-    equivalente en tamaño y estructura, no exactamente a la misma persona. Se documenta y se acota
-    (no se puede evitar sin modificar 02/03 — ver "Propuestas para `common/`", §10).
-  * La tasa de **cese** (única sacada 100 % del panel propio) no tiene esta limitación.
+* **Limitación de perfil, RESUELTA (seguimiento post-fusión a `main`)**: hasta la entrega anterior,
+  `churn_traspaso.generar_tablas`/`propension_apv.generar_tablas` no aceptaban `perfil` y
+  construían su propio universo "sistema", paralelo al `cuprum` propio (mismo `afiliado_id`
+  k-ésimo, no la misma persona demográfica). Ambos ya aceptan `perfil` en `main`; ninguno acepta
+  además un `universo` inyectado, pero como `generar_universo` es determinista, llamarlos con el
+  MISMO `n_afiliados`/`periodo_inicio`/`periodo_fin`/`seed`/`perfil="cuprum"` que el universo
+  propio reconstruye el universo IDÉNTICO dentro de 02/03 (verificado con `.equals(...)` en
+  `tests/test_segmentacion.py::test_tablas_externas_mismo_universo_que_propio`). El `afiliado_id`
+  k-ésimo es ahora la misma persona en los tres — ya no hay features "de segunda mano".
 
 ## 3. Features "as-of", corte de referencia y horizonte
 
@@ -59,11 +54,11 @@ es sobre TODA la cartera de Cuprum).
 | Estabilidad laboral | `racha_cotiza_m` (meses consecutivos cotizando), `n_empleadores_12` | Panel propio | Hasta `corte-2` |
 | Edad y pensión | `edad`, `meses_hasta_pension` | Afiliados propio (dato calendario, sin desfase) | — |
 | Saldo obligatorio | `log_saldo_aprox`, `saldo_renta_ratio` | Panel propio, **fórmula cerrada** (ver §8, no una simulación mes a mes) | Hasta `corte-2` |
-| Ahorro voluntario | `log_apv_saldo` (stock), `log_apv_flujo_6m` (flujo 6 m) | `propension_apv.saldos`/`aportes_voluntarios` (⚠ perfil, §2) | Hasta `corte` |
-| Fondo | `fondo_ord` (E=0…A=4), `n_cambios_fondo_12` | `churn_traspaso.saldos`/`cambios_fondo` (⚠ perfil) | Hasta `corte` |
-| Uso digital | `log_uso_digital_3m` (logins+consultas, 3 m) | `churn_traspaso.uso_digital` (⚠ perfil) | Hasta `corte` |
-| Contacto/reclamo | `contactos_12`, `reclamos_12` | `churn_traspaso.contactos`/`reclamos` (⚠ perfil) | Hasta `corte` |
-| Antigüedad AFP | `log_antiguedad_afp` | `churn_traspaso.saldos` (⚠ perfil) | Hasta `corte` |
+| Ahorro voluntario | `log_apv_saldo` (stock), `log_apv_flujo_6m` (flujo 6 m) | `propension_apv.saldos`/`aportes_voluntarios` | Hasta `corte` |
+| Fondo | `fondo_ord` (E=0…A=4), `n_cambios_fondo_12` | `churn_traspaso.saldos`/`cambios_fondo` | Hasta `corte` |
+| Uso digital | `log_uso_digital_3m` (logins+consultas, 3 m) | `churn_traspaso.uso_digital` | Hasta `corte` |
+| Contacto/reclamo | `contactos_12`, `reclamos_12` | `churn_traspaso.contactos`/`reclamos` | Hasta `corte` |
+| Antigüedad AFP | `log_antiguedad_afp` | `churn_traspaso.saldos` | Hasta `corte` |
 | Tipo de afiliado | `es_independiente`, `es_voluntario`, `es_pensionado_activo` (dummies; DEPENDIENTE es la base) | Afiliados propio | — |
 
 19 features numéricas (`FEATURES_CLUSTERING`) entran al espacio de clustering, reescaladas con
@@ -97,143 +92,146 @@ cardinalidad).
 
 ## 6. Resultados (`n_afiliados=20 000`, seed=42, perfil `cuprum`, corte=202509)
 
+**Corrida vigente (post-fix de perfil en 02/03, ver §2)**. Los números de la corrida anterior
+(cuando 02/03 aún generaban su propio universo "sistema" paralelo) quedan en el historial de git;
+aquí solo el resultado final.
+
 ### Selección de k (tabla completa; k-means y GMM, k=5…9)
 
 | Algoritmo | k | Silueta | ARI re-muestreo | ARI temporal (corte-6) | Segmentos ≥ 3 % |
 |---|---:|---:|---:|---:|---|
-| kmeans | 5 | 0,224 | 0,974 | 0,704 | No |
-| kmeans | 6 | 0,236 | 0,980 | 0,602 | No |
-| **kmeans** | **7 (ganador)** | **0,240** | **0,991** | 0,576 | No |
-| kmeans | 8 | 0,225 | 0,973 | 0,544 | No |
-| kmeans | 9 | 0,220 | 0,781 | 0,515 | No |
-| gmm | 5–9 | 0,10–0,18 | 0,68–1,00 | 0,25–0,51 | No |
+| **kmeans** | **5 (ganador)** | **0,271** | **0,987** | 0,465 | No |
+| kmeans | 6 | 0,267 | 0,990 | 0,496 | No |
+| kmeans | 7 | 0,261 | 0,965 | 0,446 | No |
+| kmeans | 8 | 0,261 | 0,928 | 0,431 | No |
+| kmeans | 9 | 0,174 | 0,968 | 0,443 | No |
+| gmm | 5–9 | 0,10–0,23 | 0,60–0,85 | 0,23–0,47 | No |
 
-k-means gana en silueta y en ARI de re-muestreo en los 5 valores de k probados; GMM (covarianza
-diagonal) da siluetas más bajas y BIC que no converge a un óptimo claro en el rango — se reporta
-igual por completitud, pero no fue elegido en ningún k. **Ninguno de los 10 (algoritmo, k)
-evaluados deja los 5-9 segmentos todos sobre el piso de 3 %**: siempre queda un sub-grupo chico y
-genuino (afiliados sin RIM ni empleador conocido — ver segmento 3 más abajo) por debajo. Se aplicó
-la fusión del punto 3: **k baja de 7 a 6**, con silueta final **0,2065** (por encima del umbral de
-0,20, pero por poco — ver §8).
+k-means vuelve a ganar en silueta y ARI de re-muestreo en los 5 k probados. Con el universo real
+de Cuprum ya compartido por los tres generadores, la silueta sube en todo el rango (antes
+0,10-0,24; ahora 0,17-0,27) — la cartera real separa mejor que la mezcla con el universo "sistema"
+paralelo. Sigue sin haber un k en [5,9] que deje todos los segmentos ≥ 3 % a la vez, así que se
+aplica la misma fusión de segmentos chicos: **k baja de 5 a 4**, silueta final **0,2395** (antes:
+k 7→6, silueta 0,2065 — mejora clara).
 
 ### Aceptación (post-fusión)
 
-| Criterio | Valor | Umbral | Cumple |
-|---|---:|---:|---|
-| Silueta | 0,2065 | ≥ 0,20 | Sí (margen estrecho, ver §8) |
-| ARI de re-muestreo | 0,991 (del k=7 ganador; la fusión no reajusta el modelo) | ≥ 0,60 | Sí |
-| Todos los segmentos ≥ 3 % | mínimo 5,1 % (segmento 0) | — | Sí (tras la fusión) |
-| Separación de negocio (≥ 2 de 3 tasas, razón máx/mín ≥ 2) | 3 de 3 (ver tabla abajo) | ≥ 2 de 3 | Sí |
-| Exactitud del clasificador | 0,9834 | ≥ 0,85 | Sí |
-| Runtime (20 000 afiliados) | 89,3 s | < 5 min | Sí |
-| Tests | 13, 2,7 s | < 2 min | Sí |
+| Criterio | Antes (universo paralelo) | Ahora (universo compartido) | Umbral | Cumple |
+|---|---:|---:|---:|---|
+| k final | 6 (de 7) | **4 (de 5)** | 5–9 antes de fusión | — |
+| Silueta | 0,2065 | **0,2395** | ≥ 0,20 | Sí |
+| ARI de re-muestreo | 0,991 | 0,987 | ≥ 0,60 | Sí |
+| ARI temporal, recalculado post-fusión | *(no calculado)* | **0,4655** (antes de fusión: 0,4647) | reportado, no gatilla aceptación (ver §8) | — |
+| Todos los segmentos ≥ 3 % | mínimo 5,1 % | mínimo **15,0 %** | — | Sí |
+| Separación de negocio (razón máx/mín) | 3/3, hasta 16,7× | **3/3**, hasta 30,7× (mín 2,08×) | ≥ 2 de 3 | Sí |
+| Exactitud del clasificador | 0,9834 | **0,9812** | ≥ 0,85 | Sí |
+| Runtime (20 000 afiliados) | 89,3 s | **90,8 s** | < 5 min | Sí |
+
+Nota del gerente: la columna "Antes" reproduce la entrega anterior de DS-3. La corrida de
+control de esa misma versión en `main` (commit 2c35143, `--n-afiliados 20000`) dio k 6→5,
+silueta 0,2179, ARI re-muestreo 0,989 y exactitud 0,982: variación menor entre corridas de la
+versión con universo paralelo, sin efecto en las conclusiones. La columna "Ahora" fue
+reproducida por el gerente (k 5→4, silueta 0,2395, ARI temporal 0,4655, 3/3, exactitud 0,9812).
+| Tests | 13, 2,7 s | **14, 3,1 s** | < 2 min | Sí |
 
 ### Perfil de segmentos (medianas; `n`/`%` sobre 19 575 afiliados activos al corte)
 
 | Seg. | n (%) | Renta | Densidad 12m | Racha (m) | Edad | Antigüedad AFP (m) | Saldo aprox. | Saldo APV | Fondo típico |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---|
-| 0 | 1 004 (5,1 %) | $1.362.412 | 100 % | 7 | 45 | **0** | $2.626.315 | $0 | C (86 %) |
-| 1 | 1 608 (8,2 %) | $1.696.387 | 100 % | 17 | 45 | 122 | $6.003.261 | **$2.145.393** | C/B/A |
-| 2 | 4 732 (24,2 %) | $1.573.192 | 100 % | 18 | **36** | 141 | $5.793.874 | $0 | **A/B (92 %)** |
-| 3 | 3 846 (19,6 %) | **$0** | **17 %** | 0 | 49 | 127 | $2.183.752 | $0 | C/D |
-| 4 | 2 360 (12,1 %) | $1.583.347 | 100 % | 19 | 42 | 78 | $5.902.848 | $0 | C/B |
-| 5 | 6 025 (30,8 %) | **$1.978.281** | 100 % | 24 | 49 | 137 | **$7.001.428** | $0 | **C/D/E (95 %)** |
+| 0 | 7 121 (36,4 %) | $1.794.378 | 100 % | 24 | 48 | 52 | $6.027.989 | $0 | C/D (88 %) |
+| 1 | 2 940 (15,0 %) | **$3.027.956** | 100 % | 24 | 45 | 69 | **$10.258.425** | **$3.363.102** | C (51 %) |
+| 2 | 4 576 (23,4 %) | $1.366.357 | 100 % | 12 | **35** | 97 | $5.276.015 | $0 | **A/B (89 %)** |
+| 3 | 4 938 (25,2 %) | **$0** | **17 %** | 0 | 48 | 59 | $2.271.842 | $0 | C/D (80 %) |
 
 ### Tasas de negocio por segmento (validación de utilidad, brief §4)
 
 | Seg. | Cese 3 m | Traspaso 6 m | Aporte APV 6 m |
 |---:|---:|---:|---:|
-| 0 | 7,2 % | 3,5 % | 4,5 % |
-| 1 | 5,2 % | 2,6 % | **65,9 %** |
-| 2 | 5,9 % | 2,6 % | 4,3 % |
-| 3 | **10,8 %** | 1,7 % | 4,0 % |
-| 4 | 4,4 % | **0,2 %** | 6,4 % |
-| 5 | 4,9 % | 1,8 % | 4,8 % |
-| **razón máx/mín** | **2,42** | **16,66** | **16,36** |
+| 0 | 5,3 % | 2,6 % | 11,8 % |
+| 1 | **3,3 %** (mín.) | **3,1 %** (máx.) | **70,2 %** (máx.) |
+| 2 | 6,2 % | 2,1 % | 8,4 % |
+| 3 | **11,3 %** (máx.) | 1,5 % (mín.) | 2,3 % (mín.) |
+| **razón máx/mín** | **3,38** | **2,08** | **30,69** |
 
-Las 3 tasas separan con razón ≥ 2 entre el segmento de mayor y menor valor (el brief exige al menos
-2 de 3): el aporte APV lo domina casi por completo el segmento 1 (65,9 % vs. 4,0-6,4 % del resto) y
-el traspaso lo evita casi por completo el segmento 4 (0,2 % vs. 1,7-3,5 %) — dos separaciones muy
-por encima del mínimo, más una separación moderada (2,42×) en cese.
+Las 3 tasas separan con razón ≥ 2 (el brief exige al menos 2 de 3): el aporte APV lo domina el
+segmento 1 (70,2 % vs. 2,3-11,8 % del resto, razón 30,7×) y el cese lo concentra el segmento 3
+(11,3 % vs. 3,3-6,2 %, razón 3,4×). El traspaso separa por poco (razón 2,08×, el segmento premium
+1 es el más propenso a irse) — el margen más estrecho de los tres, a diferencia de la corrida
+anterior (16,7×): con el universo real, el comportamiento de traspaso de los distintos perfiles de
+Cuprum es más parecido entre sí de lo que sugería mezclarlo con el universo "sistema" paralelo.
 
 ### Clasificador explicativo (LightGBM, importancias top 10 de 25 features)
 
 | Feature | Ganancia (%) |
 |---|---:|
-| `log_uso_digital_3m` | 19,2 |
-| `log_apv_flujo_6m` | 18,1 |
-| `fondo_ord` | 17,1 |
-| `densidad_12` | 16,5 |
-| `log_antiguedad_afp` | 11,1 |
-| `edad` | 4,6 |
-| `meses_hasta_pension` | 4,0 |
-| `log_saldo_aprox` | 2,7 |
-| `densidad_24` | 2,7 |
-| `log_renta` | 2,0 |
+| `log_apv_flujo_6m` | 31,9 |
+| `fondo_ord` | 23,0 |
+| `densidad_12` | 22,5 |
+| `edad` | 7,0 |
+| `densidad_24` | 3,1 |
+| `log_saldo_aprox` | 3,1 |
+| `meses_hasta_pension` | 2,8 |
+| `log_renta` | 2,6 |
+| `racha_cotiza_m` | 1,8 |
+| `n_empleadores_12` | 0,7 |
 
-Exactitud 0,9834 (train 14 681, test 4 894, split aleatorio estratificado): el clasificador
-reproduce casi perfectamente el clustering, lo esperable cuando ve las mismas features con las que
-se ajustó (sirve para explicar en reglas y para asignar afiliados nuevos sin reclusterizar, no para
-"predecir" nada nuevo). El uso digital y el flujo de APV son, con margen, las señales más
-discriminantes — más que la renta misma.
+Exactitud 0,9812 (train 14 681, test 4 894, split aleatorio estratificado). El flujo de APV, el
+fondo y la densidad de cotización concentran el 77 % de la ganancia — mucho más concentrado que en
+la corrida anterior (donde el uso digital lideraba): con el universo real, el comportamiento de
+ahorro/cotización manda por sobre el uso de canales digitales.
 
 ### Matriz de transición (fracción de cada segmento de origen que termina en cada destino)
 
-A 6 meses, la diagonal va de 66 % (segmento 1) a 85 % (segmento 5): la mayoría se queda en su
-segmento, con fugas concentradas hacia el segmento 1 (ahorradores) desde casi todos los demás — es
-de esperar dado que APV es la variable más volátil mes a mes. A 12 meses la diagonal baja un poco
-más (58-80 %), consistente con más tiempo para migrar. Tablas completas en
+A 6 meses, la diagonal va de 70 % (segmento 1) a 83 % (segmento 2): la mayoría se queda en su
+segmento; el segmento 1 (ahorradores premium) es el que más migra hacia el 0 (18 %). A 12 meses la
+diagonal baja un poco más (63-82 %). Tablas completas en
 `salidas/segmentacion_afiliados/reportes/transicion_{6,12}m.csv`.
 
 ## 7. Lectura de negocio: segmento → descripción → acción
 
 | Segmento | % cartera | Descripción | Acción |
 |---|---:|---|---|
-| **0 · Recién llegados** | 5,1 % | Antigüedad en la AFP ≈ 0, racha de cotización corta (7 m), renta media, **sin uso digital ni contactos, sin APV**. | Onboarding activo (registro app, bienvenida), evaluar match de APVC del empleador, primer contacto comercial temprano. |
-| **1 · Ahorradores voluntarios** | 8,2 % | Renta alta, ~10 años en la AFP, saldo APV mediano $2,1 M, **65,9 % aportó APV en 6 m** (el resto del sistema: 4-6 %), uso digital y contactos moderados. | Retención personalizada (mayor riesgo de fuga de valor si se van), venta cruzada de Régimen B / asesoría patrimonial, prioridad para ejecutivo propio. |
-| **2 · Núcleo joven en acumulación** | 24,2 % | El segmento activo más numeroso: edad mediana 36, ~26 años a la pensión, fondo A/B en el 92 % (tolerancia al riesgo propia de la etapa), mayor antigüedad AFP entre los activos, **sin APV**. | Educación financiera + oferta de APV (potencial sin explotar), fidelización de largo plazo, canal digital-first. |
-| **3 · Intermitentes / riesgo de inactividad** | 19,6 % | Renta y densidad actuales muy bajas (mediana de renta $0, densidad 17 %), mayor mezcla de independientes/voluntarios/pensionados que el resto, **la tasa de cese a 3 m más alta (10,8 %)**. | Cobranza/reactivación proactiva, prioridad de retención de cotización, revisar elegibilidad AFC y vías de aporte alternativas (independiente/voluntario). |
-| **4 · Estables silenciosos** | 12,1 % | Cotización estable (densidad 100 %, racha 19 m), tenencia media (6,5 años), **la tasa de traspaso a 6 m más baja del sistema (0,2 %)**, pero sin uso digital ni contactos recientes. | No está en riesgo de fuga — oportunidad de venta cruzada sin explotar: activación digital y oferta de APV vía transferencia (no tienen descuento por planilla activo). |
-| **5 · Preretiro de alto valor** | 30,8 % | El segmento más grande: mayor renta ($2,0 M) y mayor saldo aproximado ($7,0 M), edad mediana 49, ~13 años a la pensión, fondo conservador (C/D/E en el 95 %). | Asesoría previsional (glide path hacia fondos generacionales, vigentes desde 2027), foco de retención ante la licitación de stock de 2027-2028 (afecta a los no pensionados, y este es el segmento de mayor valor en riesgo), revisión de comisión/beneficios VIP. |
+| **0 · Núcleo estable, ingreso medio** | 36,4 % | El segmento más grande: renta media-alta, cotización continua (racha 24 m), fondo conservador-moderado (C/D 88 %), antigüedad AFP baja-media (4,3 años), **sin APV**. | Oferta de APV (mayor potencial sin explotar por volumen), fidelización estándar, venta cruzada de productos según rubro (salud es el más común aquí). |
+| **1 · Ahorradores premium** | 15,0 % | Renta y saldo más altos de la cartera ($3,0 M / $10,3 M), **70,2 % aportó APV en 6 m** (el resto: 2-12 %), pero también la **tasa de traspaso más alta (3,1 %)** y la de cese más baja (3,3 %). | Retención prioritaria de valor (mayor riesgo de fuga en $ administrados), asesoría patrimonial dedicada, vigilar especialmente ante la licitación de stock 2027-2028 (es el segmento de mayor valor en riesgo). |
+| **2 · Joven en acumulación** | 23,4 % | El más joven (edad mediana 35), mayor horizonte a la pensión (28 años), fondo A/B en el 89 % (tolerancia al riesgo propia de la etapa), racha de cotización más corta (12 m, algo más de rotación reciente), **sin APV**. | Educación financiera + oferta de APV de entrada, fidelización de largo plazo, canal digital-first. |
+| **3 · Intermitentes / riesgo de inactividad** | 25,2 % | Renta y densidad actuales muy bajas (mediana de renta $0, densidad 17 %), sin racha de cotización vigente, **la tasa de cese a 3 m más alta (11,3 %)** y la de aporte APV más baja (2,3 %). | Cobranza/reactivación proactiva, prioridad de retención de cotización, revisar vías de aporte alternativas (independiente/voluntario) y elegibilidad AFC. |
 
 ## 8. Decisiones tomadas, supuestos y limitaciones
 
-* **Perfil `cuprum` vs. tablas 02/03 en perfil `sistema`**: ver §2. Es la limitación más importante
-  del proyecto; no se puede cerrar sin modificar `churn_traspaso`/`propension_apv` (fuera de
-  alcance — ver propuesta en §10).
+* **Perfil `cuprum` en 02/03: RESUELTO** (ver §2). Ya no hay features "de segunda mano": las 19
+  features de clustering (núcleo + externas) describen a la misma persona en las tres fuentes.
 * **`saldo_aprox` es una fórmula cerrada**, no una simulación mes a mes: valor futuro de una
   anualidad (`TASA_COTIZACION_OBLIGATORIA × renta media histórica`, capitalizada
   `TASA_MENSUAL_CAPITALIZACION=0,40 %` mensual real por los meses efectivamente cotizados desde
   `periodo_inicio` hasta `corte-2`). Da el orden de magnitud relativo entre afiliados (suficiente
   para segmentar), no un saldo exacto — un proyecto de capitalización dedicado lo simularía mes a
-  mes con rentabilidad variable por fondo, como hacen 02/03 con SU propio universo.
-* **Silueta post-fusión (0,2065) pasa el umbral (0,20) por un margen estrecho**: con 19 features
-  bastante heterogéneas (renta, edad, fondo, uso digital, ahorro voluntario) es esperable que los
-  segmentos no queden perfectamente esféricos/separados — una silueta de 0,20-0,25 es normal para
-  clustering de comportamiento con muchas dimensiones débilmente correlacionadas entre sí (no es
-  un artefacto: los 3 chequeos de negocio del §6 sí separan con margen amplio, así que los
-  segmentos "significan algo" aunque geométricamente no estén perfectamente aislados).
-* **ARI temporal (6 meses) más modesto que el ARI de re-muestreo** (0,58 del ganador k=7 vs. 0,99):
-  el criterio de aceptación del brief ("ARI de estabilidad ≥ 0,60") se satisface con el ARI de
-  **re-muestreo** (el estándar de Ben-Hur/Elisseeff/Guyon para "¿esta metodología encuentra la
-  misma estructura si la vuelvo a estimar?"); el ARI **entre cortes separados 6 meses** es más
-  bajo porque, a diferencia del re-muestreo (misma población, mismo corte), ahí se suma un
-  ingrediente real: el comportamiento de las personas efectivamente cambia en 6 meses (alguien deja
-  de cotizar, empieza a aportar APV, cambia de fondo) — parte de esa caída de ARI es deriva
-  genuina del negocio, no solo ruido de estimación. Se reporta igual, sin forzarlo al umbral, para
-  no esconder que la partición es más estable "estimándola de nuevo" que "6 meses después". No se
-  recalculó tras la fusión de segmentos chicos (la fusión solo reetiqueta, no reajusta el modelo).
-* **Fusión de segmentos chicos** (§5/§6): ninguno de los 10 (algoritmo, k) probados en [5,9] deja
-  todos los segmentos ≥ 3 % a la vez — el segmento de afiliados sin RIM ni empleador conocido
-  (bajísima densidad, la semilla del actual segmento 3) aparece como un grupo chico y genuino en
-  casi cualquier k. Fusionarlo con su vecino más parecido (misma práctica que un analista humano
-  aplicaría) es más razonable que forzar una partición peor solo para que un k marginal cumpla el
-  piso, o que reportar un segmento que no cumple el criterio de negocio sin decirlo.
+  mes con rentabilidad variable por fondo, como hacen 02/03 con SU propio universo. Esta
+  limitación NO se cierra con el fix de perfil (es una decisión de diseño de este proyecto, no una
+  consecuencia de usar universos distintos).
+* **Silueta post-fusión (0,2395) supera con más margen el umbral (0,20)** que antes del fix de
+  perfil (0,2065): con el universo real de Cuprum compartido, la cartera separa mejor en el
+  espacio de 19 features que al mezclarla con el ruido de un universo "sistema" paralelo — aun así
+  no es una silueta "alta" en términos absolutos (clustering de comportamiento con features
+  heterogéneas y débilmente correlacionadas rara vez da siluetas > 0,3-0,4); los 3 chequeos de
+  negocio del §6 son los que confirman que los segmentos "significan algo" para el negocio.
+* **ARI temporal (6 meses), ahora recalculado sobre la partición FINAL (post-fusión)**: 0,4655
+  (antes de fusión, mismo k=5: 0,4647 — la fusión casi no cambia el número, coherente con que solo
+  reetiqueta). Sigue siendo más bajo que el ARI de re-muestreo (0,987): el criterio del brief ("ARI
+  de estabilidad ≥ 0,60") se satisface con el de **re-muestreo** (Ben-Hur/Elisseeff/Guyon: "¿esta
+  metodología encuentra la misma estructura si la vuelvo a estimar?"); el ARI entre cortes
+  separados 6 meses mezcla eso con una deriva REAL del negocio (alguien deja de cotizar, empieza a
+  aportar APV, cambia de fondo en esos 6 meses) y por eso es, y debería ser, más bajo — no se
+  fuerza al umbral, se reporta tal cual.
+* **Fusión de segmentos chicos** (§5/§6): sigue siendo necesaria incluso con el universo real —
+  ningún (algoritmo, k) en [5,9] deja los 5-9 segmentos todos ≥ 3 % a la vez (aunque, con el
+  universo real, el segmento chico que sobra es bastante menos extremo que antes: el tamaño mínimo
+  post-fusión subió de 5,1 % a 15,0 %). Fusionarlo con su vecino más parecido sigue siendo más
+  razonable que forzar una partición peor solo para que un k marginal cumpla el piso.
 * **Todos los tipos de afiliado entran a la segmentación** (a diferencia del proyecto 04, que
   excluye independientes/voluntarios de sus modelos de riesgo): la pregunta de negocio aquí es
-  sobre TODA la cartera, y de hecho el segmento 3 (mayor tasa de cese) tiene una mezcla
-  notablemente distinta de tipos de afiliado que el resto (12,3 % independientes, 7,6 %
-  voluntarios, 2,8 % pensionados activos, vs. 0-1 % en los segmentos "activos").
+  sobre TODA la cartera; el segmento 3 (mayor tasa de cese) sigue teniendo una mezcla algo distinta
+  de tipos de afiliado que el resto (11,6 % independientes, 7,0 % voluntarios, 2,3 % pensionados
+  activos, vs. 0-0,6 % en los segmentos "activos").
 * **Clasificador con exactitud 0,98**: reproduce casi perfectamente el clustering porque ve las
   MISMAS features con las que se ajustó (no es una señal de que el negocio sea trivialmente
   predecible con datos externos — es la tarea que pide el brief: explicar y asignar afiliados
@@ -253,11 +251,11 @@ python -m afp_lab.segmentacion_afiliados.run --n-afiliados 20000
 python -m pytest afp_lab/segmentacion_afiliados/tests -q
 ```
 
-* `run.py` (`--n-afiliados 20000`, perfil `cuprum` por defecto): **89,3 s** en la corrida de
-  referencia de este informe (universo propio 2,2 s + tablas externas 7,2 s + features 1,4 s +
-  selección de k 71,6 s + clasificador 1,8 s + resto < 1 s). Muy por debajo del límite de 5
+* `run.py` (`--n-afiliados 20000`, perfil `cuprum` por defecto): **90,8 s** en la corrida de
+  referencia de este informe (universo propio 2,3 s + tablas externas 7,4 s + features 1,3 s +
+  selección de k 72,2 s + clasificador 1,3 s + resto < 1 s). Muy por debajo del límite de 5
   minutos.
-* `pytest afp_lab/segmentacion_afiliados/tests`: **13 tests, ~2,7 s**. Muy por debajo del límite de
+* `pytest afp_lab/segmentacion_afiliados/tests`: **14 tests, ~3,1 s**. Muy por debajo del límite de
   2 minutos.
 * `--salida` (por defecto `salidas/segmentacion_afiliados/`, en `.gitignore`):
   `dataset_segmentos.parquet` (19 575 filas con el segmento asignado) y `reportes/*.csv`
@@ -270,12 +268,10 @@ python -m pytest afp_lab/segmentacion_afiliados/tests -q
 
 **Propuestas para `common/` / otros proyectos** (no se tocó nada fuera de esta carpeta):
 
-* La limitación de perfil (§2/§8) se cerraría si `churn_traspaso.generar_tablas` y
-  `propension_apv.generar_tablas` aceptaran un `universo: dict | None = None` inyectado (o un
-  parámetro `perfil`), usándolo en vez de llamar a `generar_universo` por su cuenta cuando se
-  provee. Es un cambio pequeño y aditivo (parámetro opcional, comportamiento por defecto
-  intacto) que beneficiaría a cualquier proyecto futuro que necesite combinar el perfil `cuprum`
-  con las tablas de 02/03 sobre el MISMO universo.
+* `churn_traspaso.generar_tablas`/`propension_apv.generar_tablas` ya aceptan `perfil` (resuelto,
+  §2/§8). Sigue pendiente, como mejora ideal (no bloqueante): que acepten además un
+  `universo: dict | None = None` inyectado, para no recalcular el universo común 3 veces (hoy
+  ~2-3 s cada una a 20 000 afiliados — barato, pero innecesario si ya se tiene el universo a mano).
 * Una utilidad común de "fusión de clusters chicos por centroide" (`segmentar.
   fusionar_segmentos_chicos`) podría vivir en `afp_lab.common` si un futuro proyecto de clustering
   la necesita — hoy es propia de este proyecto.
@@ -284,12 +280,10 @@ python -m pytest afp_lab/segmentacion_afiliados/tests -q
 
 * Simular `saldo_aprox` mes a mes (como hacen 02/03) en vez de la fórmula cerrada, si se necesita
   precisión de monto y no solo de orden relativo entre afiliados.
-* Recalcular el ARI temporal DESPUÉS de la fusión de segmentos chicos (hoy se reporta el del k=7
-  pre-fusión) para tener el número exactamente correspondiente a la partición final de 6 segmentos.
 * Explorar features derivadas específicamente para separar mejor el segmento 3 (intermitentes) de
   los segmentos "activos" con fondo/edad similares — hoy se distingue sobre todo por renta/densidad
   actuales, que son ruidosas mes a mes; una historia de 24 meses (no solo el snapshot en `corte-2`)
   podría dar una silueta más alta.
-* Si se resuelve la propuesta de `common/` de arriba, repetir la validación de negocio (traspaso,
-  APV) sobre el universo `cuprum` real (no el paralelo "sistema") y comparar si las razones
-  máx/mín cambian.
+* El traspaso ahora separa por el margen más estrecho de las 3 tasas (2,08×, §6): vale la pena
+  revisar si una feature adicional (p. ej. brecha de comisión percibida, o contacto reciente de la
+  competencia) separaría mejor a los segmentos de mayor propensión a irse.

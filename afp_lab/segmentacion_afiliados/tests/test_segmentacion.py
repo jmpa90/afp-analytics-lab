@@ -45,6 +45,24 @@ def feats(tablas, externas):
 
 
 # --------------------------------------------------------------------------------- forma
+def test_tablas_externas_mismo_universo_que_propio(tablas, externas):
+    """Seguimiento de ronda 2: `churn_traspaso`/`propension_apv` ya aceptan `perfil`; con el
+    mismo n_afiliados/periodo/seed/perfil que `generar_datos`, `generar_universo` (determinista)
+    reconstruye el universo IDENTICO dentro de 02/03 — el afiliado_id k-esimo es la misma
+    persona en los tres, ya no una simulacion paralela distinta (limitacion resuelta)."""
+    from afp_lab.churn_traspaso.synthetic import generar_tablas as gt_churn
+    from afp_lab.propension_apv.synthetic import generar_tablas as gt_apv
+
+    churn = gt_churn(n_afiliados=N_AFILIADOS, periodo_inicio=PERIODO_INICIO,
+                     periodo_fin=PERIODO_FIN, seed=SEED, perfil="cuprum")
+    apv = gt_apv(n_afiliados=N_AFILIADOS, periodo_inicio=PERIODO_INICIO,
+                periodo_fin=PERIODO_FIN, seed=SEED, perfil="cuprum")
+    assert tablas["afiliados"].equals(churn["afiliados"])
+    assert tablas["panel_mensual"].reset_index(drop=True).equals(churn["panel_mensual"].reset_index(drop=True))
+    assert tablas["afiliados"].equals(apv["afiliados"])
+    assert tablas["panel_mensual"].reset_index(drop=True).equals(apv["panel_mensual"].reset_index(drop=True))
+
+
 def test_features_una_fila_por_afiliado(tablas, feats):
     activos = tablas["afiliados"][tablas["afiliados"]["periodo_afiliacion"] <= CORTE]
     assert len(feats) == len(activos)

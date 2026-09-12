@@ -15,7 +15,9 @@ import argparse
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from sklearn.metrics import adjusted_rand_score
 
 from .evaluate import (construir_targets_negocio, entrenar_clasificador, matriz_transicion,
                        perfil_segmentos, separacion_negocio, tasas_por_segmento)
@@ -58,7 +60,7 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
     t1 = time.time()
     print("Generando tablas externas (02 churn_traspaso, 03 propension_apv, sin modificarlas)...")
     externas = generar_tablas_externas(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                                       periodo_fin=periodo_fin, seed=seed)
+                                       periodo_fin=periodo_fin, seed=seed, perfil=perfil)
     print(f"  listo en {time.time() - t1:.1f}s")
 
     corte = _elegir_corte_referencia(periodo_inicio, periodo_fin)
@@ -99,6 +101,21 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
     print(f"Aceptacion final (post-fusion): silueta={silueta_final:.4f} (>=0,20), "
          f"ari_resampling={ganador.ari_resampling:.4f} (>=0,60), segmentos>=3%={tam_ok_final}, "
          f"cumple={cumple_final}")
+
+    # ARI temporal RECALCULADO sobre la particion final (post-fusion): un ajuste
+    # independiente en corte-6, con el mismo algoritmo/k del ganador, fusionado con el mismo
+    # criterio, y comparado por ARI contra `labels` (ya fusionado) sobre los afiliados
+    # presentes en ambos cortes. El `ganador.ari_temporal` de la tabla de seleccion es el del
+    # k SIN fusionar (7, en la corrida de referencia); este es el numero que corresponde a
+    # los k_final segmentos que de verdad se entregan.
+    labels_t6_raw, _, _ = ajustar(feats_t6, ganador.algoritmo, ganador.k, seed=seed + 500, scaler=scaler)
+    X_t6, _ = escalar(feats_t6, scaler)
+    labels_t6_fused, _ = fusionar_segmentos_chicos(X_t6, labels_t6_raw)
+    comunes, pos0, pos6 = np.intersect1d(feats["afiliado_id"].to_numpy(), feats_t6["afiliado_id"].to_numpy(),
+                                        return_indices=True)
+    ari_temporal_final = float(adjusted_rand_score(labels[pos0], labels_t6_fused[pos6]))
+    print(f"ARI temporal post-fusion (corte vs. corte-6, k={k_final} en ambos): {ari_temporal_final:.4f} "
+         f"(antes de la fusion, k={ganador.k}: {ganador.ari_temporal:.4f})")
 
     perfil_seg = perfil_segmentos(feats)
     perfil_seg.to_csv(salida_dir / "reportes" / "perfil_segmentos.csv", index=False)
@@ -142,7 +159,8 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
     print(f"\nRuntime total: {total:.1f}s. Salidas en {salida_dir.resolve()}")
     return {
         "tabla_k": tabla_k, "ganador": ganador, "k_final": k_final, "silueta_final": silueta_final,
-        "cumple_final": cumple_final, "mapa_fusion": mapa_fusion, "feats": feats,
+        "ari_temporal_final": ari_temporal_final, "cumple_final": cumple_final,
+        "mapa_fusion": mapa_fusion, "feats": feats,
         "perfil_segmentos": perfil_seg, "tasas_negocio": tasas, "separacion_negocio": sep,
         "clasificador": clas, "transicion_6m": trans6, "transicion_12m": trans12, "corte": corte,
         "modelo": modelo, "scaler": scaler,

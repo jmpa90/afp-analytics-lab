@@ -17,8 +17,9 @@ def metricas_regresion(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
         "n": int(len(y)),
         "mae": float(np.mean(np.abs(e))),
         "rmse": float(np.sqrt(np.mean(e ** 2))),
-        "wape": float(np.sum(np.abs(e)) / max(np.sum(np.abs(y)), 1e-9)),
-        "sesgo_agregado": float((pred.sum() - y.sum()) / max(y.sum(), 1e-9)),
+        # sin masa real en el grupo el WAPE y el sesgo relativo no estan definidos (NaN, no 1e17)
+        "wape": float(np.sum(np.abs(e)) / np.sum(np.abs(y))) if np.sum(np.abs(y)) > 0 else float("nan"),
+        "sesgo_agregado": float((pred.sum() - y.sum()) / y.sum()) if y.sum() > 0 else float("nan"),
     }
 
 

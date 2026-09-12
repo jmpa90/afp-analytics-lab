@@ -44,6 +44,9 @@ def metricas_clasificacion(y: np.ndarray, prob: np.ndarray) -> dict[str, float]:
 
 def tabla_metricas_por_segmento(df: pd.DataFrame, col_segmento: str, fn, col_y: str, col_pred: str) -> pd.DataFrame:
     filas = []
-    for seg, g in df.groupby(col_segmento):
+    # observed=True: con columnas category no se generan filas vacias (reportado por DS-1 y DS-2)
+    for seg, g in df.groupby(col_segmento, observed=True):
+        if len(g) == 0:
+            continue
         filas.append({col_segmento: seg, **fn(g[col_y].to_numpy(), g[col_pred].to_numpy())})
     return pd.DataFrame(filas)

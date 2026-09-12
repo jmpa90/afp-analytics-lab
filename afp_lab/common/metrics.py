@@ -24,7 +24,10 @@ def metricas_regresion(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
 
 def metricas_clasificacion(y: np.ndarray, prob: np.ndarray) -> dict[str, float]:
     y, prob = np.asarray(y, int), np.asarray(prob, float)
-    orden = np.argsort(-prob)
+    # desempate aleatorio reproducible: un score con muchos empates (reglas binarias) no debe
+    # beneficiarse ni perjudicarse por el orden de las filas
+    rng = np.random.default_rng(0)
+    orden = np.lexsort((rng.random(len(prob)), -prob))
     top = orden[: max(1, len(y) // 10)]
     base = y.mean() if y.mean() > 0 else 1e-9
     # KS: distancia maxima entre las distribuciones acumuladas de positivos y negativos

@@ -695,7 +695,11 @@ Cambios estructurales de esta ronda, antes de los resultados:
    afiliados antiguos entren por traspaso durante la ventana** para reproducir el saldo neto positivo
    de la Ficha. Es el supuesto más fuerte del perfil.
 
-**Tensión de calibración que hay que resolver con el gerente.** El brief de la ronda 1 pedía 4–7 %
+**Tensión de calibración, resuelta por el gerente en la revisión de la ronda 2: manda la Ficha.** El
+rango 4–7 % de la ronda 1 era un prior; la cifra oficial es 0,47 % mensual sobre afiliados del sistema.
+Para Cuprum no hay dato público de fuga *bruta* (la Ficha sólo publica el neto, +4.128 en junio de 2026),
+así que 0,446 % mensual es un **supuesto de trabajo** anclado al promedio del sistema, a reemplazar por la
+serie "traspasos por AFP de origen y destino" de la SP cuando se descargue. Antecedentes: el brief de la ronda 1 pedía 4–7 %
 anual **sobre cotizantes**; el de la ronda 2 pide calibrar con la Ficha, que da **0,47 % mensual sobre
 afiliados** (≈5,6 % anual sobre afiliados y, con la densidad de cotizantes del sistema de 53,5 %,
 ≈10,5 % anual sobre cotizantes). Los dos objetivos no son compatibles. Se optó por el de la ronda 2
@@ -759,9 +763,15 @@ Lecturas:
   retenido por la campaña es prácticamente el mismo (5.140 – 5.260 MM) y la conclusión de priorizar
   por valor esperado no cambia en ningún escenario. Es decir: **la decisión es robusta al supuesto,
   el presupuesto no**.
-* Con 30 % de capacidad se retiene el 22 % del saldo en riesgo. Llevar la capacidad al 100 % es la
-  palanca de mayor impacto, y el rendimiento por contacto (14,7 MM de saldo retenido) da la cota para
-  justificar la inversión.
+* Con 30 % de capacidad se retiene el 22 % del saldo en riesgo. Ampliar la capacidad sigue siendo la
+  palanca de mayor impacto absoluto, pero con **rendimiento marginal decreciente**: el saldo retenido por
+  contacto cae de ~14 MM al 30 % a ~7 MM al 100 % (la malla de `escenarios_licitacion` incluye ahora
+  10/30/50/70/100 %; `reportes/licitacion_escenarios.csv`). La inversión se justifica tramo a tramo con
+  ese rendimiento marginal, no con la cota del 30 %.
+* Limitación: `licitacion_stock` se genera después de la cartera y no retroalimenta `saldos`,
+  `panel_mensual` ni `traspasos`; los afiliados que se van en 2028-06 siguen en la cartera simulada.
+  No afecta a esta ronda (los cortes se truncan antes) pero hay que resolverlo antes de simular el
+  segundo sorteo (2029-08) o de mover `licitacion.py` a `common/`.
 
 **Combinación con el score** (`combinar_con_score`, `reportes/licitacion_ranking_combinado.csv`):
 `p_ir = p_sorteo_se_va · sorteado + p_churn · (1 − sorteado)`. El resultado operativo es contundente:

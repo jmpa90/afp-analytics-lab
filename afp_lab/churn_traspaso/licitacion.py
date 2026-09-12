@@ -266,7 +266,7 @@ def escenario_licitacion(lic: pd.DataFrame, p_salida_pasiva: float, capacidad: f
 
 def escenarios_licitacion(lic: pd.DataFrame, par: ParametrosLicitacion | None = None,
                           supuestos_salida: tuple[float, ...] = (0.55, 0.65, 0.75),
-                          capacidades: tuple[float, ...] = (0.0, 0.30),
+                          capacidades: tuple[float, ...] = (0.0, 0.10, 0.30, 0.50, 0.70, 1.0),
                           prioridades: tuple[str, ...] = ("saldo_x_prob", "aleatorio")) -> pd.DataFrame:
     """Malla de escenarios por sorteo: supuesto de salida pasiva x capacidad x criterio de prioridad."""
     par = par or ParametrosLicitacion()

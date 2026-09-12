@@ -233,6 +233,27 @@ sobre las filas reemplazadas de dependientes fue WAPE 0,125 con sesgo -2,2 % y 9
 (`reportes/reemplazos_202610.csv`). Las 1.923 filas de agosto que siguen `PREDICHA` son cesantes reales
 más pagos tardíos aún no recibidos; 10 quedaron `PARCIAL` esperando a un segundo pagador.
 
+## 10b. Ronda 2: perfil Cuprum
+
+`python -m afp_lab.rim_nowcasting.pipeline demo --perfil cuprum` genera la cartera con el perfil de
+`common.synth_base.PERFILES["cuprum"]` (renta 1,7× el sistema, 7 % de cotizantes en el tope, más
+finanzas/minería/salud, densidad ~70 %). Backtest en los mismos snapshots (2026-08 y 2026-09):
+
+| | Sistema | Cuprum |
+|---|---|---|
+| WAPE dependientes h=1 (modelo / persistencia) | 0,115 / 0,215 | 0,115 / 0,211 |
+| WAPE dependientes h=2 (modelo / persistencia) | 0,182 / 0,265 | 0,221 / 0,272 |
+| WAPE tramo > $2 M h=1 (modelo / persistencia) | 0,135 / 0,216 | 0,150 / 0,246 |
+| AUC cotiza / no cotiza h=1 / h=2 | 0,969 / 0,918 | 0,968 / 0,919 |
+| Tasa de cotización real (h=1) | 0,72 | 0,62 |
+| Ciclo mensual: WAPE de lo reemplazado (dependientes, PAGO) | 0,125 | 0,126 |
+
+Lectura: a un mes el modelo rinde igual en ambas carteras; a dos meses pierde algo en Cuprum porque la
+remuneración variable (bonos de finanzas y minería, gratificación anual) pesa más y se conoce con más
+rezago. El tope imponible importa más (7 % de cotizantes topados): el error en el tramo > $2 M sigue
+siendo el menor en términos relativos. La masa imponible proyectada por mes sube de ~4.500 a ~6.400
+millones para los mismos 5.000 afiliados.
+
 ## 11. Supuestos y próximos pasos
 
 * Los parámetros macro y las proporciones (rotación, DNP, pagos tardíos) son supuestos razonables para

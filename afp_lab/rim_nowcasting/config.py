@@ -13,6 +13,7 @@ class Config:
     periodo_snapshot: int = 202609             # "hoy": mes en que corre el modelo
     seed: int = 42
     particiones_simulacion: int = 8
+    perfil: str = "sistema"                    # "sistema" o "cuprum" (ver common/synth_base.PERFILES)
 
     # --- Desfase de informacion ------------------------------------------
     # En el snapshot T se conocen las cotizaciones RECIBIDAS hasta T-1

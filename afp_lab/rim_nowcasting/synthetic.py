@@ -139,39 +139,64 @@ def generar_empleadores(spark: SparkSession, cfg: Config) -> DataFrame:
 
 
 # ---------------------------------------------------------------- afiliados
+def _perfil(cfg: Config) -> dict:
+    from afp_lab.common.synth_base import PERFILES
+
+    return PERFILES[getattr(cfg, "perfil", "sistema")]
+
+
 def generar_afiliados(spark: SparkSession, cfg: Config) -> DataFrame:
-    """Dimension de afiliados con atributos observables y latentes (prefijo lat_)."""
+    """Dimension de afiliados con atributos observables y latentes (prefijo lat_).
+
+    Con `cfg.perfil = "cuprum"` la cartera sigue el perfil de common.synth_base.PERFILES (mas renta,
+    mas educacion universitaria, mas Region Metropolitana, rubros de finanzas/mineria/salud, etc.).
+    """
     seed = cfg.seed
+    pf = _perfil(cfg)
     n_nuevos = 0.10   # afiliados que se incorporan durante la ventana simulada (cold start)
     idx_ini = periodo_to_idx(cfg.periodo_inicio)
     idx_fin = periodo_to_idx(cfg.periodo_snapshot)
     r = lambda k: F.rand(seed + k)  # noqa: E731
+    p_edu = pf["p_educacion"]
+    c_edu = [p_edu[0], p_edu[0] + p_edu[1], p_edu[0] + p_edu[1] + p_edu[2]]
+    p_rm, p_v, p_viii = pf["p_region_rm"], pf["p_region_v"], pf["p_region_viii"]
+    p_ind, p_vol = pf["p_independiente"], pf["p_voluntario"]
+    if pf["pesos_rubro"] is None:
+        rubro_pref = F.floor(r(21) * N_RUBROS).cast("int")
+    else:
+        w = [float(x) for x in pf["pesos_rubro"]]
+        acum, tot, expr = 0.0, sum(w), None
+        for i, wi in enumerate(w):
+            acum += wi / tot
+            expr = F.when(r(21) < acum, i) if expr is None else expr.when(r(21) < acum, i)
+        rubro_pref = expr.otherwise(N_RUBROS - 1).cast("int")
     df = (
         spark.range(1, cfg.n_afiliados + 1).withColumnRenamed("id", "afiliado_id")
         .withColumn("sexo", F.when(r(11) < 0.47, "F").otherwise("M"))
-        .withColumn("edad_inicio", (18 + F.floor((r(12) + r(13)) / 2 * 47)).cast("int"))
-        .withColumn("region", F.when(r(14) < 0.42, 13).when(r(14) < 0.52, 5).when(r(14) < 0.62, 8)
+        .withColumn("edad_inicio", (pf["edad_min"] + F.floor(F.least(F.lit(0.999), (r(12) + r(13)) / 2 + pf["edad_sesgo"])
+                                                             * pf["edad_rango"])).cast("int"))
+        .withColumn("region", F.when(r(14) < p_rm, 13).when(r(14) < p_rm + p_v, 5).when(r(14) < p_rm + p_v + p_viii, 8)
                     .otherwise((1 + F.floor(r(15) * 16)).cast("int")))
-        .withColumn("nivel_educacional", F.when(r(16) < 0.15, "BASICA").when(r(16) < 0.60, "MEDIA")
-                    .when(r(16) < 0.80, "TECNICA").otherwise("UNIVERSITARIA"))
+        .withColumn("nivel_educacional", F.when(r(16) < c_edu[0], "BASICA").when(r(16) < c_edu[1], "MEDIA")
+                    .when(r(16) < c_edu[2], "TECNICA").otherwise("UNIVERSITARIA"))
         .withColumn("tipo_afiliado", F.when((F.col("edad_inicio") >= 60) & (r(17) < 0.5), "PENSIONADO_ACTIVO")
-                    .when(r(17) < 0.08, "INDEPENDIENTE").when(r(17) < 0.10, "VOLUNTARIO").otherwise("DEPENDIENTE"))
+                    .when(r(17) < p_ind, "INDEPENDIENTE").when(r(17) < p_ind + p_vol, "VOLUNTARIO").otherwise("DEPENDIENTE"))
         .withColumn("_idx_afil", F.when(r(18) < n_nuevos, idx_ini + 1 + F.floor(r(19) * (idx_fin - idx_ini - 1)))
                     .otherwise(idx_ini - F.floor(r(19) * 240)))
         .withColumn("periodo_afiliacion", ((2000 + F.floor(F.col("_idx_afil") / 12)) * 100
                                            + (F.col("_idx_afil") % 12 + 1)).cast("int"))
         .drop("_idx_afil")
         # latentes (no observables por el modelo; se usan solo para simular)
-        .withColumn("lat_productividad", F.exp(F.randn(seed + 20) * 0.45
+        .withColumn("lat_productividad", F.exp(F.randn(seed + 20) * 0.45 + pf["desplaz_productividad"]
                     + F.when(F.col("nivel_educacional") == "UNIVERSITARIA", 0.55)
                     .when(F.col("nivel_educacional") == "TECNICA", 0.25)
                     .when(F.col("nivel_educacional") == "BASICA", -0.20).otherwise(0.0)))
-        .withColumn("lat_rubro_pref", F.floor(r(21) * N_RUBROS).cast("int"))
+        .withColumn("lat_rubro_pref", rubro_pref)
         .withColumn("lat_p_sep_factor", F.exp(F.randn(seed + 22) * 0.4))
         .withColumn("lat_p_lic_factor", F.exp(F.randn(seed + 23) * 0.5))
-        .withColumn("lat_multi_empleador", (r(24) < 0.05).cast("int"))
-        .withColumn("lat_jornada", F.when(r(25) < 0.12, 0.5).otherwise(1.0))
-        .withColumn("lat_masa_imm", (r(26) < 0.15).cast("int"))
+        .withColumn("lat_multi_empleador", (r(24) < pf["p_multi_empleador"]).cast("int"))
+        .withColumn("lat_jornada", F.when(r(25) < pf["p_jornada_parcial"], 0.5).otherwise(1.0))
+        .withColumn("lat_masa_imm", (r(26) < pf["p_masa_imm"]).cast("int"))
     )
     return df
 
@@ -445,7 +470,9 @@ def simular_verdad_mensual(spark: SparkSession, cfg: Config, afiliados: DataFram
     periodos = rango_periodos(cfg.periodo_inicio, cfg.periodo_snapshot)
     emp_pdf = empleadores.toPandas()          # dimension pequena: viaja en el closure
     macro = macro_pandas(cfg.periodo_inicio, cfg.periodo_snapshot)
-    fn = _simular_particion(emp_pdf, macro, periodos, cfg.seed)
+    pf = _perfil(cfg)
+    fn = _simular_particion(emp_pdf, macro, periodos, cfg.seed,
+                            p_activo_inicial=pf["p_activo_inicial"], factor_contratacion=pf["factor_contratacion"])
     cols = ["afiliado_id", "tipo_afiliado", "sexo", "edad_inicio", "periodo_afiliacion",
             "lat_productividad", "lat_rubro_pref", "lat_p_sep_factor", "lat_p_lic_factor",
             "lat_multi_empleador", "lat_jornada", "lat_masa_imm"]

@@ -253,13 +253,14 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--n-test", type=int, default=Config.n_snapshots_test)
         sp.add_argument("--gbt-iter", type=int, default=Config.gbt_max_iter)
         sp.add_argument("--reusar-fuentes", action="store_true", help="no regenerar datos si existen")
+        sp.add_argument("--perfil", default=Config.perfil, choices=["sistema", "cuprum"], help="perfil de cartera")
     return p
 
 
 def _cfg_desde_args(a: argparse.Namespace) -> Config:
     return Config(n_afiliados=a.n_afiliados, ruta_salida=a.salida, periodo_snapshot=a.snapshot,
                   periodo_inicio=a.inicio, seed=a.seed, n_snapshots_entrenamiento=a.n_train,
-                  n_snapshots_test=a.n_test, gbt_max_iter=a.gbt_iter)
+                  n_snapshots_test=a.n_test, gbt_max_iter=a.gbt_iter, perfil=a.perfil)
 
 
 def main(argv: list[str] | None = None) -> None:

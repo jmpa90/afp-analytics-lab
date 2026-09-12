@@ -28,7 +28,7 @@ import pandas as pd
 from afp_lab.common.synth_base import generar_universo
 from afp_lab.rim_nowcasting.calendario import add_months, periodo_to_idx, rango_periodos
 
-from .licitacion import ParametrosLicitacion, simular_licitacion_stock
+from .licitacion import SORTEOS, ParametrosLicitacion, simular_licitacion_stock
 
 # --------------------------------------------------------------------- catalogos
 FONDOS = ("A", "B", "C", "D", "E")
@@ -113,6 +113,39 @@ MERCADOS = {
 #  * mas entradas por traspaso durante la ventana (capta afiliados de renta alta de otras AFP), que
 #    es lo que produce el saldo neto positivo;
 #  * la retencion propia es mas intensa (asesoria presencial, cartera premium).
+#
+# `b0=-6.32` esta calibrado para que `tasa_salida_mensual` (indicador de `resumen_simulacion`) de
+# Cuprum quede en ~0,446 %/mes (rango de test 0,35-0,60 %), supuesto de trabajo anclado al promedio
+# del SISTEMA completo (Ficha N 165: 0,47 %/mes, 56.974 cuentas / 12,2 M afiliados en jun-2026;
+# decision del gerente en la revision de la ronda 2, `docs/revisiones/ronda_2/churn_traspaso.md`).
+#
+# Ronda 3 (objetivo 3): se buscaron cifras PUBLICAS 2024-2026 de traspasos de Cuprum (WebSearch).
+# `spensiones.cl` y `cuprum.cl` estan bloqueados por el proxy de la sandbox (confirmado con
+# `curl`/`WebFetch` -> EGRESS_BLOCKED, igual que `latercera.com`: el bloqueo alcanza a mas dominios de
+# prensa que los dos que cita el brief), asi que solo quedan disponibles los snippets que devuelve
+# WebSearch, mas la Ficha N 165 que ya estaba descargada en `data/sp/`. Se encontraron DOS cifras
+# NETAS (entradas - salidas) citables con URL y fecha, de fuentes y ventanas de tiempo distintas:
+#   - Ficha Estadistica Previsional N 165 (SP, ago-2026; ya en `data/sp/`, tabla "Traspasos netos de
+#     cuentas jun-26", verificada extrayendo el texto del PDF): Cuprum +4.128 en JUNIO DE 2026 (un
+#     mes). El pie de tabla confirma que el total BRUTO del sistema completo ese mes fue de 56.974
+#     cuentas, pero la SP solo publica el NETO por AFP, no el bruto de origen/destino por AFP.
+#   - La Tercera, "Pensiones: fondo A lidero las preferencias de traspasos en 2024 y el E fue el que
+#     mas afiliados perdio" (WebSearch, 12-sep-2026; latercera.com bloqueado para verificar fecha de
+#     publicacion o el texto completo con WebFetch):
+#     https://www.latercera.com/pulso/noticia/pensiones-fondo-a-lidero-las-preferencias-de-traspasos-en-2024-y-el-e-fue-el-que-mas-afiliados-perdio/OA36QNL5TZFWZGUZJ7RJPBYN4U/
+#     -> Cuprum +4.699 NETOS en el ANO 2024 completo (y 565.088 traspasos brutos ENTRE AFP en todo el
+#     sistema ese ano, sin desagregar por AFP de origen).
+# El resto de las busquedas (ver README Ronda 3, objetivo 3, para las consultas exactas) devolvio
+# menciones de Cuprum SIN una cifra de traspaso bruto atribuible a una URL verificable (o cifras de
+# NETOS sin fuente localizable en los resultados de busqueda): se descartan por CONVENCIONES seccion 2
+# ("nunca inventadas"), no se documentan como hallazgo.
+# Ninguna de las dos cifras citables es la fuga BRUTA mensual de Cuprum que se necesita para reemplazar
+# el 0,446 %: la SP publica solo el NETO por AFP y el bruto AGREGADO del sistema (sin partir por AFP de
+# origen), y no se encontro prensa que desagregue la salida bruta de Cuprum. Ambas SI coinciden en que
+# el neto de Cuprum es POSITIVO (consistente con `traspasos_netos_total` > 0 en la simulacion), pero
+# corresponden a ventanas no comparables (un mes vs un ano calendario) y no permiten estimar una tasa
+# de salida bruta ni una tendencia. El supuesto de trabajo de 0,446 %/mes se MANTIENE sin cambios; ver
+# README Ronda 3 (seccion 14, objetivo 3) para el detalle completo de la busqueda.
 PARAMETROS_POR_PERFIL = {
     "cuprum": {
         "b0": -6.32,
@@ -411,7 +444,9 @@ def _fondo_defecto(edad: np.ndarray, sexo: np.ndarray) -> np.ndarray:
 def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = PERIODO_INICIO,
                    periodo_fin: int = PERIODO_FIN, seed: int = 42,
                    par: ParametrosChurn | None = None, perfil: str = "sistema",
-                   par_licitacion: ParametrosLicitacion | None = None) -> dict[str, pd.DataFrame]:
+                   par_licitacion: ParametrosLicitacion | None = None,
+                   sorteos_licitacion: tuple[tuple[int, int, int], ...] = SORTEOS,
+                   aplicar_salida_licitacion: bool = True) -> dict[str, pd.DataFrame]:
     """Universo comun + tablas propias del proyecto de traspasos.
 
     `perfil`: "sistema" (promedio del sistema, el de la ronda 1) o "cuprum" (nuestra cartera; ver
@@ -422,6 +457,14 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = PERIODO_INIC
     Devuelve un dict con: afiliados, empleadores, panel_mensual, macro (del universo comun),
     mercado, saldos, cambios_fondo, traspasos, contactos, reclamos, uso_digital, licitacion_stock
     (propias) y afiliados_latente_churn (latente, solo para diagnosticos).
+
+    `sorteos_licitacion` parametriza el calendario de sorteos de la Ley 21.735 (por defecto
+    `licitacion.SORTEOS`, dos sorteos: 2027-08 y 2029-08); solo entran los que caen dentro de
+    [`periodo_inicio`, `periodo_fin`] (ver `licitacion.sorteos_en_ventana`). `aplicar_salida_licitacion`
+    (por defecto `True`) hace que quien es sorteado y decide irse **salga de la cartera** desde el mes
+    efectivo (objetivo 1 de la ronda 3); `False` reproduce el comportamiento de la ronda 2 (la
+    licitacion se sortea y reporta pero no toca `saldos`/`traspasos`/etc.), y sirve solo para medir el
+    efecto del cambio (`run.py`, seccion "Ronda 3" del README).
     """
     par = par or ParametrosChurn()
     merc = MERCADOS[perfil]
@@ -868,10 +911,14 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = PERIODO_INIC
         "reclamos": reclamos,
         "uso_digital": uso_digital,
     }
-    # licitacion de afiliados antiguos (Ley 21.735): sorteo del 10 % de los no pensionados
-    tablas["licitacion_stock"] = simular_licitacion_stock(
+    # licitacion de afiliados antiguos (Ley 21.735): sorteo del 10 % de los no pensionados. Ronda 3:
+    # quien decide irse y no ejerce el derecho a quedarse sale de la cartera desde el mes efectivo
+    # (`aplicar_salida_licitacion`); por eso `simular_licitacion_stock` puede devolver tablas propias
+    # actualizadas y se reasignan aqui (no solo `licitacion_stock`).
+    lic_stock, tablas = simular_licitacion_stock(
         tablas, latente.set_index("afiliado_id")["lat_u_traspaso"], periodo_inicio, periodo_fin,
-        seed, par_licitacion)
+        seed, par_licitacion, sorteos=sorteos_licitacion, aplicar_salida=aplicar_salida_licitacion)
+    tablas["licitacion_stock"] = lic_stock
     return tablas
 
 

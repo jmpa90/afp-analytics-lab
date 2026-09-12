@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from afp_lab.rim_nowcasting.calendario import add_months, rango_periodos
+
 from . import HORIZONTE_MESES
 from . import evaluate as E
 from . import features as F
@@ -302,6 +304,20 @@ def main(argv: list[str] | None = None) -> int:
         _mostrar("ATENCION: segmentos grandes no superados (o no comparables)", perdidos,
                  rep / "segmentos_perdidos.csv")
 
+    # --- objetivo 2 (ronda 3): intervalos bootstrap del AUC por segmento (tramo de edad, incl. 60+,
+    # y tramo de saldo), para no dar por perdido un segmento chico que solo tiene pocos eventos.
+    boot_auc = E.bootstrap_auc_segmentos(te_seg, prob, n_boot=E.N_BOOT_REFERENCIA, seed=args.seed)
+    _mostrar(f"Intervalos bootstrap ({E.N_BOOT_REFERENCIA} remuestreos) del AUC por segmento",
+             boot_auc, rep / "bootstrap_auc_segmento.csv", max_filas=20)
+    boot_cap = pd.concat([
+        E.bootstrap_ic_segmento(te_seg, prob, seg, metrica="captura", n_boot=E.N_BOOT_REFERENCIA,
+                                seed=args.seed).rename(columns={seg: "valor"}).assign(segmento=seg)
+        for seg in E.SEGMENTOS_BOOTSTRAP
+    ], ignore_index=True)
+    _mostrar(f"Intervalos bootstrap ({E.N_BOOT_REFERENCIA} remuestreos) de la captura al "
+             f"{int(E.FRACCIONES_CONTACTO[1] * 100)} % por segmento", boot_cap,
+             rep / "bootstrap_captura_segmento.csv", max_filas=20)
+
     calibs = []
     for etiqueta, p in (("sin_calibrar", prob_bruta), ("platt_ranking", prob),
                         ("isotonica_agregado", prob_agregado)):
@@ -360,6 +376,36 @@ def main(argv: list[str] | None = None) -> int:
                  LIC.resumen_riesgo_licitacion(lic, tablas["saldos"]), rep / "licitacion_resumen.csv")
         _mostrar("Licitacion de stock: escenarios de retencion",
                  LIC.escenarios_licitacion(lic), rep / "licitacion_escenarios.csv", max_filas=30)
+
+        # --- objetivo 1 (ronda 3): efecto de la retroalimentacion sobre la cartera en los cortes
+        # posteriores al sorteo. Esos cortes ya quedan EXCLUIDOS del entrenamiento por
+        # `cortes_evaluables(excluir_licitacion=True)` (no cambia nada del modelo ni de las metricas
+        # de test), pero muestran que la poblacion y la tasa base de esos meses dejan de incluir, como
+        # si nada hubiera pasado, a quien la ley saco de la cartera.
+        t0 = time.perf_counter()
+        efectivo0 = int(lic["periodo_efectivo"].min())
+        cortes_post = [c for c in rango_periodos(efectivo0, min(add_months(efectivo0, 5), args.periodo_fin))]
+        tablas_sin_retro = generar_tablas(n_afiliados=args.n_afiliados, periodo_inicio=args.periodo_inicio,
+                                          periodo_fin=args.periodo_fin, seed=args.seed, perfil=args.perfil,
+                                          aplicar_salida_licitacion=False)
+        ds_con = F.construir_dataset(tablas, cortes_post)
+        ds_sin = F.construir_dataset(tablas_sin_retro, cortes_post)
+        filas_efecto = []
+        for c in cortes_post:
+            a, b = ds_con[ds_con["periodo_corte"] == c], ds_sin[ds_sin["periodo_corte"] == c]
+            filas_efecto.append({
+                "periodo_corte": c,
+                "n_filas_con_retroalimentacion": int(len(a)),
+                "n_filas_sin_retroalimentacion": int(len(b)),
+                "afiliados_removidos_de_la_cartera": int(len(b) - len(a)),
+                "tasa_base_con_retroalimentacion": float(a["y"].mean()) if len(a) else float("nan"),
+                "tasa_base_sin_retroalimentacion": float(b["y"].mean()) if len(b) else float("nan"),
+            })
+        _mostrar("Objetivo 1 (ronda 3): efecto de la licitacion sobre la cartera y la tasa del "
+                 "target en los cortes posteriores al sorteo (excluidos del entrenamiento)",
+                 pd.DataFrame(filas_efecto), rep / "licitacion_efecto_cartera.csv")
+        marca("licitacion_efecto_cartera", t0)
+
         ultimo_corte = max(split["test"])
         te_ultimo = te[te["periodo_corte"] == ultimo_corte]
         prob_ultimo = prob[te["periodo_corte"].to_numpy() == ultimo_corte]

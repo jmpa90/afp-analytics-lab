@@ -154,6 +154,96 @@ def test_licitacion_stock_ley_21735(tablas_cuprum):
     assert not lic.duplicated(["afiliado_id", "periodo_sorteo"]).any()
 
 
+def test_licitacion_retroalimenta_la_cartera(tablas_cuprum):
+    """Objetivo 1 de la ronda 3: quien es sorteado y decide SE_VA sale de la cartera desde el mes
+    efectivo (sin saldo, sin eventos propios nuevos) y queda en `traspasos` como SALIDA_LICITACION."""
+    from afp_lab.churn_traspaso.synthetic import generar_tablas
+
+    tablas_sin = generar_tablas(n_afiliados=N_TEST, seed=SEED, perfil="cuprum",
+                                aplicar_salida_licitacion=False)
+    lic = tablas_cuprum["licitacion_stock"]
+    efectivo = int(lic["periodo_efectivo"].iloc[0])
+    mes_previo = add_months(efectivo, -1)
+    se_va = lic.loc[lic["decision"] == "SE_VA", "afiliado_id"]
+
+    saldos_con, saldos_sin = tablas_cuprum["saldos"], tablas_sin["saldos"]
+    vig_prev = set(saldos_con.loc[saldos_con["periodo"] == mes_previo, "afiliado_id"])
+    se_va_vigentes = se_va[se_va.isin(vig_prev)]
+    assert len(se_va_vigentes) > 0
+
+    # con la retroalimentacion, ninguno de los que sigue vigente y decide irse tiene saldo desde el
+    # mes efectivo en adelante; sin ella, la ronda 2 los seguia simulando como si nada
+    ult_con = saldos_con.groupby("afiliado_id")["periodo"].max()
+    ult_sin = saldos_sin.groupby("afiliado_id")["periodo"].max()
+    for af in se_va_vigentes:
+        assert periodo_to_idx(int(ult_con.loc[af])) < periodo_to_idx(efectivo)
+        assert periodo_to_idx(int(ult_sin.loc[af])) >= periodo_to_idx(efectivo)
+    # y sin nuevos contactos/reclamos/uso digital propios desde el mes efectivo
+    for nombre in ("uso_digital", "contactos", "reclamos", "cambios_fondo"):
+        d = tablas_cuprum[nombre]
+        if len(d):
+            fuera = d["afiliado_id"].isin(se_va_vigentes.to_numpy()) & (d["periodo"] >= efectivo)
+            assert not fuera.any(), nombre
+
+    # la poblacion vigente al mes efectivo se reduce exactamente por los que salen
+    n_con = saldos_con.loc[saldos_con["periodo"] == efectivo, "afiliado_id"].nunique()
+    n_sin = saldos_sin.loc[saldos_sin["periodo"] == efectivo, "afiliado_id"].nunique()
+    assert n_sin - n_con == len(se_va_vigentes)
+
+    # registro nuevo en traspasos, distinto del churn voluntario (no contamina el target)
+    tr = tablas_cuprum["traspasos"]
+    lic_tr = tr[tr["tipo"] == "SALIDA_LICITACION"]
+    assert set(lic_tr["afiliado_id"]) == set(se_va_vigentes)
+    assert (lic_tr["periodo_efectivo"] == efectivo).all()
+    assert "SALIDA_LICITACION" not in set(tablas_sin["traspasos"]["tipo"])
+
+    # a quien ya se habia traspasado voluntariamente ANTES del mes efectivo no se le agrega nada
+    se_va_ya_salido = se_va[~se_va.isin(vig_prev)]
+    if len(se_va_ya_salido):
+        assert not set(se_va_ya_salido) & set(lic_tr["afiliado_id"])
+
+
+def test_licitacion_segundo_sorteo_parametrizable():
+    """Objetivo 1: `sorteos` es parametrizable y permite simular el segundo sorteo (2029-08) con una
+    ventana extendida; el efecto de retroalimentacion se aplica de forma secuencial a ambos."""
+    from afp_lab.churn_traspaso.synthetic import generar_tablas
+    from afp_lab.churn_traspaso.licitacion import SORTEOS
+
+    tablas = generar_tablas(n_afiliados=N_TEST, seed=SEED, perfil="cuprum",
+                            periodo_inicio=202101, periodo_fin=203006, sorteos_licitacion=SORTEOS)
+    lic = tablas["licitacion_stock"]
+    assert sorted(lic["periodo_sorteo"].unique()) == [202708, 202908]
+    assert set(lic["periodo_efectivo"].unique()) == {202806, 203006}
+
+    tr = tablas["traspasos"]
+    lic_tr = tr[tr["tipo"] == "SALIDA_LICITACION"]
+    assert set(lic_tr["periodo_efectivo"].unique()) <= {202806, 203006}
+    # nadie sale dos veces por licitacion
+    assert not lic_tr["afiliado_id"].duplicated().any()
+    # quien salio en el primer sorteo no puede volver a ser sorteado en el segundo (ya no esta vigente)
+    salieron_primero = set(lic_tr.loc[lic_tr["periodo_efectivo"] == 202806, "afiliado_id"])
+    sorteados_segundo = set(lic.loc[lic["periodo_sorteo"] == 202908, "afiliado_id"])
+    assert not (salieron_primero & sorteados_segundo)
+    # y sin la ventana extendida (la del run de referencia), el segundo sorteo no aparece
+    corta = generar_tablas(n_afiliados=300, seed=SEED, perfil="cuprum")["licitacion_stock"]
+    assert sorted(corta["periodo_sorteo"].unique()) == [202708]
+
+
+def test_cortes_excluyen_la_licitacion_con_dos_sorteos():
+    """`cortes_evaluables(excluir_licitacion=True)` sigue truncando por el PRIMER sorteo aunque haya
+    un segundo mas adelante en la ventana (no debe cambiar nada de lo que ya se entrena/evalua)."""
+    from afp_lab.churn_traspaso.synthetic import generar_tablas
+    from afp_lab.churn_traspaso.licitacion import SORTEOS
+
+    corta = generar_tablas(n_afiliados=300, seed=SEED, perfil="cuprum")
+    larga = generar_tablas(n_afiliados=300, seed=SEED, perfil="cuprum", periodo_inicio=202101,
+                           periodo_fin=203006, sorteos_licitacion=SORTEOS)
+    assert F.cortes_evaluables(corta, excluir_licitacion=True) == F.cortes_evaluables(
+        larga, excluir_licitacion=True)
+    assert len(F.cortes_evaluables(larga, excluir_licitacion=False)) > len(
+        F.cortes_evaluables(corta, excluir_licitacion=False))
+
+
 def test_escenarios_licitacion_monotonos(tablas_cuprum):
     """Encargo B2: la campana retiene, priorizar por saldo x prob gana al azar, y hay sensibilidad."""
     lic = tablas_cuprum["licitacion_stock"]
@@ -557,6 +647,61 @@ def test_readme_documenta_los_parametros_vigentes():
         "regenerar con synthetic.tabla_parametros_markdown()")
 
 
+def test_bootstrap_ic_segmento_auc_marca_el_cruce_de_0_5():
+    """Objetivo 2 de la ronda 3: intervalo bootstrap del AUC por segmento, semilla fija, pocos
+    remuestreos para que el test sea rapido (el reporte real usa >= 200, `N_BOOT_REFERENCIA`)."""
+    rng = np.random.default_rng(0)
+    n = 3000
+    tramo = np.where(np.arange(n) < n * 0.9, "grande", "60+")
+    p = rng.random(n)
+    y = np.zeros(n, dtype=int)
+    g = tramo == "grande"
+    y[g] = (rng.random(g.sum()) < (0.02 + 0.30 * p[g])).astype(int)   # señal fuerte
+    y[~g] = (rng.random((~g).sum()) < 0.02).astype(int)               # sin señal (pocos eventos)
+    df = pd.DataFrame({"tramo_edad": tramo, "y": y,
+                       "saldo_obligatorio": rng.uniform(1e6, 5e7, n)})
+    tabla = E.bootstrap_ic_segmento(df, p, "tramo_edad", metrica="auc", n_boot=40, seed=1,
+                                    umbral_aceptacion=0.70).set_index("tramo_edad")
+    # el segmento chico y sin senal real no puede distinguirse de 0,5 (backlog ronda 2: no dar por
+    # perdido un segmento chico solo porque su punto cae bajo el umbral)
+    assert tabla.loc["60+", "cruza_0_5"]
+    assert tabla.loc["60+", "ic_low"] <= 0.5 <= tabla.loc["60+", "ic_high"]
+    # el segmento grande con senal real si se distingue de 0,5 y su intervalo es mas angosto
+    assert not tabla.loc["grande", "cruza_0_5"]
+    ancho_chico = tabla.loc["60+", "ic_high"] - tabla.loc["60+", "ic_low"]
+    ancho_grande = tabla.loc["grande", "ic_high"] - tabla.loc["grande", "ic_low"]
+    assert ancho_grande < ancho_chico
+    assert (tabla["ic_low"] <= tabla["punto"]).all() and (tabla["punto"] <= tabla["ic_high"]).all()
+
+
+def test_bootstrap_ic_segmento_es_reproducible_y_valida_metrica():
+    rng = np.random.default_rng(3)
+    n = 500
+    df = pd.DataFrame({"tramo_saldo": rng.choice(["0-5M", "5-15M"], n),
+                       "y": (rng.random(n) < 0.05).astype(int),
+                       "saldo_obligatorio": rng.uniform(1e6, 2e7, n)})
+    p = rng.random(n)
+    a = E.bootstrap_ic_segmento(df, p, "tramo_saldo", metrica="captura", n_boot=25, seed=7)
+    b = E.bootstrap_ic_segmento(df, p, "tramo_saldo", metrica="captura", n_boot=25, seed=7)
+    pd.testing.assert_frame_equal(a, b)
+    assert ((a["punto"].dropna() >= 0) & (a["punto"].dropna() <= 1)).all()
+    with pytest.raises(ValueError):
+        E.bootstrap_ic_segmento(df, p, "tramo_saldo", metrica="no_existe")
+    with pytest.raises(ValueError):
+        E.bootstrap_ic_segmento(df, p, "tramo_saldo", n_boot=1)
+
+
+def test_bootstrap_auc_segmentos_incluye_edad_y_saldo(dataset):
+    """El reporte real (README §14) cubre al menos tramo_edad (con 60+) y tramo_saldo."""
+    d = E.agregar_segmentos(dataset)
+    prob = np.clip(d["y"].to_numpy() * 0.3 + np.random.default_rng(0).random(len(d)) * 0.05, 0, 1)
+    tabla = E.bootstrap_auc_segmentos(d, prob, n_boot=30, seed=42)
+    assert {"tramo_edad", "tramo_saldo"} <= set(tabla["segmento"])
+    assert "60+" in set(tabla.loc[tabla["segmento"] == "tramo_edad", "valor"])
+    assert {"ic_low", "ic_high", "cruza_0_5", "cruza_umbral_aceptacion"} <= set(tabla.columns)
+    assert (tabla["ic_low"] <= tabla["ic_high"]).all()
+
+
 def test_segmentos_y_calibracion(dataset):
     d = E.agregar_segmentos(dataset.head(4000))
     for c in ("tramo_saldo", "tramo_edad", "tramo_renta"):
@@ -571,7 +716,8 @@ def test_run_end_to_end(tmp_path):
                      "--sin-techo", "--semillas-estabilidad", ""]) == 0
     rep = tmp_path / "reportes"
     for f in ("metricas_test.csv", "captura_negocio.csv", "importancias.csv", "calibracion.csv",
-              "saldo_en_riesgo.csv", "split.csv", "tiempos.csv", "casos_explicados.csv"):
+              "saldo_en_riesgo.csv", "split.csv", "tiempos.csv", "casos_explicados.csv",
+              "bootstrap_auc_segmento.csv", "bootstrap_captura_segmento.csv"):
         assert (rep / f).exists(), f
     assert (tmp_path / "modelo" / "lightgbm.txt").exists()
     met = pd.read_csv(rep / "metricas_test.csv").set_index("predictor")

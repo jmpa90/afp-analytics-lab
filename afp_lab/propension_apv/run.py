@@ -5,7 +5,11 @@
 Genera el universo sintetico, construye el dataset as-of de todos los cortes, entrena el
 hurdle, lo compara con los baselines, calcula metricas por segmento y por corte, calibracion,
 sesgo del monto por decil, diagnostico de memorizacion y metrica de negocio, y escribe todo en
-`salidas/propension_apv/`.
+`salidas/propension_apv/<perfil>/`.
+
+`--perfil` elige la cartera del universo comun (ver `docs/contexto_afp_cuprum.md`):
+`sistema` (promedio de las AFP), `cuprum` (nuestra cartera) o `ambos` (corre los dos y escribe la
+tabla de comparacion `comparacion_perfiles.csv`).
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ import pandas as pd
 from . import evaluate as ev
 from . import features as F
 from . import model as M
-from .synthetic import HORIZONTE, generar_tablas
+from .synthetic import ANCLAS_FICHA_165, HORIZONTE, PERFIL_DEFECTO, generar_tablas
 
 RAIZ = Path(__file__).resolve().parents[2]
 SALIDA_DEFECTO = RAIZ / "salidas" / "propension_apv"
@@ -44,13 +48,14 @@ def _guardar(df: pd.DataFrame, ruta: Path, nombre: str) -> None:
 
 def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int = 42,
              primer_corte: int = PRIMER_CORTE, n_test: int = N_TEST, n_valid: int = N_VALID,
-             cada_origen: int = CADA_ORIGEN, diagnostico: bool = True) -> dict:
+             cada_origen: int = CADA_ORIGEN, diagnostico: bool = True,
+             perfil: str = PERFIL_DEFECTO) -> dict:
     t0 = time.perf_counter()
     salida = Path(salida)
     tiempos: dict[str, float] = {}
 
     # ------------------------------------------------------------------ 1. datos sinteticos
-    tablas = generar_tablas(n_afiliados=n_afiliados, seed=seed)
+    tablas = generar_tablas(n_afiliados=n_afiliados, seed=seed, perfil=perfil)
     tiempos["generacion"] = time.perf_counter() - t0
     fuentes = salida / "fuentes"
     fuentes.mkdir(parents=True, exist_ok=True)
@@ -59,6 +64,7 @@ def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int 
 
     resumen_fuentes = pd.DataFrame(
         [{"tabla": k, "filas": len(v), "columnas": v.shape[1]} for k, v in tablas.items()])
+    calibracion = calibrar_contra_ficha(tablas, perfil)
 
     # ------------------------------------------------------------------ 2. dataset as-of
     t = time.perf_counter()
@@ -182,6 +188,7 @@ def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int 
     # ------------------------------------------------------------------ 5. salidas
     rep = salida / "reportes"
     _guardar(resumen_fuentes, rep, "resumen_fuentes")
+    _guardar(calibracion, rep, "calibracion_ficha_165")
     _guardar(resumen_split, rep, "resumen_split")
     _guardar(modelos_por_origen, rep, "modelos_por_origen")
     _guardar(solape, rep, "solape_valid_pool_test")
@@ -219,7 +226,9 @@ def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int 
                   ].to_parquet(salida / "predicciones_test.parquet", index=False)
 
     # ------------------------------------------------------------------ 6. impresion
+    print(f"\n### PERFIL: {perfil} ###")
     _imprimir("Tablas sinteticas", resumen_fuentes)
+    _imprimir("Calibracion contra la Ficha Estadistica Previsional N 165 (SP, ago 2026)", calibracion)
     _imprimir("Origenes moviles (gap de 6 meses entre cada par de particiones)", resumen_split)
     _imprimir("Ajuste por origen (arboles elegidos por early stopping contra validacion)", ajuste)
     _imprimir("Modelos persistidos (uno por origen; el .pkl de un origen NO reproduce el agregado)",
@@ -256,6 +265,8 @@ def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int 
     return {"modelo": modelo, "clasificacion": clasificacion, "monto": monto, "negocio": negocio,
             "aceptacion": aceptacion, "tiempos": tiempos, "origenes": origenes,
             "por_corte": por_corte, "sesgo_decil": sesgo_decil, "memorizacion": memorizacion,
+            "perfil": perfil, "calibracion": calibracion, "resumen_split": resumen_split,
+            "contexto": contexto, "resumen_calib": resumen_calib, "negocio_resumen": resumen_neg,
             "ajuste": ajuste, "pred": pred, "solape": solape, "solape_monto": solape_monto,
             "deriva": deriva, "modelos_por_origen": modelos_por_origen,
             "datos": {"train": train_ult, "valid": valid_ult, "test": test}}
@@ -267,15 +278,136 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--salida", type=Path, default=SALIDA_DEFECTO)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--primer-corte", type=int, default=PRIMER_CORTE)
+    ap.add_argument("--perfil", choices=("sistema", "cuprum", "ambos"), default=PERFIL_DEFECTO,
+                    help="cartera del universo comun; 'ambos' corre los dos y compara")
     ap.add_argument("--cada-origen", type=int, default=CADA_ORIGEN,
                     help="meses entre reentrenamientos (origenes moviles); subirlo acorta el runtime")
     ap.add_argument("--sin-diagnostico", action="store_true",
                     help="omite la CV agrupada por afiliado (diagnostico de memorizacion)")
     args = ap.parse_args(argv)
-    ejecutar(n_afiliados=args.n_afiliados, salida=args.salida, seed=args.seed,
-             primer_corte=args.primer_corte, cada_origen=args.cada_origen,
-             diagnostico=not args.sin_diagnostico)
+    perfiles = ("sistema", "cuprum") if args.perfil == "ambos" else (args.perfil,)
+    resultados = {}
+    for perfil in perfiles:
+        resultados[perfil] = ejecutar(
+            n_afiliados=args.n_afiliados, salida=Path(args.salida) / perfil, seed=args.seed,
+            primer_corte=args.primer_corte, cada_origen=args.cada_origen,
+            diagnostico=not args.sin_diagnostico, perfil=perfil)
+    if len(resultados) > 1:
+        comp = comparar_perfiles(resultados)
+        Path(args.salida).mkdir(parents=True, exist_ok=True)
+        comp.to_csv(Path(args.salida) / "comparacion_perfiles.csv", index=False)
+        largo = comp.set_index("perfil").T.reset_index().rename(columns={"index": "indicador"})
+        largo.to_csv(Path(args.salida) / "comparacion_perfiles_vertical.csv", index=False)
+        _imprimir("Comparacion de perfiles (sistema vs cuprum)", largo)
+        print(f"\nComparacion en {Path(args.salida) / 'comparacion_perfiles.csv'}")
 
+
+
+# =========================================================================== perfiles
+def calibrar_contra_ficha(tablas: dict[str, pd.DataFrame], perfil: str) -> pd.DataFrame:
+    """Compara el universo simulado con las anclas de la Ficha Estadistica Previsional N 165.
+
+    Devuelve una fila por indicador con el valor simulado, el valor oficial y el objetivo del
+    perfil, de modo que la calibracion quede auditable. Se mide sobre los tres ultimos anos
+    calendario completos de la ventana simulada.
+    """
+    from .synthetic import ANCLAS_FICHA_165 as A
+    from .synthetic import CUENTAS_APV_POR_COTIZANTE_SISTEMA as TECHO
+
+    panel = tablas["panel_mensual"]
+    panel = panel.assign(rim=panel["rim_emp1"] + panel["rim_emp2"], anio=panel["periodo"] // 100)
+    ap = tablas["aportes_voluntarios"]
+    ap = ap.assign(anio=ap["periodo"] // 100)
+    anios = [a for a in (2023, 2024, 2025) if a in set(panel["anio"])]
+
+    tasas, mensuales = [], []
+    for a in anios:
+        cot = set(panel[(panel["anio"] == a) & (panel["rim"] > 0)]["afiliado_id"])
+        x = ap[ap["anio"] == a]
+        if not cot:
+            continue
+        tasas.append(len(set(x["afiliado_id"]) & cot) / len(cot))
+        mensuales.append(len(set(x[x["periodicidad"] == "MENSUAL"]["afiliado_id"]) & cot) / len(cot))
+    tasa = float(np.mean(tasas)) if tasas else np.nan
+    mensual = float(np.mean(mensuales)) if mensuales else np.nan
+
+    ult = panel[panel["anio"] == max(anios)] if anios else panel
+    rim_media = float(ult.loc[ult["rim"] > 0, "rim"].mean())
+    apv = ap[ap["tipo"].isin(["APV_REGIMEN_A", "APV_REGIMEN_B"])]
+    share_a = float((apv["tipo"] == "APV_REGIMEN_A").mean()) if len(apv) else np.nan
+
+    objetivo_rim = (A["ingreso_imponible_promedio_cuprum"] if perfil == "cuprum"
+                    else A["ingreso_imponible_promedio_sistema"])
+    filas = [
+        {"indicador": "ingreso imponible promedio de cotizantes (CLP)",
+         "simulado": rim_media, "oficial_ficha_165": objetivo_rim,
+         "nivel_del_dato_oficial": f"{perfil} (Ficha §0)",
+         "comentario": f"ratio simulado/oficial {rim_media / objetivo_rim:.2f}"},
+        {"indicador": "% de depositos en regimen A",
+         "simulado": share_a, "oficial_ficha_165": A["share_depositos_regimen_a"],
+         "nivel_del_dato_oficial": "sistema",
+         "comentario": "mezcla A/B calibrada con esta ancla (P_REGIMEN_B_BASE / _POR_TRAMO)"},
+        {"indicador": "deposito promedio (CLP)",
+         "simulado": float(ap["monto"].mean()), "oficial_ficha_165": A["deposito_promedio_clp"],
+         "nivel_del_dato_oficial": "sistema",
+         "comentario": "brecha conocida: los aportes esporadicos de la simulacion son grandes"},
+        {"indicador": "deposito mediano (CLP)",
+         "simulado": float(ap["monto"].median()), "oficial_ficha_165": A["deposito_promedio_clp"],
+         "nivel_del_dato_oficial": "sistema (promedio, no mediana)",
+         "comentario": "referencia, no ancla"},
+        {"indicador": "cotizantes con algun aporte en el anio",
+         "simulado": tasa, "oficial_ficha_165": TECHO,
+         "nivel_del_dato_oficial": "sistema: cuentas APV en AFP por cotizante (techo, no tasa)",
+         "comentario": "la Ficha no publica aportantes por AFP: el techo es 0,319 cuentas/cotizante"},
+        {"indicador": "cotizantes con aporte mensual",
+         "simulado": mensual, "oficial_ficha_165": np.nan,
+         "nivel_del_dato_oficial": "no publicado",
+         "comentario": "objetivo del brief: 5-8 % sistema"},
+    ]
+    return pd.DataFrame(filas)
+
+
+def comparar_perfiles(resultados: dict[str, dict]) -> pd.DataFrame:
+    """Tabla unica con los indicadores clave de cada perfil (encargo 1 del BRIEF_RONDA2)."""
+    filas = []
+    for perfil, r in resultados.items():
+        clas = r["clasificacion"].set_index("predictor")
+        monto = r["monto"].set_index(["predictor", "vista"])
+        cal = r["calibracion"].set_index("indicador")["simulado"]
+        neg = r["negocio"].set_index(["score", "fraccion_contactada"])
+        rc = r["resumen_calib"].iloc[0]
+        pc = r["por_corte"]
+        test = r["datos"]["test"]
+        filas.append({
+            "perfil": perfil,
+            # --- universo simulado
+            "rim_media_cotizantes": cal["ingreso imponible promedio de cotizantes (CLP)"],
+            "tasa_anual_aportantes": cal["cotizantes con algun aporte en el anio"],
+            "tasa_aporte_mensual": cal["cotizantes con aporte mensual"],
+            "share_regimen_a": cal["% de depositos en regimen A"],
+            "deposito_medio": cal["deposito promedio (CLP)"],
+            # --- dataset
+            "filas_test": len(test), "tasa_base_test": float(test["y"].mean()),
+            "aportantes_test": int(test["y"].sum()),
+            # --- clasificacion
+            "auc": clas.loc["modelo", "auc"], "auc_regla": clas.loc["regla_negocio", "auc"],
+            "auc_min_corte": pc["auc"].min(), "auc_max_corte": pc["auc"].max(),
+            "lift_decil_1": clas.loc["modelo", "lift_decil_1"],
+            "average_precision": clas.loc["modelo", "average_precision"],
+            # --- monto
+            "wape_condicional": monto.loc[("modelo", "condicional_en_aportantes"), "wape"],
+            "sesgo_monto_esperado": monto.loc[("modelo", "esperado_en_todos"), "sesgo_agregado"],
+            # --- calibracion
+            "brier": rc["brier"], "ece": rc["ece"], "sesgo_prob": rc["sesgo_agregado"],
+            # --- negocio
+            "captura_10pct": neg.loc[("modelo_monto_esperado", 0.10), "captura_monto"],
+            "captura_10pct_renta": neg.loc[("renta", 0.10), "captura_monto"],
+            "conversion_contactados_10pct": neg.loc[("modelo_monto_esperado", 0.10),
+                                                    "tasa_aporte_contactados"],
+            "share_adquisicion_del_flujo": float(r["contexto"]["share_adquisicion_sobre_flujo_total"].iloc[0]),
+            "runtime_s": r["tiempos"]["total"],
+        })
+    return pd.DataFrame(filas)
 
 if __name__ == "__main__":
     main()

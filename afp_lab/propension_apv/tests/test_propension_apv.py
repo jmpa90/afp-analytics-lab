@@ -16,7 +16,8 @@ from afp_lab.propension_apv import evaluate as ev
 from afp_lab.propension_apv import features as F
 from afp_lab.propension_apv import model as M
 from afp_lab.propension_apv import run as R
-from afp_lab.propension_apv.synthetic import (ESTADOS, ESTADOS_CON_INGRESO, HORIZONTE,
+from afp_lab.propension_apv.synthetic import (ANCLAS_FICHA_165, CUENTAS_APV_POR_COTIZANTE_SISTEMA,
+                                              ESTADOS, ESTADOS_CON_INGRESO, HORIZONTE,
                                               MESES_DESFASE, MESES_DESFASE_LICENCIA,
                                               anio_tributario_disponible, generar_tablas,
                                               truncar_tablas)
@@ -409,3 +410,92 @@ def test_corrida_end_to_end_pequena(tmp_path):
     assert "rango_por_corte" in res["aceptacion"].columns
     assert len(res["por_corte"]) == 6
     assert res["tiempos"]["total"] < 120
+
+
+# ============================================================== 7. perfiles de cartera (ronda 2)
+def _tasas_apv(tablas, anios=(2023, 2024, 2025)):
+    """(tasa anual de aportantes, tasa de aporte mensual) promedio de los anios pedidos."""
+    panel = tablas["panel_mensual"]
+    panel = panel.assign(rim=panel["rim_emp1"] + panel["rim_emp2"], anio=panel["periodo"] // 100)
+    ap = tablas["aportes_voluntarios"]
+    ap = ap.assign(anio=ap["periodo"] // 100)
+    tasas, mensuales = [], []
+    for a in anios:
+        cot = set(panel[(panel["anio"] == a) & (panel["rim"] > 0)]["afiliado_id"])
+        x = ap[ap["anio"] == a]
+        tasas.append(len(set(x["afiliado_id"]) & cot) / len(cot))
+        mensuales.append(len(set(x[x["periodicidad"] == "MENSUAL"]["afiliado_id"]) & cot) / len(cot))
+    return float(np.mean(tasas)), float(np.mean(mensuales))
+
+
+@pytest.fixture(scope="module")
+def tablas_cuprum():
+    return generar_tablas(n_afiliados=5_000, seed=SEED, perfil="cuprum")
+
+
+@pytest.fixture(scope="module")
+def tablas_sistema_5k():
+    return generar_tablas(n_afiliados=5_000, seed=SEED, perfil="sistema")
+
+
+def test_perfil_cuprum_tiene_mas_renta_y_mas_apv(tablas_sistema_5k, tablas_cuprum):
+    """El perfil Cuprum debe reproducir la cartera de la Ficha N 165: mas renta y mas APV."""
+    def rim_media(t):
+        p = t["panel_mensual"]
+        r = p["rim_emp1"] + p["rim_emp2"]
+        return float(r[r > 0].mean())
+
+    ratio_renta = rim_media(tablas_cuprum) / rim_media(tablas_sistema_5k)
+    # Ficha N 165: ingreso imponible promedio Cuprum / sistema = 2.331.030 / 1.346.859 = 1,73
+    objetivo = (ANCLAS_FICHA_165["ingreso_imponible_promedio_cuprum"]
+                / ANCLAS_FICHA_165["ingreso_imponible_promedio_sistema"])
+    assert 0.85 * objetivo <= ratio_renta <= 1.15 * objetivo, ratio_renta
+
+    t_sis, m_sis = _tasas_apv(tablas_sistema_5k)
+    t_cup, m_cup = _tasas_apv(tablas_cuprum)
+    # liderazgo en APV: la tasa de aportantes de Cuprum casi duplica la del sistema
+    assert t_cup > 1.4 * t_sis, (t_sis, t_cup)
+    assert m_cup > 1.4 * m_sis, (m_sis, m_cup)
+    # y sigue bajo el techo implicito de la Ficha (0,319 cuentas APV en AFP por cotizante,
+    # con ~la mitad de las cuentas activas en un anio -> el doble del techo como cota holgada)
+    assert t_cup <= 2.0 * CUENTAS_APV_POR_COTIZANTE_SISTEMA, t_cup
+
+
+def test_mezcla_regimen_a_b_calibrada_con_la_ficha(tablas_sistema_5k, tablas_cuprum):
+    """76,7 % de los depositos en regimen A (Ficha N 165, nivel sistema)."""
+    def share_a(t):
+        ap = t["aportes_voluntarios"]
+        apv = ap[ap["tipo"].isin(["APV_REGIMEN_A", "APV_REGIMEN_B"])]
+        return float((apv["tipo"] == "APV_REGIMEN_A").mean())
+
+    objetivo = ANCLAS_FICHA_165["share_depositos_regimen_a"]
+    assert abs(share_a(tablas_sistema_5k) - objetivo) <= 0.06, share_a(tablas_sistema_5k)
+    # en Cuprum el regimen B pesa mas porque la cartera esta en tramos mas altos del IGC
+    assert share_a(tablas_cuprum) < share_a(tablas_sistema_5k)
+
+
+def test_tabla_de_calibracion_contra_la_ficha(tablas_cuprum):
+    cal = R.calibrar_contra_ficha(tablas_cuprum, "cuprum")
+    assert {"indicador", "simulado", "oficial_ficha_165", "nivel_del_dato_oficial",
+            "comentario"} <= set(cal.columns)
+    assert len(cal) >= 6
+    ind = cal.set_index("indicador")["oficial_ficha_165"]
+    assert ind["ingreso imponible promedio de cotizantes (CLP)"] == (
+        ANCLAS_FICHA_165["ingreso_imponible_promedio_cuprum"])
+
+
+def test_los_dos_perfiles_corren_end_to_end_y_se_comparan(tmp_path):
+    res = {}
+    for perfil in ("sistema", "cuprum"):
+        res[perfil] = R.ejecutar(n_afiliados=800, salida=tmp_path / perfil, seed=11,
+                                 n_test=6, n_valid=6, cada_origen=3, diagnostico=False,
+                                 perfil=perfil)
+        assert (tmp_path / perfil / "reportes" / "calibracion_ficha_165.csv").exists()
+    comp = R.comparar_perfiles(res)
+    assert list(comp["perfil"]) == ["sistema", "cuprum"]
+    for col in ("auc", "lift_decil_1", "wape_condicional", "captura_10pct",
+                "tasa_anual_aportantes", "share_regimen_a", "ece"):
+        assert col in comp.columns and comp[col].notna().all()
+    # la cartera Cuprum tiene mas aportantes, asi que la tasa base del test es mayor
+    assert comp.set_index("perfil").loc["cuprum", "tasa_base_test"] > \
+        comp.set_index("perfil").loc["sistema", "tasa_base_test"]

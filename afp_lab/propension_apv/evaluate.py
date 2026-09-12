@@ -1,8 +1,12 @@
 """Evaluacion: metricas comparables (`afp_lab.common.metrics`), segmentos, calibracion y negocio.
 
-Todo se calcula sobre el set de test (los cortes mas recientes), nunca sobre validacion ni
+Todo se calcula sobre el set de test (12 cortes mensuales), nunca sobre validacion ni
 entrenamiento. Las metricas de clasificacion y regresion son las de `common.metrics` para que
 los resultados sean comparables con los otros proyectos del laboratorio.
+
+Ademas del agregado se reporta **por corte** (la tasa base es estacional: un test de 3 cortes
+contiguos no dice nada) y el **sesgo del monto por decil** (un sesgo agregado chico puede
+esconder deciles bajos subestimados y un decil alto sobreestimado que se compensan).
 """
 from __future__ import annotations
 
@@ -69,6 +73,42 @@ def tabla_monto(df: pd.DataFrame, predicciones: dict[str, pd.DataFrame]) -> pd.D
     return pd.DataFrame(filas)
 
 
+def sesgo_monto_por_decil(df: pd.DataFrame, pred: pd.DataFrame, n_bins: int = 10) -> pd.DataFrame:
+    """Sesgo del `monto_esperado` por decil de monto esperado.
+
+    El sesgo agregado de una variable con 95 % de ceros y cola larga se compensa entre deciles:
+    esta tabla muestra si el modelo subestima a la mayoria y sobreestima al decil superior.
+    """
+    d = pd.DataFrame({"monto": df["monto"].to_numpy(),
+                      "y": df["y"].to_numpy(),
+                      "pred": pred["monto_esperado"].to_numpy()})
+    d["decil"] = pd.qcut(d["pred"].rank(method="first"), n_bins, labels=False) + 1
+    g = d.groupby("decil").agg(n=("pred", "size"), aportantes=("y", "sum"),
+                               monto_real=("monto", "sum"), monto_predicho=("pred", "sum"))
+    g["sesgo"] = g["monto_predicho"] / g["monto_real"].replace(0, np.nan) - 1.0
+    g["share_monto_real"] = g["monto_real"] / max(d["monto"].sum(), 1e-9)
+    return g.reset_index()
+
+
+def metricas_por_corte(df: pd.DataFrame, pred: pd.DataFrame,
+                       col_corte: str = "periodo_corte") -> pd.DataFrame:
+    """Clasificacion y monto corte a corte (para ver la estacionalidad de la tasa base)."""
+    filas = []
+    for corte, g in df.groupby(col_corte, observed=True):
+        p = pred.loc[g.index]
+        m = metricas_clasificacion(g["y"].to_numpy(), p["prob_aporte"].to_numpy())
+        pos = g["y"] == 1
+        r = (metricas_regresion(g.loc[pos, "monto"].to_numpy(),
+                                p.loc[pos, "monto_condicional"].to_numpy())
+             if pos.any() else {"wape": np.nan})
+        filas.append({"periodo_corte": int(corte), "n": m["n"], "tasa_base": m["tasa_base"],
+                      "auc": m["auc"], "lift_decil_1": m["lift_decil_1"], "brier": m["brier"],
+                      "wape_monto_aportantes": r["wape"],
+                      "sesgo_monto_esperado": float(p["monto_esperado"].sum()
+                                                    / max(g["monto"].sum(), 1e-9) - 1.0)})
+    return pd.DataFrame(filas).sort_values("periodo_corte").reset_index(drop=True)
+
+
 def monto_por_segmento(df: pd.DataFrame, pred: pd.DataFrame, segmento: str,
                        solo_aportantes: bool = True) -> pd.DataFrame:
     d = df[[segmento, "monto", "y"]].copy()
@@ -125,6 +165,36 @@ def metrica_negocio(df: pd.DataFrame, scores: dict[str, np.ndarray],
                 "monto_medio_contactado": float(d.loc[sel, "monto"].mean()),
             })
     return pd.DataFrame(filas)
+
+
+def contexto_negocio(df: pd.DataFrame, tablas: dict[str, pd.DataFrame],
+                     horizonte: int = 6) -> pd.DataFrame:
+    """Que fraccion del flujo total de ahorro voluntario es el que este modelo puede capturar.
+
+    El target cubre solo la poblacion de **adquisicion / reactivacion** (sin aporte en los 6
+    meses previos): el resto del flujo lo aportan los aportantes mensuales vigentes, que estan
+    excluidos por definicion del problema. Sirve para no presentar la captura del modelo como si
+    fuera sobre el flujo total de la AFP.
+    """
+    from afp_lab.rim_nowcasting.calendario import add_months
+
+    meses = sorted({add_months(int(c), k) for c in df["periodo_corte"].unique()
+                    for k in range(1, horizonte + 1)})
+    ap = tablas["aportes_voluntarios"]
+    flujo_total = float(ap[ap["periodo"].isin(meses)]["monto"].sum())
+    # el monto del target se cuenta una vez por corte; para comparar con el flujo total se usa
+    # el promedio por corte escalado a la cantidad de meses cubiertos
+    monto_target = float(df["monto"].sum())
+    n_cortes = df["periodo_corte"].nunique()
+    return pd.DataFrame([{
+        "meses_cubiertos": len(meses),
+        "n_cortes_test": n_cortes,
+        "flujo_total_aportes_en_esos_meses": flujo_total,
+        "monto_target_sumado_sobre_cortes": monto_target,
+        "monto_target_promedio_por_corte": monto_target / max(n_cortes, 1),
+        "share_adquisicion_sobre_flujo_total": (monto_target / max(n_cortes, 1))
+                                               / max(flujo_total / max(len(meses), 1) * horizonte, 1e-9),
+    }])
 
 
 def resumen_negocio(negocio: pd.DataFrame, score_modelo: str = "modelo_monto_esperado",

@@ -16,8 +16,10 @@ empleador, el APV colectivo depende del empleador, etc.):
 Todos los parametros numericos estan explicitos en las constantes de modulo y en
 `ParametrosAPV`; el README documenta por que cada uno es razonable para Chile.
 
-La ventana por defecto parte en 202101 aunque el laboratorio trabaja desde 202201: los primeros
-12 meses son *burn-in* para que los cortes tengan 24 meses de historial de aportes.
+La ventana por defecto parte en 201901 aunque el laboratorio trabaja desde 202201: los primeros
+24 meses son *burn-in* (para que el primer corte tenga 24 meses de historial de aportes) y los
+63 cortes resultantes permiten el split con gap entre cada par de particiones que pide
+CONVENCIONES §3.
 """
 from __future__ import annotations
 
@@ -30,10 +32,19 @@ from afp_lab.common.synth_base import generar_universo
 from afp_lab.rim_nowcasting.calendario import periodo_to_idx, rango_periodos
 
 # --------------------------------------------------------------------------- calendario
-PERIODO_INICIO = 202101          # incluye 12 meses de burn-in para el historial de aportes
+PERIODO_INICIO = 201901          # incluye 24 meses de burn-in para el historial de aportes
 PERIODO_FIN = 202609             # "hoy" del laboratorio (igual que el proyecto 01)
-MESES_DESFASE = 2                # la cotizacion del mes m se conoce en m+2 (CONVENCIONES §3)
+# Desfases de disponibilidad de cada fuente (CONVENCIONES §3, convencion de fechas de la ronda 1).
+# `periodo_corte` es el MES DE LA DECISION; cada fuente se lee con su propio rezago.
+MESES_DESFASE = 2                # panel laboral / RIM: la cotizacion del mes m se conoce en m+2
+MESES_DESFASE_LICENCIA = 1       # licencias medicas (feed COMPIN/ISAPRE) y eventos AFC
+MESES_DESFASE_OPERACIONAL = 0    # aportes voluntarios, campanas, saldos: sistemas propios
 HORIZONTE = 6                    # ventana del target: corte+1 .. corte+6
+# Rezago con el que se trunca cada tabla en los tests de leakage
+DESFASE_POR_TABLA = {"panel_mensual": MESES_DESFASE, "apvc_empleador": MESES_DESFASE,
+                     "campanas": MESES_DESFASE_OPERACIONAL,
+                     "aportes_voluntarios": MESES_DESFASE_OPERACIONAL,
+                     "saldos": MESES_DESFASE_OPERACIONAL}
 
 # --------------------------------------------------------------------------- dominios
 TIPOS_APORTE = ("APV_REGIMEN_A", "APV_REGIMEN_B", "COTIZACION_VOLUNTARIA", "DEPOSITO_CONVENIDO")
@@ -53,7 +64,8 @@ ESTADOS_DEPENDIENTES = (1, 2)
 
 # --------------------------------------------------------------------------- tributario
 # UTM anual promedio aproximada (SII). UTA = 12 x UTM.
-UTM_ANUAL = {2021: 52_000, 2022: 57_000, 2023: 63_000, 2024: 65_500, 2025: 68_000, 2026: 70_500}
+UTM_ANUAL = {2019: 49_000, 2020: 50_000, 2021: 52_000, 2022: 57_000, 2023: 63_000,
+             2024: 65_500, 2025: 68_000, 2026: 70_500}
 # Tramos del IGC (Ley de la Renta, art. 52): limite superior en UTA y tasa marginal.
 TRAMOS_IGC_UTA = ((13.5, 0.000), (30.0, 0.040), (50.0, 0.080), (70.0, 0.135),
                   (90.0, 0.230), (120.0, 0.304), (310.0, 0.350), (np.inf, 0.400))
@@ -140,9 +152,9 @@ class ParametrosAPV:
     # --- ruido no explicable -------------------------------------------------
     b_afinidad_latente: float = 0.90   # N(0,1) por afiliado: mantiene el AUC en 0,75-0,88
     # --- interceptos (calibran las tasas objetivo del brief) -----------------
-    intercepto_esporadico: float = -7.70   # ~12-18 % de cotizantes con algun aporte en el anio
-    intercepto_mensual: float = -9.15      # ~5-8 % con aporte mensual
-    intercepto_stock_inicial: float = -5.55  # stock de aportantes mensuales al inicio de la ventana
+    intercepto_esporadico: float = -7.95   # ~12-18 % de cotizantes con algun aporte en el anio
+    intercepto_mensual: float = -9.35      # ~5-8 % con aporte mensual
+    intercepto_stock_inicial: float = -5.75  # stock de aportantes mensuales al inicio de la ventana
     p_salida_mensual: float = 0.030        # abandono mensual del aporte por planilla
     p_salida_cambio_empleador: float = 0.45
 
@@ -174,6 +186,16 @@ def tramo_igc(renta_anual: np.ndarray, anio: int) -> np.ndarray:
 def tasa_marginal_igc(tramo: np.ndarray) -> np.ndarray:
     tasas = np.array([t[1] for t in TRAMOS_IGC_UTA])
     return tasas[np.asarray(tramo, int)]
+
+
+def anio_tributario_disponible(periodo_corte: int) -> int:
+    """Ultimo ano tributario conocido en el corte.
+
+    La Operacion Renta del ano *Y* se declara en abril de *Y+1*: en un corte de abril o
+    posterior se conoce *Y-1*; antes de abril, solo *Y-2*.
+    """
+    anio, mes = periodo_corte // 100, periodo_corte % 100
+    return anio - 1 if mes >= 4 else anio - 2
 
 
 def _sigmoide(x: np.ndarray) -> np.ndarray:
@@ -535,19 +557,37 @@ def _construir_tributario(rim: np.ndarray, periodos: list[int], afiliado_ids: np
 
 
 def truncar_tablas(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> dict[str, pd.DataFrame]:
-    """Copia de `tablas` sin ninguna informacion posterior a `periodo_corte`.
+    """Copia de `tablas` sin nada que no este disponible en el mes de decision `periodo_corte`.
 
-    Se usa en los tests de leakage: las features construidas en `periodo_corte` deben ser
-    identicas con las tablas completas y con las truncadas.
+    Aplica el desfase propio de cada fuente (`DESFASE_POR_TABLA`) y, ademas, **neutraliza las
+    columnas del panel del mes `corte-1`**: de ese mes solo se conocen las licencias medicas, de
+    modo que si alguna feature leyera la RIM, el estado o el empleador de `corte-1` el test de
+    leakage lo detectaria. `macro` no se trunca porque el IMM y el tope imponible estan
+    legislados por adelantado.
     """
     corte_idx = periodo_to_idx(periodo_corte)
-    fuera = {}
+    fuera: dict[str, pd.DataFrame] = {}
     for nombre, df in tablas.items():
-        if "periodo" in df.columns:
+        if nombre == "macro":
+            fuera[nombre] = df.copy()
+        elif nombre == "panel_mensual":
             idx = df["periodo"].map(periodo_to_idx)
-            fuera[nombre] = df[idx <= corte_idx].reset_index(drop=True)
-        elif "anio" in df.columns:
-            fuera[nombre] = df[df["anio"] <= periodo_corte // 100].reset_index(drop=True)
+            g = df[idx <= corte_idx - MESES_DESFASE_LICENCIA].copy().reset_index(drop=True)
+            ultimo = g["periodo"].map(periodo_to_idx) == corte_idx - MESES_DESFASE_LICENCIA
+            cols_monto = ["sueldo_base", "rim_emp1", "rim_emp2", "gratificacion", "aguinaldo",
+                          "variable", "jornada"]
+            g.loc[ultimo, cols_monto] = 0.0
+            g.loc[ultimo, "estado"] = "CESANTE"
+            g.loc[ultimo, ["empleador_id", "empleador2_id"]] = pd.NA
+            g.loc[ultimo, "meses_antiguedad"] = 0
+            fuera[nombre] = g
+        elif nombre == "tributario":
+            fuera[nombre] = df[df["anio"] <= anio_tributario_disponible(periodo_corte)
+                               ].reset_index(drop=True)
+        elif "periodo" in df.columns:
+            lag = DESFASE_POR_TABLA.get(nombre, MESES_DESFASE_OPERACIONAL)
+            idx = df["periodo"].map(periodo_to_idx)
+            fuera[nombre] = df[idx <= corte_idx - lag].reset_index(drop=True)
         else:
             fuera[nombre] = df.copy()
     return fuera

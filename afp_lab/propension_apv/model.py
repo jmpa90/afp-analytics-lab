@@ -3,14 +3,20 @@
 Dos etapas, ambas LightGBM (pandas + LightGBM + scikit-learn; la escala no exige Spark):
 
 1. **Clasificador binario**: `p = P(al menos un aporte en corte+1..corte+6)`.
-   Se calibra con regresion isotonica ajustada en el set de **validacion** (nunca en test),
-   porque la probabilidad se agrega para proyectar el flujo de ahorro voluntario.
-2. **Regresor** sobre `log(monto)` en las filas con aporte -> `monto_condicional`.
-   Como la perdida L2 sobre logs estima la mediana-geometrica, se aplica un factor de
-   *smearing* `s = sum(monto real) / sum(exp(pred))` calculado en entrenamiento.
+2. **Regresor** sobre `log(monto / rim_ref)` en las filas con aporte. Se modela el **ratio** y no
+   el nivel para que el modelo aprenda "cuantos sueldos ahorra" y no un monto nominal: el
+   entrenamiento esta 3-4 anos antes del test. `monto_condicional = rim_ref x exp(y) x s`, con
+   *smearing* `s = sum(monto) / sum(rim_ref x exp(y))` **calculado en validacion** (con gap), no
+   en entrenamiento, porque el regresor esta ajustado sobre train.
 
 Salida por afiliado: `prob_aporte`, `monto_condicional` y
 `monto_esperado = prob_aporte x monto_condicional`, que es el score de priorizacion.
+
+**Protocolo (ronda 2)**: todos los hiperparametros que se eligen (numero de arboles por early
+stopping, si calibrar o no, el factor de smearing) se deciden **solo con el set de validacion**,
+que esta separado de entrenamiento por el mismo gap de `h` meses que lo separa de test
+(CONVENCIONES §3). El numero de arboles no esta fijado a mano: se deja un tope alto y corta el
+early stopping.
 
 Baselines obligatorios:
 
@@ -30,35 +36,47 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression
-from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import GroupKFold, StratifiedKFold
 
 from .features import columnas_modelo
 
 UMBRAL_RENTA_REGLA = 2_000_000.0     # "renta > 2 M" del brief
+# La isotonica solo se aplica si mejora el Brier fuera de muestra en validacion al menos esto
+# (en terminos relativos). Una mejora de 1e-4 no justifica deformar la probabilidad.
+MEJORA_MINIMA_CALIBRACION = 0.01
+LIMITES_LOG_RATIO = (-4.0, 4.0)      # winsorizacion del target del regresor
 
 
 @dataclass
 class ParametrosModelo:
-    """Hiperparametros. `n_jobs=2` porque la maquina de 4 nucleos es compartida."""
+    """Hiperparametros. `n_jobs=2` porque la maquina de 4 nucleos es compartida.
+
+    `*_n_estimators` son TOPES: el numero efectivo de arboles lo elige el early stopping contra
+    el set de validacion con gap. La regularizacion (hojas chicas, hojas con muchas
+    observaciones, `lambda_l2`) esta puesta para frenar la memorizacion por afiliado.
+    """
 
     n_jobs: int = 2
     seed: int = 42
     # clasificador
     clf_learning_rate: float = 0.05
-    clf_num_leaves: int = 48
-    clf_min_child_samples: int = 120
-    clf_n_estimators: int = 700
-    clf_feature_fraction: float = 0.75
-    clf_bagging_fraction: float = 0.80
-    # regresor de log(monto)
+    clf_num_leaves: int = 16
+    clf_min_child_samples: int = 400
+    clf_n_estimators: int = 3_000
+    clf_feature_fraction: float = 0.70
+    clf_bagging_fraction: float = 0.70
+    clf_lambda_l2: float = 10.0
+    # regresor de log(monto / rim_ref)
     reg_learning_rate: float = 0.05
-    reg_num_leaves: int = 24
-    reg_min_child_samples: int = 60
-    reg_n_estimators: int = 500
-    reg_feature_fraction: float = 0.75
-    reg_bagging_fraction: float = 0.80
-    early_stopping: int = 60
-    version: str = "apv-hurdle-lgbm-v1"
+    reg_num_leaves: int = 12
+    reg_min_child_samples: int = 150
+    reg_n_estimators: int = 2_000
+    reg_feature_fraction: float = 0.70
+    reg_bagging_fraction: float = 0.70
+    reg_lambda_l2: float = 10.0
+    early_stopping: int = 100
+    version: str = "apv-hurdle-lgbm-v2"
 
 
 @dataclass
@@ -83,26 +101,39 @@ class ModeloAPV:
     def version(self) -> str:
         return self.params.version
 
+    @property
+    def n_arboles(self) -> tuple[int, int]:
+        return (int(self.clf.best_iteration_ or self.clf.n_estimators),
+                int(self.reg.best_iteration_ or self.reg.n_estimators))
+
 
 # --------------------------------------------------------------------------- entrenamiento
-def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
-             params: ParametrosModelo | None = None) -> ModeloAPV:
-    """Entrena el hurdle con early stopping y calibracion sobre `valid`."""
-    params = params or ParametrosModelo()
-    cols = columnas_modelo(train)
-
-    clf = lgb.LGBMClassifier(
+def _clasificador(params: ParametrosModelo) -> lgb.LGBMClassifier:
+    return lgb.LGBMClassifier(
         objective="binary", learning_rate=params.clf_learning_rate,
         num_leaves=params.clf_num_leaves, min_child_samples=params.clf_min_child_samples,
         n_estimators=params.clf_n_estimators, colsample_bytree=params.clf_feature_fraction,
-        subsample=params.clf_bagging_fraction, subsample_freq=1,
+        subsample=params.clf_bagging_fraction, subsample_freq=1, reg_lambda=params.clf_lambda_l2,
         n_jobs=params.n_jobs, random_state=params.seed, verbose=-1)
+
+
+def _objetivo_regresion(df: pd.DataFrame) -> np.ndarray:
+    """`log(monto / rim_ref)` winsorizado: el regresor aprende ratios, no niveles nominales."""
+    ratio = df["monto"].to_numpy() / np.maximum(df["rim_ref_clp"].to_numpy(), 1.0)
+    return np.clip(np.log(np.maximum(ratio, 1e-6)), *LIMITES_LOG_RATIO)
+
+
+def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
+             params: ParametrosModelo | None = None) -> ModeloAPV:
+    """Entrena el hurdle. Early stopping, smearing y calibracion se deciden solo con `valid`."""
+    params = params or ParametrosModelo()
+    cols = columnas_modelo(train)
+
+    clf = _clasificador(params)
     clf.fit(train[cols], train["y"], eval_X=valid[cols], eval_y=valid["y"], eval_metric="auc",
             callbacks=[lgb.early_stopping(params.early_stopping, verbose=False)])
 
-    # --- calibracion isotonica sobre validacion (monotona: no altera el orden ni el AUC)
-    # Se decide CON VALIDACION (nunca con test) si conviene calibrar: la isotonica se evalua
-    # fuera de muestra con 3 folds dentro de validacion y solo se aplica si baja el Brier.
+    # --- calibracion: se decide en validacion, con 3 folds fuera de muestra ---------------
     p_valid = clf.predict_proba(valid[cols])[:, 1]
     y_valid = valid["y"].to_numpy()
     calibrador = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
@@ -114,22 +145,25 @@ def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
         p_cv[i_te] = iso.predict(p_valid[i_te])
     brier_crudo = float(np.mean((p_valid - y_valid) ** 2))
     brier_cal = float(np.mean((p_cv - y_valid) ** 2))
-    usa_calibracion = brier_cal <= brier_crudo
+    # solo se calibra si la mejora es material (>= 1 % del Brier): una mejora de 1e-4 no
+    # justifica deformar la probabilidad y suele ser ruido del set de validacion
+    usa_calibracion = brier_cal <= brier_crudo * (1.0 - MEJORA_MINIMA_CALIBRACION)
 
-    # --- regresor de log(monto) en aportantes
+    # --- regresor de log(monto / rim_ref) en aportantes -----------------------------------
     tr_pos, va_pos = train[train["y"] == 1], valid[valid["y"] == 1]
     reg = lgb.LGBMRegressor(
         objective="regression", learning_rate=params.reg_learning_rate,
         num_leaves=params.reg_num_leaves, min_child_samples=params.reg_min_child_samples,
         n_estimators=params.reg_n_estimators, colsample_bytree=params.reg_feature_fraction,
-        subsample=params.reg_bagging_fraction, subsample_freq=1,
+        subsample=params.reg_bagging_fraction, subsample_freq=1, reg_lambda=params.reg_lambda_l2,
         n_jobs=params.n_jobs, random_state=params.seed, verbose=-1)
-    reg.fit(tr_pos[cols], np.log(tr_pos["monto"]),
-            eval_X=va_pos[cols], eval_y=np.log(va_pos["monto"]), eval_metric="l2",
+    reg.fit(tr_pos[cols], _objetivo_regresion(tr_pos),
+            eval_X=va_pos[cols], eval_y=_objetivo_regresion(va_pos), eval_metric="l2",
             callbacks=[lgb.early_stopping(params.early_stopping, verbose=False)])
 
-    pred_tr = np.exp(reg.predict(tr_pos[cols]))
-    smearing = float(tr_pos["monto"].sum() / max(pred_tr.sum(), 1e-9))
+    # smearing en VALIDACION (con gap), no en train: el regresor esta ajustado sobre train
+    pred_va = va_pos["rim_ref_clp"].to_numpy() * np.exp(reg.predict(va_pos[cols]))
+    smearing = float(va_pos["monto"].sum() / max(pred_va.sum(), 1e-9))
 
     return ModeloAPV(
         clf=clf, reg=reg, calibrador=calibrador, usa_calibracion=usa_calibracion,
@@ -143,12 +177,13 @@ def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
 
 
 def predecir(modelo: ModeloAPV, df: pd.DataFrame) -> pd.DataFrame:
-    """Devuelve `prob_aporte` (calibrada), `monto_condicional` y `monto_esperado`."""
+    """Devuelve `prob_aporte`, `monto_condicional` y `monto_esperado`."""
     x = df[modelo.columnas]
     p_cruda = modelo.clf.predict_proba(x)[:, 1]
     p = modelo.calibrador.predict(p_cruda) if modelo.usa_calibracion else p_cruda
     p = np.clip(p, 1e-6, 1 - 1e-6)
-    monto_cond = np.exp(modelo.reg.predict(x)) * modelo.smearing
+    ratio = np.exp(np.clip(modelo.reg.predict(x), *LIMITES_LOG_RATIO))
+    monto_cond = np.maximum(df["rim_ref_clp"].to_numpy(), 1.0) * ratio * modelo.smearing
     return pd.DataFrame({
         "afiliado_id": df["afiliado_id"].to_numpy(),
         "periodo_corte": df["periodo_corte"].to_numpy(),
@@ -159,6 +194,38 @@ def predecir(modelo: ModeloAPV, df: pd.DataFrame) -> pd.DataFrame:
     }, index=df.index)
 
 
+# --------------------------------------------------------------------------- diagnostico
+def diagnostico_memorizacion(train: pd.DataFrame, valid: pd.DataFrame, modelo: ModeloAPV,
+                             n_folds: int = 3) -> pd.DataFrame:
+    """Cuanto del AUC viene de memorizar afiliados.
+
+    Compara: (a) AUC dentro de entrenamiento, (b) AUC en validacion temporal con gap y
+    (c) AUC de una validacion cruzada **agrupada por afiliado** dentro de entrenamiento
+    (`GroupKFold`: ningun afiliado aparece a la vez en el fold de ajuste y en el de evaluacion).
+    Si (a) >> (c), el modelo esta memorizando afiliados y no aprendiendo el mecanismo.
+    """
+    cols = modelo.columnas
+    n_arboles = modelo.n_arboles[0]
+    p = ParametrosModelo(**{**modelo.params.__dict__, "clf_n_estimators": n_arboles})
+
+    auc_train = float(roc_auc_score(train["y"], modelo.clf.predict_proba(train[cols])[:, 1]))
+    auc_valid = float(roc_auc_score(valid["y"], modelo.clf.predict_proba(valid[cols])[:, 1]))
+
+    oof = np.zeros(len(train))
+    grupos = train["afiliado_id"].to_numpy()
+    for i_tr, i_te in GroupKFold(n_folds).split(train, train["y"], groups=grupos):
+        m = _clasificador(p)
+        m.fit(train.iloc[i_tr][cols], train.iloc[i_tr]["y"])
+        oof[i_te] = m.predict_proba(train.iloc[i_te][cols])[:, 1]
+    auc_grupo = float(roc_auc_score(train["y"], oof))
+
+    return pd.DataFrame([
+        {"evaluacion": "train (en muestra)", "auc": auc_train},
+        {"evaluacion": f"CV agrupada por afiliado ({n_folds} folds, dentro de train)", "auc": auc_grupo},
+        {"evaluacion": "validacion temporal con gap", "auc": auc_valid},
+    ])
+
+
 # --------------------------------------------------------------------------- baselines
 def regla_negocio(df: pd.DataFrame) -> np.ndarray:
     """Regla del brief: `(renta > 2 M y empleador con APVC) o aporte en 24 m`.
@@ -166,7 +233,7 @@ def regla_negocio(df: pd.DataFrame) -> np.ndarray:
     Se toma la precedencia literal ("y" antes que "o"); la variante alternativa se discute
     en el README. Devuelve un vector booleano.
     """
-    return (((df["rim_ref"] > UMBRAL_RENTA_REGLA) & (df["ofrece_apvc"] > 0))
+    return (((df["rim_ref_clp"] > UMBRAL_RENTA_REGLA) & (df["ofrece_apvc"] > 0))
             | (df["n_aportes_24m"] > 0)).to_numpy()
 
 
@@ -197,7 +264,7 @@ def baseline_regla(train: pd.DataFrame, df: pd.DataFrame) -> pd.DataFrame:
 
 def baseline_renta(df: pd.DataFrame) -> pd.DataFrame:
     """Ordenamiento comercial habitual: contactar por renta (solo sirve como ranking)."""
-    return pd.DataFrame({"score_renta": df["rim_ref"].to_numpy()}, index=df.index)
+    return pd.DataFrame({"score_renta": df["rim_ref_clp"].to_numpy()}, index=df.index)
 
 
 # --------------------------------------------------------------------------- interpretabilidad
@@ -221,10 +288,19 @@ def explicar(modelo: ModeloAPV, df: pd.DataFrame, n_ejemplos: int = 5,
     pred = predecir(modelo, df)
     orden = pred["monto_esperado"].sort_values(ascending=False).index
     n_top = n_ejemplos // 2 + 1
+    # un afiliado aparece en varios cortes: se toma solo su mejor fila para no repetir el caso
+    vistos, top = set(), []
+    for i in orden:
+        a = int(df.loc[i, "afiliado_id"])
+        if a in vistos:
+            continue
+        vistos.add(a)
+        top.append(i)
+        if len(top) == n_top:
+            break
     rng = np.random.default_rng(seed)
-    resto = rng.choice(df.index.difference(orden[:n_top]), size=max(n_ejemplos - n_top, 0),
-                       replace=False)
-    idx = list(orden[:n_top]) + list(resto)
+    resto = rng.choice(df.index.difference(top), size=max(n_ejemplos - n_top, 0), replace=False)
+    idx = list(top) + list(resto)
     sub = df.loc[idx]
     contrib = modelo.clf.predict(sub[modelo.columnas], pred_contrib=True)
     filas = []
@@ -251,16 +327,17 @@ def guardar(modelo: ModeloAPV, ruta: str | Path) -> Path:
     ruta.mkdir(parents=True, exist_ok=True)
     with open(ruta / "modelo.pkl", "wb") as fh:
         pickle.dump(modelo, fh)
+    n_clf, n_reg = modelo.n_arboles
     (ruta / "calibracion.json").write_text(json.dumps({
-        "version": modelo.version, "smearing": modelo.smearing,
+        "version": modelo.version, "smearing_valid": modelo.smearing,
+        "tasa_base_train": modelo.tasa_base_train,
+        "monto_medio_aportantes_train": modelo.monto_medio_aportantes_train,
         "usa_calibracion_isotonica": bool(modelo.usa_calibracion),
         "brier_valid_crudo": modelo.brier_valid_crudo,
         "brier_valid_calibrado_cv": modelo.brier_valid_calibrado,
-        "tasa_base_train": modelo.tasa_base_train,
-        "monto_medio_aportantes_train": modelo.monto_medio_aportantes_train,
         "cortes_train": modelo.cortes_train, "cortes_valid": modelo.cortes_valid,
-        "n_arboles_clf": int(modelo.clf.best_iteration_ or modelo.clf.n_estimators),
-        "n_arboles_reg": int(modelo.reg.best_iteration_ or modelo.reg.n_estimators),
+        "n_arboles_clf": n_clf, "tope_arboles_clf": modelo.params.clf_n_estimators,
+        "n_arboles_reg": n_reg, "tope_arboles_reg": modelo.params.reg_n_estimators,
         "columnas": modelo.columnas,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     return ruta

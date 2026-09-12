@@ -1,14 +1,25 @@
 """Features "as-of" para la propension a ahorro voluntario (CONVENCIONES §3).
 
-Regla unica: **una fila se construye en `periodo_corte` con informacion cuyo periodo es
-<= `periodo_corte`**. El `periodo_corte` ya incorpora el desfase de 2 meses de la AFP
-(la cotizacion del mes m se conoce en m+2), de modo que en produccion
-`periodo_corte = hoy - 2`. El target ocurre en `corte+1 .. corte+6` y nunca se mira.
+**Convencion de fechas (ronda 2)**: `periodo_corte` es el **mes en que se toma la decision**
+(se arma la lista de contacto, se proyecta el flujo). Cada fuente se lee con su propio desfase:
 
-Para que el calculo sea barato con decenas de cortes, las tablas largas se convierten una
-sola vez en matrices densas `afiliado x periodo` (`preparar_panel`); cada corte es entonces
-un corte de columnas de esas matrices. `construir_features(tablas, periodo_corte)` funciona
-igual sin pasar el panel precalculado (lo construye internamente).
+| Fuente | Ultimo mes leido | Por que |
+|---|---|---|
+| panel laboral: RIM, estado, empleador, antiguedad, edad, saldo obligatorio | `corte-2` | la cotizacion del mes *m* llega en *m+2* |
+| licencias medicas (`dias_licencia`) | `corte-1` | el feed COMPIN/ISAPRE llega en *m+1* |
+| tablas operacionales de la AFP: aportes voluntarios, campanas, saldo voluntario | `corte` | son sistemas propios, sin rezago |
+| tributario (tabla anual) | ano `Y-1` si el corte es de abril o posterior, `Y-2` si no | la Operacion Renta del ano *Y* llega en abril de *Y+1* |
+
+El target ocurre en `corte+1 … corte+6`: **nada del target esta observado cuando se arma la
+lista**. La exclusion "sin aporte voluntario en los 6 meses previos" se evalua sobre
+`corte-5 … corte`, que es exactamente lo que se puede consultar en produccion.
+
+Los montos en CLP se expresan en **unidades de IMM** del mes correspondiente: el entrenamiento
+esta 3-4 anos antes del test y los niveles nominales crecen fuerte en ese lapso; normalizar evita
+que los arboles aprendan umbrales nominales que ya no significan lo mismo.
+
+Para que el calculo sea barato con decenas de cortes, las tablas largas se convierten una sola vez
+en matrices densas `afiliado x periodo` (`preparar_panel`) y cada corte es un corte de columnas.
 """
 from __future__ import annotations
 
@@ -19,21 +30,29 @@ import pandas as pd
 
 from afp_lab.rim_nowcasting.calendario import add_months, periodo_to_idx, rango_periodos
 
-from .synthetic import (ESTADOS, ESTADOS_INV, HORIZONTE, MESES_DESFASE, indexar_periodos,
-                        matriz_densa, tramo_igc)
+from .synthetic import (ESTADOS, ESTADOS_INV, HORIZONTE, MESES_DESFASE, MESES_DESFASE_LICENCIA,
+                        anio_tributario_disponible, indexar_periodos, matriz_densa, tramo_igc)
 
 # columnas que nunca entran al modelo
 COLUMNAS_ID = ("afiliado_id", "periodo_corte")
 COLUMNAS_TARGET = ("y", "monto")
+# escala en CLP que usa el regresor para des-normalizar; no son features
+COLUMNAS_ESCALA = ("rim_ref_clp", "imm_corte")
 
 CATEGORICAS = ("tipo_afiliado", "sexo", "nivel_educacional", "rubro", "tamano_empleador",
                "estado_corte", "region")
 
-# tramos usados para reportar por segmento (sueldos brutos mensuales en CLP)
+# tramos usados para reportar por segmento (rentas mensuales en CLP del mes de panel conocido)
 CORTES_TRAMO_RENTA = (0, 600_000, 1_000_000, 1_800_000, 3_000_000, np.inf)
 ETIQUETAS_TRAMO_RENTA = ("1_hasta_600k", "2_600k_1M", "3_1M_1.8M", "4_1.8M_3M", "5_sobre_3M")
 CORTES_TRAMO_EDAD = (0, 30, 40, 50, 60, 200)
 ETIQUETAS_TRAMO_EDAD = ("1_menos_30", "2_30_39", "3_40_49", "4_50_59", "5_60_mas")
+
+# topes de las features "meses desde ..." (con un flag aparte para no mezclar
+# "hace mucho" con "nunca" dentro de una variable continua)
+TOPE_MESES_COTIZACION = 24
+TOPE_MESES_APORTE = 36
+TOPE_MESES_CONTACTO = 24
 
 
 @dataclass
@@ -41,7 +60,7 @@ class PanelDenso:
     """Matrices `afiliado x periodo` con TODA la historia simulada.
 
     No hay leakage por construir estas matrices completas: `construir_features` solo lee
-    columnas con indice <= `periodo_corte`.
+    columnas con indice <= el desfase que corresponde a cada fuente.
     """
 
     periodos: list[int]
@@ -106,8 +125,8 @@ def preparar_panel(tablas: dict[str, pd.DataFrame]) -> PanelDenso:
         ia, ip = idx(ap)
         np.add.at(aporte_monto, (ia, ip), ap["monto"].to_numpy(np.float32))
         aporte_flag[ia, ip] = 1.0
-        aporte_mensual[ia[ap["periodicidad"].to_numpy() == "MENSUAL"],
-                       ip[ap["periodicidad"].to_numpy() == "MENSUAL"]] = 1.0
+        mensual = ap["periodicidad"].to_numpy() == "MENSUAL"
+        aporte_mensual[ia[mensual], ip[mensual]] = 1.0
 
     camp = tablas["campanas"]
     camp_total = np.zeros((n_af, n_per), dtype=np.float32)
@@ -156,17 +175,21 @@ def _ventana(m: np.ndarray, j: int, k: int) -> np.ndarray:
 
 
 def _suma(m: np.ndarray, j: int, k: int) -> np.ndarray:
-    """Suma de las ultimas `k` columnas terminando en `j` (inclusive)."""
     return _ventana(m, j, k).sum(axis=1, dtype=np.float64)
 
 
-def _meses_desde(m: np.ndarray, j: int, ventana: int, sin_dato: float = 99.0) -> np.ndarray:
-    """Meses transcurridos desde la ultima columna con valor > 0 dentro de `ventana`."""
-    ini = max(0, j - ventana + 1)
-    v = m[:, ini: j + 1] > 0
+def _meses_desde(m: np.ndarray, j: int, ventana: int) -> tuple[np.ndarray, np.ndarray]:
+    """(meses desde el ultimo mes con valor > 0 dentro de `ventana`, flag "no hubo ninguno").
+
+    Si no hubo ninguno el valor se fija en `ventana` (el tope) y el flag en 1, para no mezclar
+    "hace mucho" con "nunca" dentro de una variable continua.
+    """
+    v = _ventana(m, j, ventana) > 0
     largo = v.shape[1]
-    ultimo = largo - 1 - np.argmax(v[:, ::-1], axis=1)
-    return np.where(v.any(axis=1), (largo - 1 - ultimo).astype(float), sin_dato)
+    r = largo - 1 - np.argmax(v[:, ::-1], axis=1)
+    hubo = v.any(axis=1)
+    meses = np.where(hubo, (largo - 1 - r).astype(float), float(ventana))
+    return meses, (~hubo).astype(float)
 
 
 def _meses_a_marzo(mes_corte: int) -> int:
@@ -174,130 +197,147 @@ def _meses_a_marzo(mes_corte: int) -> int:
     return (3 - mes_corte) % 12
 
 
+def _n_empleadores_distintos(ventana_emp: np.ndarray) -> np.ndarray:
+    """Cantidad de empleadores DISTINTOS (no de transiciones) en la ventana.
+
+    Se cuenta con una mascara booleana por empleador presente en la ventana; es O(filas x meses)
+    y evita el sesgo de contar dos veces al afiliado que vuelve al mismo empleador.
+    """
+    v = np.sort(ventana_emp, axis=1)
+    distinto = np.ones_like(v, dtype=bool)
+    distinto[:, 1:] = v[:, 1:] != v[:, :-1]
+    return (distinto & (v >= 0)).sum(axis=1).astype(float)
+
+
 # ------------------------------------------------------------------ features
 def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
                        denso: PanelDenso | None = None, solo_elegibles: bool = True) -> pd.DataFrame:
-    """Features as-of de un `periodo_corte` (una fila por afiliado elegible).
+    """Features as-of del mes de decision `periodo_corte` (una fila por afiliado elegible).
 
-    Poblacion (definida solo con informacion <= corte):
+    Poblacion (definida solo con informacion disponible en el corte):
 
-    * afiliado vigente (con registro en el panel del mes de corte y no RETIRADO),
-    * que cotizo al menos una vez en los 12 meses previos al corte,
-    * **sin aporte voluntario en los 6 meses previos** (problema de adquisicion/reactivacion;
-      el mantenimiento de los aportantes mensuales es otro problema).
+    * afiliado vigente: con registro en el panel de `corte-2` y no RETIRADO;
+    * que cotizo al menos una vez en los 12 meses de panel conocidos (`corte-13 … corte-2`);
+    * **sin aporte voluntario en `corte-5 … corte`** (adquisicion y reactivacion; el
+      mantenimiento de los aportantes mensuales es otro problema).
     """
     d = denso or preparar_panel(tablas)
     if periodo_corte not in d.pos:
         raise ValueError(f"periodo_corte {periodo_corte} fuera de la ventana simulada")
-    j = d.pos[periodo_corte]
+    j = d.pos[periodo_corte]                       # mes de la decision (fuentes operacionales)
+    jp = j - MESES_DESFASE                         # panel laboral / RIM
+    jl = j - MESES_DESFASE_LICENCIA                # licencias medicas
+    if jp < 0:
+        raise ValueError(f"el corte {periodo_corte} no tiene {MESES_DESFASE} meses de panel previos")
     anio, mes = periodo_corte // 100, periodo_corte % 100
-    imm, uf = d.imm[j], d.uf[j]
+    imm_p, imm_d = d.imm[jp], d.imm[j]
     n_af = len(d.afiliado_ids)
 
-    # --- renta y estabilidad (as-of, con el desfase de 2 meses ya aplicado) -----------
-    rim_corte = d.rim[:, j].astype(float)
-    n_cot_12 = _suma(d.cotiza, j, 12)
-    n_cot_6 = _suma(d.cotiza, j, 6)
-    n_cot_3 = _suma(d.cotiza, j, 3)
-    suma_12 = _suma(d.rim, j, 12)
-    suma_3 = _suma(d.rim, j, 3)
+    # --- renta y estabilidad (panel conocido hasta corte-2) --------------------------
+    rim_corte = d.rim[:, jp].astype(float)
+    n_cot_12 = _suma(d.cotiza, jp, 12)
+    n_cot_6 = _suma(d.cotiza, jp, 6)
+    n_cot_3 = _suma(d.cotiza, jp, 3)
+    suma_12 = _suma(d.rim, jp, 12)
+    suma_3 = _suma(d.rim, jp, 3)
     media_12 = suma_12 / np.maximum(n_cot_12, 1.0)
     media_3 = suma_3 / np.maximum(n_cot_3, 1.0)
-    sumsq_12 = (_ventana(d.rim, j, 12).astype(np.float64) ** 2).sum(axis=1)
+    sumsq_12 = (_ventana(d.rim, jp, 12).astype(np.float64) ** 2).sum(axis=1)
     var_12 = np.maximum(sumsq_12 / np.maximum(n_cot_12, 1.0) - media_12 ** 2, 0.0)
     rim_ref = np.where(rim_corte > 0, rim_corte, media_12)
+    meses_desde_cot, sin_cotizacion = _meses_desde(d.cotiza, jp, TOPE_MESES_COTIZACION)
 
-    emp = d.emp_idx[:, j]
+    emp = d.emp_idx[:, jp]
     tiene_emp = emp >= 0
     emp_seguro = np.clip(emp, 0, None)
-    ventana_emp = d.emp_idx[:, max(0, j - 11): j + 1]
-    cambios = (ventana_emp[:, 1:] != ventana_emp[:, :-1]) & (ventana_emp[:, 1:] >= 0)
-    n_empleadores_12 = cambios.sum(axis=1) + (ventana_emp[:, 0] >= 0)
+    n_empleadores_12 = _n_empleadores_distintos(_ventana(d.emp_idx, jp, 12))
 
     # --- tributario ------------------------------------------------------------------
-    tramo_12m = tramo_igc(suma_12, anio)
-    # la Operacion Renta del anio Y llega en abril de Y+1: al corte solo se conoce Y-1 (si mes>=4) o Y-2
-    anio_disp = anio - 1 if mes >= 4 else anio - 2
+    tramo_12m = tramo_igc(suma_12, d.periodos[jp] // 100)
+    anio_disp = anio_tributario_disponible(periodo_corte)
     trib = d.tributario[d.tributario["anio"] == anio_disp]
     mapa_tramo = pd.Series(trib["tramo_igc"].to_numpy(), index=trib["afiliado_id"].to_numpy())
-    tramo_declarado = pd.Series(d.afiliado_ids).map(mapa_tramo).fillna(-1).to_numpy(float)
+    tramo_serie = pd.Series(d.afiliado_ids).map(mapa_tramo)
+    tramo_declarado = tramo_serie.fillna(0).to_numpy(float)
+    sin_tramo_declarado = tramo_serie.isna().to_numpy().astype(float)
 
-    # --- empleador -------------------------------------------------------------------
-    ofrece_apvc = np.where(tiene_emp, d.apvc_ofrece[emp_seguro, j], 0.0)
-    pct_match = np.where(tiene_emp, d.apvc_match[emp_seguro, j], 0.0)
-    meses_con_apvc = np.zeros(n_af)
-    if j > 0:
-        hist = d.apvc_ofrece[:, max(0, j - 35): j + 1]
-        acum = hist[:, ::-1].cumprod(axis=1).sum(axis=1)   # meses consecutivos ofreciendo, hasta 36
-        meses_con_apvc = np.where(tiene_emp, acum[emp_seguro], 0.0)
+    # --- empleador (nomina del mes de panel conocido) --------------------------------
+    ofrece_apvc = np.where(tiene_emp, d.apvc_ofrece[emp_seguro, jp], 0.0)
+    pct_match = np.where(tiene_emp, d.apvc_match[emp_seguro, jp], 0.0)
+    hist_apvc = _ventana(d.apvc_ofrece, jp, 36)
+    meses_apvc_emp = hist_apvc[:, ::-1].cumprod(axis=1).sum(axis=1)   # meses consecutivos, tope 36
+    meses_con_apvc = np.where(tiene_emp, meses_apvc_emp[emp_seguro], 0.0)
 
     aporto_12m = (_suma(d.aporte_flag, j, 12) > 0).astype(float)
-    df_emp = pd.DataFrame({"emp": np.where(tiene_emp, emp, -1), "rim": rim_corte, "apv": aporto_12m})
+    emp_col = np.where(tiene_emp, emp, -1)
+    df_emp = pd.DataFrame({"emp": emp_col, "rim": rim_corte, "apv": aporto_12m})
     agg = df_emp[df_emp["emp"] >= 0].groupby("emp").agg(
         emp_n_trabajadores=("rim", "size"), emp_rim_mediana=("rim", "median"),
         frac_apv_empleador=("apv", "mean"))
-    emp_n = np.where(tiene_emp, pd.Series(np.where(tiene_emp, emp, -1)).map(
-        agg["emp_n_trabajadores"]).fillna(0).to_numpy(), 0.0)
-    emp_mediana = np.where(tiene_emp, pd.Series(np.where(tiene_emp, emp, -1)).map(
-        agg["emp_rim_mediana"]).fillna(0).to_numpy(), 0.0)
-    frac_apv_emp = np.where(tiene_emp, pd.Series(np.where(tiene_emp, emp, -1)).map(
-        agg["frac_apv_empleador"]).fillna(0).to_numpy(), 0.0)
+    s_emp = pd.Series(emp_col)
+    emp_n = np.where(tiene_emp, s_emp.map(agg["emp_n_trabajadores"]).fillna(0).to_numpy(), 0.0)
+    emp_mediana = np.where(tiene_emp, s_emp.map(agg["emp_rim_mediana"]).fillna(0).to_numpy(), 0.0)
+    frac_apv_emp = np.where(tiene_emp, s_emp.map(agg["frac_apv_empleador"]).fillna(0).to_numpy(), 0.0)
 
     emp_attr = d.empleadores
     rubro = np.where(tiene_emp, emp_attr["rubro"].to_numpy()[emp_seguro], "SIN_EMPLEADOR")
     tamano = np.where(tiene_emp, emp_attr["tamano_empleador"].to_numpy()[emp_seguro], "SIN_EMPLEADOR")
 
-    # --- cuenta y aportes ------------------------------------------------------------
+    # --- cuenta y aportes (operacional: hasta el corte) ------------------------------
     n_ap_6 = _suma(d.aporte_flag, j, 6)
     n_ap_12 = _suma(d.aporte_flag, j, 12)
     n_ap_24 = _suma(d.aporte_flag, j, 24)
     monto_ap_24 = _suma(d.aporte_monto, j, 24)
     mensual_24 = _suma(d.aporte_mensual, j, 24)
-    meses_desde_aporte = _meses_desde(d.aporte_flag, j, 36)
+    meses_desde_aporte, nunca_aporto = _meses_desde(d.aporte_flag, j, TOPE_MESES_APORTE)
 
-    # --- campanas --------------------------------------------------------------------
+    # --- campanas (operacional: hasta el corte) --------------------------------------
     camp_1 = _suma(d.camp_total, j, 1)
     camp_3 = _suma(d.camp_total, j, 3)
     camp_6 = _suma(d.camp_total, j, 6)
     abrio_6 = _suma(d.camp_abrio, j, 6)
     canal_6 = {c: _suma(m, j, 6) for c, m in d.camp_canal.items()}
-    meses_desde_contacto = _meses_desde(d.camp_total, j, 24)
+    meses_desde_contacto, sin_contacto = _meses_desde(d.camp_total, j, TOPE_MESES_CONTACTO)
 
     # --- perfil ----------------------------------------------------------------------
     af = d.afiliados
-    edad = d.edad[:, j].astype(float)
+    edad = d.edad[:, jp].astype(float)
     sexo = af["sexo"].to_numpy()
     edad_pension = np.where(sexo == "F", 60, 65)
     meses_desde_afiliacion = np.array(
         [max(0, periodo_to_idx(periodo_corte) - periodo_to_idx(int(p))) for p in af["periodo_afiliacion"]],
         dtype=float)
-
-    estado_corte = pd.Series(d.estado[:, j]).map(ESTADOS_INV).to_numpy()
+    estado_corte = pd.Series(d.estado[:, jp]).map(ESTADOS_INV).to_numpy()
 
     out = pd.DataFrame({
         "afiliado_id": d.afiliado_ids,
         "periodo_corte": np.int32(periodo_corte),
-        # renta y estabilidad
-        "rim_corte": rim_corte,
-        "rim_ref": rim_ref,
-        "rim_media_12": media_12,
-        "rim_media_3": media_3,
+        # --- escala en CLP (no son features; el regresor las usa para des-normalizar) ---
+        "rim_ref_clp": rim_ref,
+        "imm_corte": float(imm_d),
+        # --- renta y estabilidad, en unidades de IMM ---
+        "rim_corte_imm": rim_corte / imm_p,
+        "rim_ref_imm": rim_ref / imm_p,
+        "rim_media_12_imm": media_12 / imm_p,
+        "rim_media_3_imm": media_3 / imm_p,
         "rim_cv_12": np.sqrt(var_12) / np.maximum(media_12, 1.0),
         "rim_tendencia_3_12": media_3 / np.maximum(media_12, 1.0),
-        "rim_sobre_imm": rim_ref / imm,
-        "cerca_minimo": (rim_ref < 1.15 * imm).astype(float),
+        "cerca_minimo": (rim_ref < 1.15 * imm_p).astype(float),
         "densidad_12": n_cot_12 / 12.0,
         "densidad_6": n_cot_6 / 6.0,
-        "meses_desde_ult_cotizacion": _meses_desde(d.cotiza, j, 24),
-        "meses_con_empleador": d.antig[:, j].astype(float),
-        "n_empleadores_12": n_empleadores_12.astype(float),
-        "meses_cesante_12": (_ventana(d.estado, j, 12) == ESTADOS["CESANTE"]).sum(axis=1).astype(float),
-        "dias_licencia_12": _ventana(d.dias_lic, j, 12).sum(axis=1, dtype=np.float64),
-        "licencia_larga_reciente": (_ventana(d.dias_lic, j, 3) >= 20).any(axis=1).astype(float),
-        # tributario
+        "meses_desde_ult_cotizacion": meses_desde_cot,
+        "sin_cotizacion_24m": sin_cotizacion,
+        "meses_con_empleador": d.antig[:, jp].astype(float),
+        "n_empleadores_12": n_empleadores_12,
+        "meses_cesante_12": (_ventana(d.estado, jp, 12) == ESTADOS["CESANTE"]).sum(axis=1).astype(float),
+        # licencias: se conocen hasta corte-1
+        "dias_licencia_12": _ventana(d.dias_lic, jl, 12).sum(axis=1, dtype=np.float64),
+        "licencia_larga_reciente": (_ventana(d.dias_lic, jl, 2) >= 20).any(axis=1).astype(float),
+        # tributario (la RIM ya viene topada al tope imponible: es renta IMPONIBLE, no renta bruta)
         "tramo_igc_12m": tramo_12m.astype(float),
         "tramo_igc_declarado": tramo_declarado,
-        "renta_anual_12m": suma_12,
+        "sin_tramo_declarado": sin_tramo_declarado,
+        "renta_imponible_12m_imm": suma_12 / imm_p,
         # calendario
         "mes_corte": float(mes),
         "es_marzo": float(mes == 3),
@@ -305,14 +345,15 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         "marzo_en_ventana": float(1 <= _meses_a_marzo(mes) <= HORIZONTE),
         "diciembre_en_ventana": float(1 <= ((12 - mes) % 12) <= HORIZONTE),
         # cuenta
-        "saldo_obligatorio": d.saldo_obl[:, j].astype(float),
-        "saldo_voluntario": d.saldo_vol[:, j].astype(float),
+        "saldo_obligatorio_imm": d.saldo_obl[:, jp] / imm_p,
+        "saldo_voluntario_imm": d.saldo_vol[:, j] / imm_d,
         "saldo_vol_sobre_rim": d.saldo_vol[:, j] / np.maximum(rim_ref, 1.0),
-        "saldo_obl_sobre_rim": d.saldo_obl[:, j] / np.maximum(rim_ref, 1.0),
+        "saldo_obl_sobre_rim": d.saldo_obl[:, jp] / np.maximum(rim_ref, 1.0),
         "meses_desde_ult_aporte": meses_desde_aporte,
+        "nunca_aporto_36m": nunca_aporto,
         "n_aportes_12m": n_ap_12,
         "n_aportes_24m": n_ap_24,
-        "monto_aportes_24m": monto_ap_24,
+        "monto_aportes_24m_imm": monto_ap_24 / imm_d,
         "tuvo_aporte_mensual_24m": (mensual_24 > 0).astype(float),
         # campanas
         "contactos_1m": camp_1,
@@ -323,15 +364,18 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         "contactos_6m_ejecutivo": canal_6["EJECUTIVO"],
         "contactos_6m_asesor": canal_6["ASESOR"],
         "aperturas_6m": abrio_6,
-        "tasa_apertura_6m": abrio_6 / np.maximum(camp_6, 1.0),
+        # tasa de apertura solo definida si hubo contacto; 0 en otro caso, con flag aparte
+        "tasa_apertura_6m": np.where(camp_6 > 0, abrio_6 / np.maximum(camp_6, 1.0), 0.0),
+        "tuvo_contacto_6m": (camp_6 > 0).astype(float),
         "meses_desde_ult_contacto": meses_desde_contacto,
+        "sin_contacto_24m": sin_contacto,
         # empleador
         "ofrece_apvc": ofrece_apvc.astype(float),
         "pct_match_apvc": pct_match.astype(float),
         "meses_con_apvc": meses_con_apvc,
         "frac_apv_empleador": frac_apv_emp,
         "emp_n_trabajadores": emp_n,
-        "emp_rim_mediana": emp_mediana,
+        "emp_rim_mediana_imm": emp_mediana / imm_p,
         "pos_rel_empleador": rim_corte / np.maximum(emp_mediana, 1.0),
         # perfil
         "edad": edad,
@@ -347,7 +391,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         "estado_corte": estado_corte,
     })
 
-    vigente = (d.estado[:, j] > 0) & (d.estado[:, j] != ESTADOS["RETIRADO"])
+    vigente = (d.estado[:, jp] > 0) & (d.estado[:, jp] != ESTADOS["RETIRADO"])
     out["elegible"] = (vigente & (n_cot_12 >= 1) & (n_ap_6 == 0)).astype(bool)
     if solo_elegibles:
         out = out[out["elegible"]].drop(columns=["elegible"]).reset_index(drop=True)
@@ -357,23 +401,20 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
 # ------------------------------------------------------------------ target
 def construir_target(tablas: dict[str, pd.DataFrame], periodo_corte: int,
                      horizonte: int = HORIZONTE) -> pd.DataFrame:
-    """`y` = 1 si hay al menos un aporte voluntario en `corte+1 .. corte+horizonte`.
-
-    `monto` = suma de esos aportes. Solo se llama para cortes cuyos `horizonte` meses estan
-    completos en los datos.
-    """
+    """`y` = 1 si hay al menos un aporte voluntario en `corte+1 … corte+horizonte`."""
     meses = [add_months(periodo_corte, k) for k in range(1, horizonte + 1)]
     ap = tablas["aportes_voluntarios"]
     vent = ap[ap["periodo"].isin(meses)]
     agg = vent.groupby("afiliado_id", as_index=False)["monto"].sum()
     agg["y"] = 1
-    return agg.rename(columns={"monto": "monto"})[["afiliado_id", "y", "monto"]]
+    return agg[["afiliado_id", "y", "monto"]]
 
 
 def cortes_disponibles(tablas: dict[str, pd.DataFrame], primer_corte: int,
                        horizonte: int = HORIZONTE) -> list[int]:
     """Cortes con los `horizonte` meses de target completos dentro de la ventana simulada."""
-    periodos = rango_periodos(int(tablas["macro"]["periodo"].min()), int(tablas["macro"]["periodo"].max()))
+    periodos = rango_periodos(int(tablas["macro"]["periodo"].min()),
+                              int(tablas["macro"]["periodo"].max()))
     ultimo = add_months(periodos[-1], -horizonte)
     return [p for p in periodos if primer_corte <= p <= ultimo]
 
@@ -399,14 +440,16 @@ def tipar(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     for c in CATEGORICAS:
         df[c] = df[c].astype("category")
-    num = [c for c in df.columns if c not in CATEGORICAS + COLUMNAS_ID + COLUMNAS_TARGET
-           and c not in ("tramo_renta", "tramo_edad")]
+    excluir = (set(CATEGORICAS) | set(COLUMNAS_ID) | set(COLUMNAS_TARGET)
+               | {"tramo_renta", "tramo_edad"})
+    num = [c for c in df.columns if c not in excluir]
     df[num] = df[num].astype(np.float32)
     return df
 
 
 def columnas_modelo(df: pd.DataFrame) -> list[str]:
-    excluir = set(COLUMNAS_ID) | set(COLUMNAS_TARGET) | {"tramo_renta", "tramo_edad", "elegible"}
+    excluir = (set(COLUMNAS_ID) | set(COLUMNAS_TARGET) | set(COLUMNAS_ESCALA)
+               | {"tramo_renta", "tramo_edad", "elegible"})
     cols = [c for c in df.columns if c not in excluir]
     prohibidas = [c for c in cols if c.startswith("lat_") or c.startswith("p_")]
     if prohibidas:
@@ -415,27 +458,70 @@ def columnas_modelo(df: pd.DataFrame) -> list[str]:
 
 
 def agregar_segmentos(df: pd.DataFrame) -> pd.DataFrame:
-    """Segmentos de reporte (§4 de CONVENCIONES): tramo de renta y tramo de edad."""
+    """Segmentos de reporte (CONVENCIONES §4): tramo de renta y tramo de edad."""
     df = df.copy()
-    df["tramo_renta"] = pd.cut(df["rim_ref"], bins=list(CORTES_TRAMO_RENTA),
+    df["tramo_renta"] = pd.cut(df["rim_ref_clp"], bins=list(CORTES_TRAMO_RENTA),
                                labels=list(ETIQUETAS_TRAMO_RENTA), right=False).astype(str)
     df["tramo_edad"] = pd.cut(df["edad"], bins=list(CORTES_TRAMO_EDAD),
                               labels=list(ETIQUETAS_TRAMO_EDAD), right=False).astype(str)
     return df
 
 
-def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
+def split_temporal(cortes: list[int], n_test: int = 12, n_valid: int = 12,
                    gap: int = HORIZONTE, horizonte: int = HORIZONTE) -> dict[str, list[int]]:
-    """Split temporal con gap (CONVENCIONES §3).
+    """Split temporal con gap **entre cada par de particiones** (CONVENCIONES §3, ronda 2).
 
-    `test` son los `n_test` cortes mas recientes. El **ultimo target de entrenamiento**
-    (`corte + horizonte`) queda al menos `gap` meses antes del primer corte de test, de modo
-    que ningun mes usado para etiquetar el entrenamiento se solapa con la ventana de test.
+    Para cada par (anterior -> posterior), el ultimo mes de target de la particion anterior
+    (`corte_max + horizonte`) queda al menos `gap` meses antes del primer corte de la posterior:
+    `corte_max_anterior + horizonte + gap <= corte_min_posterior`. Sin este gap entre train y
+    valid la validacion comparte meses de target con el entrenamiento y deja de servir para
+    early stopping y para calibrar.
     """
+    if len(cortes) < n_test + n_valid + 1:
+        raise ValueError("no hay cortes suficientes para el split pedido")
+    salto = gap + horizonte
     test = cortes[-n_test:]
-    corte_max_train = add_months(test[0], -(gap + horizonte))
-    previos = [c for c in cortes if c <= corte_max_train]
-    if len(previos) <= n_valid:
-        raise ValueError("no hay cortes suficientes para entrenar y validar con este gap")
-    return {"train": previos[:-n_valid], "valid": previos[-n_valid:], "test": test,
-            "descartados": [c for c in cortes if c > corte_max_train and c not in test]}
+    corte_max_valid = add_months(test[0], -salto)
+    candidatos = [c for c in cortes if c <= corte_max_valid]
+    if len(candidatos) <= n_valid:
+        raise ValueError("no hay cortes suficientes para validar con este gap")
+    valid = candidatos[-n_valid:]
+    corte_max_train = add_months(valid[0], -salto)
+    train = [c for c in cortes if c <= corte_max_train]
+    if not train:
+        raise ValueError("no hay cortes suficientes para entrenar con este gap")
+    usados = set(train) | set(valid) | set(test)
+    return {"train": train, "valid": valid, "test": test,
+            "descartados": [c for c in cortes if c not in usados]}
+
+
+def origenes_moviles(cortes: list[int], n_test: int = 12, n_valid: int = 12,
+                     gap: int = HORIZONTE, horizonte: int = HORIZONTE,
+                     cada: int = 3) -> list[dict]:
+    """Origenes moviles: reentrenamiento periodico, como en produccion (CONVENCIONES §3).
+
+    Los `n_test` cortes mas recientes se parten en bloques de `cada` meses. Para cada bloque se
+    entrena un modelo con la informacion que existiria en ese momento:
+
+    * `valid` = los `n_valid` cortes que terminan `horizonte + gap` meses antes del primer corte
+      del bloque (sirve para early stopping, smearing y la decision de calibrar),
+    * `train` = todos los cortes anteriores a `valid` con el mismo salto `horizonte + gap`.
+
+    Asi ningun mes de target de train o valid toca el bloque de test, y la ventana de
+    entrenamiento se expande a medida que avanza el tiempo.
+    """
+    salto = gap + horizonte
+    test = cortes[-n_test:]
+    bloques = [test[i:i + cada] for i in range(0, len(test), cada)]
+    origenes = []
+    for bloque in bloques:
+        corte_max_valid = add_months(bloque[0], -salto)
+        candidatos = [c for c in cortes if c <= corte_max_valid]
+        if len(candidatos) <= n_valid:
+            raise ValueError(f"no hay cortes suficientes para validar el origen {bloque[0]}")
+        valid = candidatos[-n_valid:]
+        train = [c for c in cortes if c <= add_months(valid[0], -salto)]
+        if not train:
+            raise ValueError(f"no hay cortes suficientes para entrenar el origen {bloque[0]}")
+        origenes.append({"origen": bloque[0], "train": train, "valid": valid, "test": bloque})
+    return origenes

@@ -38,8 +38,16 @@ ni nombres, ni datos de clientes.
 * Split **temporal**: entrenar con cortes antiguos, validar y testear con cortes posteriores, dejando un
   gap de al menos `h` meses entre el último target de entrenamiento y el primer corte de test.
 * Test obligatorio: alterar o borrar cualquier registro posterior al corte no cambia las features.
-* Recordar el desfase real de la AFP: la cotización del mes m se conoce en m+2. Si el proyecto usa RIM o
-  estado laboral, el último mes "conocido" es `corte` y en producción `corte = hoy - 2`.
+* Convención de fechas (acordada en la ronda 1): `periodo_corte` es el **mes en que se toma la decisión**
+  (se arma la lista, se proyecta). Cada fuente se lee con su propio desfase: panel laboral y RIM hasta
+  `corte-2` (la cotización del mes m llega en m+2), eventos AFC y licencias hasta `corte-1`, tablas
+  operacionales propias de la AFP (contactos, reclamos, aportes voluntarios, uso digital) hasta `corte`.
+  El target empieza en `corte+1`. Así la población entrenada es la misma que se sirve en producción.
+* El gap temporal de h meses se aplica **entre cada par de particiones** (train→valid y valid→test), no
+  sólo antes de test: una validación que comparte meses de target con train no sirve para early stopping
+  ni para calibrar. Validar y testear con al menos 12 cortes u orígenes móviles, y reportar por corte.
+* Hiperparámetros: sólo con validación. Si un número de test influyó en una decisión, decirlo y
+  re-evaluar en cortes posteriores no consultados.
 
 ## 4. Modelado y evaluación
 
@@ -59,7 +67,10 @@ ni nombres, ni datos de clientes.
 
 * Python 3.10+, funciones puras con docstrings en español, sin notebooks en el repo.
 * Sin `print` de debugging; el `run.py` imprime tablas de resultados y las guarda en `salidas/`.
-* No ejecutar comandos git desde el código ni desde los agentes: el gerente integra.
+* No ejecutar comandos git desde el código ni desde los agentes: el gerente integra. Y el gerente no
+  ejecuta `checkout`/`reset`/`stash` sobre el árbol compartido mientras haya trabajo sin confirmar de un
+  data scientist (en la ronda 1 un `git checkout -- .` revirtió ediciones en curso); desde la ronda 2 cada
+  DS trabaja en su propio worktree y el gerente fusiona.
 * No tocar carpetas de otros proyectos ni `common/` sin acordarlo en el README ("Propuestas para common").
 
 ## 6. Plantilla de README de proyecto

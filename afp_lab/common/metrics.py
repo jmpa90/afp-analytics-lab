@@ -24,9 +24,20 @@ def metricas_regresion(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
 
 def metricas_clasificacion(y: np.ndarray, prob: np.ndarray) -> dict[str, float]:
     y, prob = np.asarray(y, int), np.asarray(prob, float)
-    orden = np.argsort(-prob)
-    top = orden[: max(1, len(y) // 10)]
     base = y.mean() if y.mean() > 0 else 1e-9
+    # lift del decil 1 con empates tratados por su valor esperado: el grupo de score que cruza el
+    # borde del decil aporta su tasa media ponderada por la fraccion incluida (un score constante da
+    # exactamente 1,0; una regla binaria da la tasa del grupo marcado)
+    k = max(1, len(y) // 10)
+    grupos = pd.DataFrame({"p": prob, "y": y}).groupby("p")["y"].agg(["sum", "count"]).sort_index(ascending=False)
+    restante, positivos = k, 0.0
+    for suma, cuenta in zip(grupos["sum"], grupos["count"]):
+        toma = min(restante, cuenta)
+        positivos += suma * toma / cuenta
+        restante -= toma
+        if restante <= 0:
+            break
+    lift = (positivos / k) / base
     # KS: distancia maxima entre las distribuciones acumuladas de positivos y negativos
     df = pd.DataFrame({"y": y, "p": prob}).sort_values("p", ascending=False)
     pos = (df["y"] == 1).cumsum() / max((df["y"] == 1).sum(), 1)
@@ -37,13 +48,16 @@ def metricas_clasificacion(y: np.ndarray, prob: np.ndarray) -> dict[str, float]:
         "auc": float(roc_auc_score(y, prob)) if 0 < y.mean() < 1 else float("nan"),
         "average_precision": float(average_precision_score(y, prob)) if 0 < y.mean() < 1 else float("nan"),
         "brier": float(brier_score_loss(y, prob)),
-        "lift_decil_1": float(y[top].mean() / base),
+        "lift_decil_1": float(lift),
         "ks": float(np.max(np.abs(pos.to_numpy() - neg.to_numpy()))),
     }
 
 
 def tabla_metricas_por_segmento(df: pd.DataFrame, col_segmento: str, fn, col_y: str, col_pred: str) -> pd.DataFrame:
     filas = []
-    for seg, g in df.groupby(col_segmento):
+    # observed=True: con columnas category no se generan filas vacias (reportado por DS-1 y DS-2)
+    for seg, g in df.groupby(col_segmento, observed=True):
+        if len(g) == 0:
+            continue
         filas.append({col_segmento: seg, **fn(g[col_y].to_numpy(), g[col_pred].to_numpy())})
     return pd.DataFrame(filas)

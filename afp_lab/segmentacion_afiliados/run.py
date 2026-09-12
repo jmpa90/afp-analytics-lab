@@ -15,10 +15,13 @@ import argparse
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from .evaluate import (construir_targets_negocio, entrenar_clasificador, matriz_transicion,
                        perfil_segmentos, separacion_negocio, tasas_por_segmento)
 from .features import VENTANA_DENSIDAD, construir_features
-from .segmentar import ajustar, asignar, seleccionar_k
+from .segmentar import (_silueta_muestreada, ajustar, asignar_fusionado, escalar,
+                        fusionar_segmentos_chicos, seleccionar_k)
 from .synthetic import add_months, generar_datos, generar_tablas_externas, periodo_to_idx
 
 DESFASE_RIM = 2
@@ -79,8 +82,23 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
          f"tamanos_ok={ganador.tamanos_ok} cumple_aceptacion={ganador.cumple}")
 
     labels, modelo, scaler = ajustar(feats, ganador.algoritmo, ganador.k, seed=seed, scaler=scaler)
+    X_ref, _ = escalar(feats, scaler)
+    labels, mapa_fusion = fusionar_segmentos_chicos(X_ref, labels)
+    k_final = len(set(mapa_fusion.values()))
+    if k_final < ganador.k:
+        silueta_final = _silueta_muestreada(X_ref, labels, seed=seed)
+        print(f"\nFusion de segmentos chicos (< 3 %): k baja de {ganador.k} a {k_final}. "
+             f"Silueta final (post-fusion): {silueta_final:.4f}")
+    else:
+        silueta_final = ganador.silueta
+        print(f"\nSin fusiones: los {ganador.k} segmentos ya cumplen el piso de 3 %.")
     feats = feats.copy()
     feats["segmento"] = labels
+    tam_ok_final = bool((pd.Series(labels).value_counts(normalize=True) >= 0.03).all())
+    cumple_final = (silueta_final >= 0.20) and (ganador.ari_resampling >= 0.60) and tam_ok_final
+    print(f"Aceptacion final (post-fusion): silueta={silueta_final:.4f} (>=0,20), "
+         f"ari_resampling={ganador.ari_resampling:.4f} (>=0,60), segmentos>=3%={tam_ok_final}, "
+         f"cumple={cumple_final}")
 
     perfil_seg = perfil_segmentos(feats)
     perfil_seg.to_csv(salida_dir / "reportes" / "perfil_segmentos.csv", index=False)
@@ -105,8 +123,8 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
 
     feats_mas6 = construir_features(tablas, externas, corte_mas6)
     feats_mas12 = construir_features(tablas, externas, corte_mas12)
-    labels_mas6 = asignar(modelo, scaler, feats_mas6)
-    labels_mas12 = asignar(modelo, scaler, feats_mas12)
+    labels_mas6 = asignar_fusionado(modelo, scaler, feats_mas6, mapa_fusion)
+    labels_mas12 = asignar_fusionado(modelo, scaler, feats_mas12, mapa_fusion)
 
     trans6, n6 = matriz_transicion(feats["afiliado_id"].to_numpy(), labels,
                                    feats_mas6["afiliado_id"].to_numpy(), labels_mas6)
@@ -123,9 +141,10 @@ def main(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int
     total = time.time() - t0
     print(f"\nRuntime total: {total:.1f}s. Salidas en {salida_dir.resolve()}")
     return {
-        "tabla_k": tabla_k, "ganador": ganador, "feats": feats, "perfil_segmentos": perfil_seg,
-        "tasas_negocio": tasas, "separacion_negocio": sep, "clasificador": clas,
-        "transicion_6m": trans6, "transicion_12m": trans12, "corte": corte,
+        "tabla_k": tabla_k, "ganador": ganador, "k_final": k_final, "silueta_final": silueta_final,
+        "cumple_final": cumple_final, "mapa_fusion": mapa_fusion, "feats": feats,
+        "perfil_segmentos": perfil_seg, "tasas_negocio": tasas, "separacion_negocio": sep,
+        "clasificador": clas, "transicion_6m": trans6, "transicion_12m": trans12, "corte": corte,
         "modelo": modelo, "scaler": scaler,
     }
 

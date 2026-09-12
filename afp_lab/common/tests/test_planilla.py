@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from afp_lab.common.planilla import construir_rezagos, generar_planilla
+from afp_lab.common.planilla import (_estado_dnp_empleador, construir_agregado_empleador,
+                                     construir_rezagos, generar_planilla)
 from afp_lab.common.synth_base import generar_universo
 from afp_lab.common.tablas_equivalencia import (CODIGOS_NO_GENERADOS, MOVIMIENTO_PERSONAL,
                                                  TIPO_PAGO, tasa_aporte_empleador)
@@ -203,3 +204,74 @@ def test_funciona_con_perfil_cuprum():
     planilla_c = generar_planilla(universo_c, seed=SEED)
     assert len(planilla_c) > 0
     assert planilla_c.isna().drop(columns="tipo_contrato_planilla").sum().eq(0).all()
+
+
+# --------------------------------------------------------- ronda 2: bug de recepcion (DS-2)
+def test_recepcion_y_estado_consistentes_por_declaracion(planilla):
+    """Bug reportado por DS-2 desde el proyecto 05: antes, `periodo_recepcion` y
+    `estado_pago` se sorteaban linea a linea (`rng.random(n)` con n = numero de LINEAS), asi
+    que dos lineas de una misma declaracion (mismo rut, empleador y periodo — p. ej. la 01 y
+    la 02 de un afiliado con gratificacion) podian recibir un `periodo_recepcion` o un
+    `estado_pago` distinto. Ahora deben ser IDENTICOS dentro de cada declaracion."""
+    decl = planilla[planilla["tipo_movimiento"] == "DECLARACION"]
+    g = decl.groupby(["rut_trabajador", "empleador_id", "periodo"])
+    assert (g["periodo_recepcion"].nunique() == 1).all()
+    assert (g["estado_pago"].nunique() == 1).all()
+
+
+def test_dnp_es_por_empleador_y_periodo_no_por_linea(planilla):
+    """La DNP (problema de caja del empleador) debe ser identica para TODOS los
+    trabajadores del mismo empleador en el mismo periodo, no un sorteo independiente por
+    afiliado."""
+    decl = planilla[planilla["tipo_movimiento"] == "DECLARACION"]
+    frac_dnp = (decl.groupby(["empleador_id", "periodo"])["estado_pago"]
+               .apply(lambda s: (s == "DNP").mean()))
+    assert set(frac_dnp.unique()) <= {0.0, 1.0}
+
+
+def test_dnp_persistencia_configurable():
+    """`_estado_dnp_empleador` con `rho` mas alto debe dar rachas de DNP mas largas (misma
+    probabilidad marginal, mas persistencia mes a mes), sobre muchos empleadores para que el
+    promedio sea estable con una sola semilla."""
+    n_emp = 300
+    # periodos yyyymm consecutivos, sin depender de utilidades internas del modulo
+    periodos = []
+    p = 202201
+    for _ in range(48):
+        periodos.append(p)
+        p = p + 1 if p % 100 < 12 else (p // 100 + 1) * 100 + 1
+    periodos = np.array(periodos)
+    emp_lat = pd.DataFrame({"empleador_id": np.arange(n_emp), "p_dnp": np.full(n_emp, 0.25)})
+
+    def racha_media(rho, seed):
+        out = _estado_dnp_empleador(periodos, emp_lat, seed=seed, rho=rho)
+        out = out.sort_values(["empleador_id", "periodo"])
+        racha_total, n_rachas = 0, 0
+        for _, serie in out.groupby("empleador_id")["_dnp"]:
+            x = serie.to_numpy().astype(int)
+            cambios = np.diff(x) != 0
+            n_rachas += cambios.sum() + 1
+            racha_total += len(x)
+        return racha_total / n_rachas
+
+    r_baja = racha_media(0.0, seed=1)
+    r_alta = racha_media(0.7, seed=1)
+    assert r_alta > r_baja * 1.15
+
+
+def test_construir_agregado_empleador(universo, planilla):
+    agg = construir_agregado_empleador(planilla)
+    cols = ["empleador_id", "periodo", "dotacion", "masa_imponible", "lag_recepcion_medio",
+           "frac_dnp", "n_lineas"]
+    assert list(agg.columns) == cols
+    assert not agg.isna().any().any()
+    assert (agg["dotacion"] >= 0).all()
+    assert (agg["masa_imponible"] >= 0).all()
+    assert set(agg["frac_dnp"].unique()) <= {0.0, 1.0}
+    assert (agg["lag_recepcion_medio"] >= 0).all()
+    # dotacion de un (empleador, periodo) coincide con los rut distintos de sus lineas 01
+    decl01 = planilla[(planilla["tipo_movimiento"] == "DECLARACION") & (planilla["tipo_pago"] == "01")]
+    esperado = decl01.groupby(["empleador_id", "periodo"])["rut_trabajador"].nunique()
+    m = agg.set_index(["empleador_id", "periodo"])["dotacion"]
+    comparado = esperado.reindex(m.index).fillna(0).astype(int)
+    assert (comparado == m).all()

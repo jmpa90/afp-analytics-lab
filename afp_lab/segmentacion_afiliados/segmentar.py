@@ -166,3 +166,44 @@ def asignar(modelo, scaler: RobustScaler, df: pd.DataFrame) -> np.ndarray:
     (out-of-sample: `KMeans.predict`/`GaussianMixture.predict` funcionan igual)."""
     X, _ = escalar(df, scaler)
     return modelo.predict(X)
+
+
+def fusionar_segmentos_chicos(X: np.ndarray, labels: np.ndarray,
+                              min_frac: float = SEG_MIN_FRAC) -> tuple[np.ndarray, dict[int, int]]:
+    """Fusiona iterativamente el segmento mas chico (bajo `min_frac` del total) con el
+    segmento vecino mas cercano (distancia entre centroides en el espacio ya escalado),
+    hasta que todos cumplan el piso de tamano del brief (`ningun segmento < 3 %`) o quede
+    un unico segmento. `k` puede no coincidir exactamente con el ganador de `seleccionar_k`
+    en la practica: a veces ninguno de los k evaluados en [5,9] deja los 5-9 segmentos
+    *todos* sobre el piso (un sub-grupo genuino pero chico, p. ej. afiliados sin RIM
+    conocida y sin empleador, se cuela bajo el 3 % en cualquier k probado); fusionarlo con
+    su vecino mas parecido es la practica estandar en segmentacion aplicada, mas razonable
+    que forzar una particion peor solo para cumplir el piso. Devuelve las etiquetas
+    fusionadas (renumeradas 0..k'-1) y el mapa {etiqueta_original: etiqueta_fusionada} para
+    aplicar la MISMA fusion a asignaciones futuras (ver `asignar_fusionado`)."""
+    labels = np.asarray(labels).copy()
+    mapa = {int(c): int(c) for c in np.unique(labels)}
+    n = len(labels)
+    while True:
+        uniq, counts = np.unique(labels, return_counts=True)
+        if len(uniq) <= 1 or (counts / n).min() >= min_frac:
+            break
+        chico = int(uniq[np.argmin(counts)])
+        centroides = {int(c): X[labels == c].mean(axis=0) for c in uniq}
+        cc = centroides.pop(chico)
+        destino = min(centroides, key=lambda c: float(np.linalg.norm(centroides[c] - cc)))
+        labels = np.where(labels == chico, destino, labels)
+        mapa = {orig: (destino if dest == chico else dest) for orig, dest in mapa.items()}
+
+    restantes = sorted(np.unique(labels).tolist())
+    renum = {old: new for new, old in enumerate(restantes)}
+    labels_final = np.array([renum[int(l)] for l in labels])
+    mapa_final = {orig: renum[dest] for orig, dest in mapa.items()}
+    return labels_final, mapa_final
+
+
+def asignar_fusionado(modelo, scaler: RobustScaler, df: pd.DataFrame, mapa_fusion: dict[int, int]) -> np.ndarray:
+    """`asignar` seguido del mapa de `fusionar_segmentos_chicos`, para que un corte futuro
+    (transicion a 6/12 meses) quede en el MISMO espacio de segmentos ya fusionado."""
+    labels = asignar(modelo, scaler, df)
+    return np.array([mapa_fusion[int(l)] for l in labels])

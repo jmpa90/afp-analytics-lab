@@ -12,6 +12,9 @@ columnas ad-hoc cada vez.
 
     generar_planilla(universo, seed) -> pd.DataFrame   # grano: afiliado x empleador x periodo x tipo_pago
     construir_rezagos(planilla, seed) -> pd.DataFrame  # cotizaciones recibidas sin imputar al RUT
+    construir_agregado_empleador(planilla) -> pd.DataFrame  # grano: empleador x periodo (dotacion,
+                                                             # masa imponible, recepcion, DNP; pedido
+                                                             # del proyecto 05 para no recorrer lineas)
 
 Alcance y simplificaciones (documentadas también en el README de este módulo... este módulo vive
 en `common/`, así que las decisiones quedan en el docstring y en `docs/normativa_tablas_afp.md`):

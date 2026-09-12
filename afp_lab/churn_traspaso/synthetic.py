@@ -134,6 +134,11 @@ class ParametrosChurn:
     b_marzo: float = 0.35
     b_agosto: float = 0.30
     b_u_switcher: float = 0.55             # el que ya se cambio de AFP una vez se vuelve a cambiar
+    # El "switcher" es LATENTE y la brecha de antiguedad solo es un proxy imperfecto: parte de los
+    # que llegaron de otra AFP se movieron una sola vez por asignacion (licitacion previa, convenio
+    # del empleador) y no son switchers activos, y parte de los que no registran brecha si lo son.
+    p_switcher_dado_traspaso: float = 0.60
+    p_switcher_sin_traspaso: float = 0.22
     sigma_afiliado: float = 0.40           # efecto aleatorio NO observable (fija el techo de AUC)
     sigma_mes: float = 0.15                # ruido idiosincratico mensual
     p_retardo_intencion: tuple = (0.10, 0.22, 0.28, 0.25, 0.15)  # meses entre la intencion y la solicitud
@@ -196,6 +201,8 @@ DESCRIPCION_PARAMETROS = {
     "b_marzo": "Estacionalidad de marzo",
     "b_agosto": "Estacionalidad de agosto",
     "b_u_switcher": "Desplazamiento de la propension para quien ya se cambio de AFP antes",
+    "p_switcher_dado_traspaso": "P(switcher activo | llego de otra AFP): el resto se movio por asignacion",
+    "p_switcher_sin_traspaso": "P(switcher activo | sin brecha de antiguedad): switcher que aun no se movio",
     "sigma_afiliado": "Desviacion del efecto aleatorio NO observable por afiliado",
     "sigma_mes": "Desviacion del ruido idiosincratico mensual",
     "p_retardo_intencion": "Distribucion del retardo (meses) entre la intencion y la firma",
@@ -441,7 +448,11 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
     # ---- efectos aleatorios: parte NO observable + el desplazamiento de los "switchers"
     # (quien ya se cambio de AFP antes: la AFP lo ve porque su antiguedad en la AFP es menor que su
     # antiguedad en el sistema, asi que es un driver OBSERVABLE aunque persistente)
-    es_switcher = via_traspaso | (~nuevo_sistema & (antig_ini < np.maximum(-idx_afil, 0)))
+    # brecha de antiguedad OBSERVABLE (la AFP ve que su antiguedad es menor que la del sistema)
+    con_brecha = via_traspaso | (~nuevo_sistema & (antig_ini < np.maximum(-idx_afil, 0)))
+    # ...y el switcher ACTIVO, que es latente: el proxy observable falla en ambos sentidos
+    p_sw = np.where(con_brecha, par.p_switcher_dado_traspaso, par.p_switcher_sin_traspaso)
+    es_switcher = rng.random(n) < p_sw
     u_afil = rng.normal(0, par.sigma_afiliado, n) + par.b_u_switcher * es_switcher
 
     # ---- campanas de venta de la competencia por empleador (charlas en la empresa): los contactos
@@ -750,7 +761,8 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
 
     latente = pd.DataFrame({"afiliado_id": af_ids, "lat_u_traspaso": u_afil,
                             "lat_intencion_visible": intencion_visible.astype(int),
-                            "lat_switcher": es_switcher.astype(int)})
+                            "lat_switcher": es_switcher.astype(int),
+                            "lat_con_brecha_antiguedad": con_brecha.astype(int)})
     return {
         "afiliados": afiliados,
         "afiliados_latente_churn": latente,
@@ -795,9 +807,18 @@ def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | 
         rangos.append(piv.max(axis=1) - piv.min(axis=1))
     rango_rent = pd.concat(rangos)
     n_anios = max(len(cartera_mes) / 12, 1e-9)
+    # cotizantes = afiliados de la cartera con RIM > 0 ese mes (el brief fija la tasa objetivo sobre
+    # la cartera COTIZANTE, no sobre la cartera total)
+    pan = tablas["panel_mensual"]
+    rim = pan["rim_emp1"].to_numpy() + pan["rim_emp2"].to_numpy()
+    cot = pan.loc[rim > 0, ["afiliado_id", "periodo"]].merge(
+        saldos[["afiliado_id", "periodo"]], on=["afiliado_id", "periodo"])
+    cot_mes = cot.groupby("periodo")["afiliado_id"].count().reindex(cartera_mes.index)
+    tasa_cot = float((salidas_mes / cot_mes).mean() * 12)
     filas = [
         {"indicador": "afiliados_en_cartera_promedio", "valor": float(cartera_mes.mean()), "detalle": ""},
         {"indicador": "tasa_traspaso_anualizada", "valor": float((salidas_mes / cartera_mes).mean() * 12), "detalle": "sobre la cartera total"},
+        {"indicador": "tasa_traspaso_anualizada_cotizantes", "valor": tasa_cot, "detalle": "brief: 4-7 %"},
         {"indicador": "tasa_traspaso_12m_min", "valor": float(tasa_12m.min()), "detalle": "minimo movil de 12 meses"},
         {"indicador": "tasa_traspaso_12m_max", "valor": float(tasa_12m.max()), "detalle": "maximo movil de 12 meses"},
         {"indicador": "rango_rentabilidad_12m_entre_afp_mediana_pp", "valor": float(rango_rent.median()), "detalle": "real en Chile: 1-2 pp"},
@@ -811,7 +832,29 @@ def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | 
     ]
     if dataset is not None and len(dataset):
         filas.extend(chequeos_determinismo(dataset, prob))
+        filas.extend(_chequeos_proxy_latente(tablas, dataset))
     return pd.DataFrame(filas)
+
+
+def _chequeos_proxy_latente(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame) -> list[dict]:
+    """Concordancia entre una feature observable y el latente que la inspira.
+
+    Una feature que reproduce un latente con concordancia ~1 es el latente disfrazado: el gerente
+    rechazo `llego_por_traspaso` en la ronda 2 justamente por eso.
+    """
+    lat = tablas.get("afiliados_latente_churn")
+    if lat is None or "llego_por_traspaso" not in dataset.columns:
+        return []
+    m = dataset[["afiliado_id", "llego_por_traspaso"]].merge(
+        lat[["afiliado_id", "lat_switcher"]], on="afiliado_id", how="left")
+    a = m["llego_por_traspaso"].to_numpy()
+    b = m["lat_switcher"].to_numpy()
+    return [
+        {"indicador": "frac_llego_por_traspaso", "valor": float(a.mean()), "detalle": "proxy observable"},
+        {"indicador": "frac_switcher_latente", "valor": float(b.mean()), "detalle": "latente real"},
+        {"indicador": "concordancia_proxy_switcher", "valor": float((a == b).mean()),
+         "detalle": "1,0 = la feature es el latente disfrazado"},
+    ]
 
 
 def chequeos_determinismo(dataset: pd.DataFrame, prob: np.ndarray | None = None,

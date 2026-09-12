@@ -26,9 +26,9 @@ from .synthetic import generar_tablas, resumen_simulacion, tabla_parametros
 
 SALIDA_POR_DEFECTO = "salidas/churn_traspaso"
 SEMILLAS_ESTABILIDAD = (42, 123, 7, 2024, 99)
+# `afiliados_latente_churn` NO se escribe: es latente y solo alimenta diagnosticos en memoria
 TABLAS_FUENTE = ("afiliados", "empleadores", "panel_mensual", "macro", "mercado", "saldos",
-                 "cambios_fondo", "traspasos", "contactos", "reclamos", "uso_digital",
-                 "afiliados_latente_churn")
+                 "cambios_fondo", "traspasos", "contactos", "reclamos", "uso_digital")
 
 
 def _mostrar(titulo: str, df: pd.DataFrame, ruta: Path | None = None, max_filas: int = 40) -> None:
@@ -80,6 +80,11 @@ def resumen_corrida(tablas: dict, split: dict, partes: dict, seed: int) -> dict:
         "captura_10_regla": float(cap.loc["regla", "pct_traspasos_capturados"]),
         "captura_10_regla_graduada": float(cap.loc["regla_graduada", "pct_traspasos_capturados"]),
         "captura_10_saldo_modelo": float(cap.loc["modelo", "pct_saldo_riesgo_capturado"]),
+        "razon_captura_modelo_vs_mejor_regla": float(
+            cap.loc["modelo", "pct_traspasos_capturados"]
+            / max(cap.loc["regla", "pct_traspasos_capturados"],
+                  cap.loc["regla_graduada", "pct_traspasos_capturados"], 1e-9)),
+        "frac_cartera_marcada_por_la_regla": float(M.baseline_regla_negocio(te).mean()),
         "sesgo_saldo_sin_calibrar": float(E.saldo_en_riesgo(te, prob_bruta)["sesgo_relativo"].iloc[0]),
         "sesgo_saldo_isotonica": float(E.saldo_en_riesgo(te, prob_agg)["sesgo_relativo"].iloc[0]),
         "sesgo_saldo_con_ancla": float(E.saldo_en_riesgo(
@@ -105,15 +110,74 @@ def techo_predictibilidad(tablas: dict, partes: dict, seed: int, auc_modelo: flo
     partes2 = {}
     for k, d in partes.items():
         d = d.copy()
-        d["lat_u_traspaso"] = d["afiliado_id"].map(lat).astype("float32")
+        d["u_latente_diagnostico"] = d["afiliado_id"].map(lat).astype("float32")
         partes2[k] = d
-    modelo = M.entrenar(partes2["train"], partes2["valid"], seed=seed)
+    # lista de columnas EXPLICITA: `columnas_features` excluye de forma dura los prefijos lat_/p_,
+    # asi que el diagnostico tiene que pedir su columna a mano (y nunca puede colarse al modelo real)
+    cols = F.columnas_features(partes["train"]) + ["u_latente_diagnostico"]
+    modelo = M.entrenar(partes2["train"], partes2["valid"], seed=seed, columnas=cols)
     prob = M.predecir(modelo, partes2["test"])
     m = E.tabla_comparativa(partes2["test"], {"techo": prob}).iloc[0]
     return pd.DataFrame([
         {"escenario": "modelo (solo informacion observable al corte)", "auc": auc_modelo},
         {"escenario": "techo: + efecto aleatorio latente del afiliado", "auc": float(m["auc"])},
     ])
+
+
+# Las 5 configuraciones que se compararon, en valores absolutos (la 4 es la que quedo por defecto
+# en `model.PARAMS_LGBM`). Se eligen por AUC de VALIDACION; el AUC de test se reporta solo para que
+# se vea que la eleccion no se hizo con test.
+GRID_HIPERPARAMETROS = (
+    {"learning_rate": 0.05, "num_leaves": 48, "min_data_in_leaf": 200, "feature_fraction": 0.75},
+    {"learning_rate": 0.03, "num_leaves": 64, "min_data_in_leaf": 200, "feature_fraction": 0.75},
+    {"learning_rate": 0.05, "num_leaves": 48, "min_data_in_leaf": 60, "feature_fraction": 0.75},
+    {"learning_rate": 0.03, "num_leaves": 48, "min_data_in_leaf": 60, "feature_fraction": 0.75},
+    {"learning_rate": 0.03, "num_leaves": 96, "min_data_in_leaf": 60, "feature_fraction": 0.60},
+)
+VENTANAS_CALIBRACION = (3, 9, 12)
+
+
+def experimento_hiperparametros(partes: dict, seed: int) -> pd.DataFrame:
+    """Las 5 configuraciones comparadas, elegidas por AUC de VALIDACION (el test se reporta aparte)."""
+    from sklearn.metrics import roc_auc_score
+
+    tr, va, te = partes["train"], partes["valid"], partes["test"]
+    filas = []
+    for g in GRID_HIPERPARAMETROS:
+        base = dict(M.PARAMS_LGBM)
+        base.update(g)
+        m = M.entrenar(tr, va, seed=seed, params=g)
+        filas.append({
+            "configuracion": ", ".join(f"{k}={v}" for k, v in g.items()),
+            "es_default_actual": g == {k: M.PARAMS_LGBM[k] for k in g},
+            "learning_rate": base["learning_rate"], "num_leaves": base["num_leaves"],
+            "min_data_in_leaf": base["min_data_in_leaf"], "feature_fraction": base["feature_fraction"],
+            "arboles": m["mejor_iteracion"],
+            "auc_valid": float(roc_auc_score(va["y"], M.predecir(m, va))),
+            "auc_test": float(roc_auc_score(te["y"], M.predecir(m, te))),
+        })
+    d = pd.DataFrame(filas)
+    d["elegida"] = d["auc_valid"] == d["auc_valid"].max()
+    return d
+
+
+def experimento_ventana_calibracion(n_afiliados: int, semillas: list[int], periodo_inicio: int,
+                                    periodo_fin: int, n_test: int) -> pd.DataFrame:
+    """Sesgo del saldo en riesgo segun el largo de la ventana de calibracion (3 / 9 / 12 cortes)."""
+    filas = []
+    for sd in semillas:
+        for nv in VENTANAS_CALIBRACION:
+            _, sp, _, pt = preparar(n_afiliados, sd, periodo_inicio, periodo_fin, n_test, nv)
+            tr, va, te = pt["train"], pt["valid"], pt["test"]
+            m = M.entrenar(tr, va, seed=sd)
+            fila = {"seed": sd, "cortes_calibracion": nv, "cortes_train": len(sp["train"]),
+                    "tasa_base_valid": float(va["y"].mean()), "tasa_base_test": float(te["y"].mean()),
+                    "auc": float(E.tabla_comparativa(te, {"m": M.predecir(m, te)})["auc"].iloc[0])}
+            for nom, uso in (("sin_calibrar", "bruto"), ("isotonica", "agregado")):
+                p = M.predecir(m, te, uso=uso)
+                fila[f"sesgo_saldo_{nom}"] = float(E.saldo_en_riesgo(te, p)["sesgo_relativo"].iloc[0])
+            filas.append(fila)
+    return pd.DataFrame(filas)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,6 +194,9 @@ def main(argv: list[str] | None = None) -> int:
                          "vacio (por defecto) lo omite para que la corrida estandar sea corta")
     ap.add_argument("--sin-fuentes", action="store_true", help="no escribir las tablas sinteticas")
     ap.add_argument("--sin-techo", action="store_true", help="omitir el diagnostico de techo")
+    ap.add_argument("--experimentos", action="store_true",
+                    help="reproduce la seleccion de hiperparametros y el experimento de ventana de "
+                         "calibracion (reportes/hiperparametros.csv y ventana_calibracion.csv)")
     args = ap.parse_args(argv)
 
     salida = Path(args.salida)
@@ -255,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
         marca("techo_predictibilidad", t0)
 
     semillas = [int(x) for x in args.semillas_estabilidad.split(",") if x.strip()]
+    if args.experimentos:
+        t0 = time.perf_counter()
+        _mostrar("Seleccion de hiperparametros (criterio: AUC de validacion)",
+                 experimento_hiperparametros(partes, args.seed), rep / "hiperparametros.csv")
+        _mostrar("Largo de la ventana de calibracion vs sesgo del saldo en riesgo",
+                 experimento_ventana_calibracion(args.n_afiliados, semillas or [args.seed],
+                                                 args.periodo_inicio, args.periodo_fin, args.n_test),
+                 rep / "ventana_calibracion.csv", max_filas=20)
+        marca("experimentos", t0)
+
     if semillas:
         t0 = time.perf_counter()
         filas = []

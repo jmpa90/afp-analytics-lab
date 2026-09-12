@@ -1,7 +1,7 @@
 # 02 · Propensión a traspaso a otra AFP (churn de afiliados)
 
-**Ronda 2** (corrige la revisión `docs/revisiones/ronda_1/churn_traspaso.md`). Ver §11 "Qué cambió
-respecto de la ronda 1".
+**Ronda 3** — incorpora las correcciones de `docs/revisiones/ronda_2/churn_traspaso.md` (ronda 2
+aprobada con correcciones menores). Ver §11 "Qué cambió respecto de la ronda 1" y §12 "Ronda 3".
 
 Modelo que estima, para cada afiliado vigente y cada mes de corte, la **probabilidad de que solicite
 un traspaso a otra AFP en los próximos 6 meses**, y ordena la cartera para que el equipo comercial
@@ -9,10 +9,11 @@ use su capacidad de contacto (10 % de la cartera al mes) donde más traspasos y 
 se salvan.
 
 ```bash
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000                       # 43 s - 2,5 min
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000                       # 38 s - 2,5 min
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 \
-    --semillas-estabilidad 42,123,7,2024,99                                    # 2,5 - 4,5 min
-python -m pytest afp_lab/churn_traspaso/tests -q                               # 13 - 60 s
+    --semillas-estabilidad 42,123,7,2024,99                                    # 2,4 - 4,5 min
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos        # 2,2 min
+python -m pytest afp_lab/churn_traspaso/tests -q                               # 15 - 60 s
 ```
 
 ---
@@ -23,19 +24,18 @@ python -m pytest afp_lab/churn_traspaso/tests -q                               #
 |---|---|
 | **Pregunta** | ¿Qué afiliados se traspasarán a otra AFP en los próximos 6 meses? |
 | **Decisión** | A quién llama/visita el ejecutivo de retención. La restricción operativa es dura: el equipo contacta como máximo al **10 % de la cartera al mes**. |
-| **Métrica de negocio** | % de los traspasos y % del **saldo en riesgo** capturados en ese 10 % (y en el 5 % y el 20 %, para dimensionar el equipo). |
-| **Pregunta secundaria** | Saldo en riesgo esperado por afiliado = `P(traspaso) × saldo`, para presupuestar la caída de activos administrados. |
+| **Métrica de negocio (criterio principal)** | % de los traspasos y % del **saldo en riesgo** capturados en ese 10 % (y en el 5 % y el 20 %, para dimensionar el equipo). |
+| **Pregunta secundaria** | Saldo en riesgo esperado por afiliado = `P(traspaso) × saldo`. **No entregada en esta ronda** (§7 y §8). |
 
-El modelo entrega un **orden** (a quién contactar) y un **nivel** (cuánto saldo está en juego). El
-orden es sólido; el nivel depende de un pronóstico agregado del flujo mensual de traspasos que no se
-puede sacar sólo de la historia (§6 y §8).
+El modelo entrega un **orden** (a quién contactar). El **nivel** agregado —cuántos pesos se van el mes
+que viene— no se entrega: requiere un pronóstico del flujo agregado que no sale de la historia (§6).
 
 ## 2. Datos sintéticos: tablas, mecanismos y parámetros
 
 Se parte del universo común `afp_lab.common.synth_base.generar_universo` (afiliados, empleadores,
 panel laboral mensual con estado/empleador/RIM/licencias, macro). **No se redefine nada de él.** Se
-agregan 7 tablas propias, simuladas mes a mes (`synthetic.generar_tablas`, semilla fija, numpy
-vectorizado sobre afiliados con un loop de 69 meses: 2021-01 a 2026-09).
+agregan 7 tablas propias más una latente, simuladas mes a mes (`synthetic.generar_tablas`, semilla
+fija, numpy vectorizado sobre afiliados con un loop de 69 meses: 2021-01 a 2026-09).
 
 | Tabla | Grano | Columnas |
 |---|---|---|
@@ -46,27 +46,26 @@ vectorizado sobre afiliados con un loop de 69 meses: 2021-01 a 2026-09).
 | `contactos` | evento | `canal` (ejecutivo propio, vendedor competencia, call center, campaña digital), `resultado` |
 | `reclamos` | evento | `tipo` (rentabilidad, atención, comisión, pensión), `estado` |
 | `uso_digital` | afiliado × mes vigente | `logins_app`, `logins_web`, `consultas_saldo`, `descargas_certificado` |
-| `afiliados_latente_churn` | afiliado | `lat_u_traspaso`, `lat_intencion_visible`, `lat_switcher` — **latentes, sólo para el diagnóstico de techo (§6); un test verifica que no entran al modelo** |
+| `afiliados_latente_churn` | afiliado | `lat_u_traspaso`, `lat_intencion_visible`, `lat_switcher`, `lat_con_brecha_antiguedad`. **Latente**: sólo alimenta diagnósticos en memoria, `columnas_features` la excluye por prefijo y el `run` **no la escribe en `fuentes/`** |
 
 ### Mercado (`AFP_ANDES` es la propia; 5 competidoras ficticias)
 
-* **Comisiones** (% de la renta imponible, tramos en `COMISIONES`): propia 1,27 → 1,19 (2024-01) →
-  1,14 (2025-07); competidoras entre 0,58 y 1,45. Es el rango real del sistema chileno, y la AFP cara
-  reacciona bajando dos veces.
-* **Rentabilidad 12 m por fondo y AFP**: paseo aleatorio mensual del sistema con media/volatilidad
-  por multifondo (A 6,2 %/16 % anual … E 2,2 %/3,5 %) más una desviación AR(1) por AFP. La
-  innovación del AR(1) está calibrada para que la **diferencia de rentabilidad 12 m entre AFP sea de
-  1,5–1,8 pp (mediana) y 2,8 pp en el p95**, que es lo que se observa en Chile. La propia arrastra un
-  **castigo de −1,0 pp anual entre 2024-01 y 2025-12**, que domina su ventana (brecha media −0,7 pp
-  dentro contra +0,1 pp fuera; verificado en `test_castigo_de_rentabilidad_domina_su_ventana`).
-* **Licitación de nuevos afiliados** cada 24 meses: la adjudicataria recibe a todos los que se
-  afilian al sistema y ellos **deben permanecer 24 meses** (regla real). La propia gana 2022-08 →
-  2024-07, así que en el período de test hay una cohorte recién liberada.
+* **Comisiones** (% de la renta imponible): propia 1,27 → 1,19 (2024-01) → 1,14 (2025-07);
+  competidoras entre 0,58 y 1,45. Es el rango real del sistema chileno, y la AFP cara recorta dos veces.
+* **Rentabilidad 12 m por fondo y AFP**: paseo aleatorio mensual del sistema por multifondo (A
+  6,2 %/16 % anual … E 2,2 %/3,5 %) más una desviación AR(1) por AFP. La innovación está calibrada
+  para que la **diferencia de rentabilidad 12 m entre AFP sea de 1,46–1,81 pp (mediana entre semillas)
+  y 2,80 pp en el p95**, que es lo que se observa en Chile. La propia arrastra un **castigo de −1,0 pp
+  anual entre 2024-01 y 2025-12**, que domina su ventana: la brecha media de la propia contra el
+  promedio del sistema es **−0,45 pp dentro del castigo contra +0,15 pp fuera** (semilla 42; entre
+  semillas −0,45 … −1,15 dentro y −0,12 … +0,17 fuera).
+* **Licitación de nuevos afiliados** cada 24 meses: la adjudicataria recibe a todos los que se afilian
+  al sistema y ellos **deben permanecer 24 meses** (regla real). La propia gana 2022-08 → 2024-07.
 
 ### Cuenta obligatoria
 
 * Saldo inicial = `0,10 × RIM_ref × ((1+i)^m − 1)/i × densidad × lognormal(σ=0,35)`; mediana
-  **8,6 millones de CLP**, media ~16 millones, coherente con los saldos por edad en Chile.
+  **8,55 millones de CLP**, coherente con los saldos por edad en Chile.
 * Mensual: `saldo_t = saldo_{t−1} × (1 + r_fondo_propia_t) + 0,10 × RIM_{t−2}` — el aporte entra con
   **2 meses de desfase**, igual que la recaudación real, así que el saldo del corte es conocido al corte.
 * Fondo inicial por asignación etaria por defecto (B hasta 35, C hasta 50 M / 55 H, D después) y un
@@ -79,11 +78,11 @@ vectorizado sobre afiliados con un loop de 69 meses: 2021-01 a 2026-09).
 | **Campaña de la competencia por empleador** | con prob. 2 % mensual una empresa entra en campaña 3 meses; durante esa ventana la prob. de visita a sus afiliados se multiplica ×8 | la fuerza de venta de las AFP trabaja **por empresa** (charlas en el lugar de trabajo), no afiliado por afiliado |
 | Visita de vendedor de la competencia | 1,6 % mensual base, ×2,6 en el decil superior de saldo | persiguen cuentas grandes |
 | Contacto del ejecutivo propio | 1,2 % base, ×3 si hubo reclamo o visita de la competencia en 3 m | la retención es **reactiva**: llega después de la señal |
-| Reclamos | 0,40 % base, ×2,2 si la rentabilidad propia va mal, ×1,6 si la comisión es cara | da ~0,12 reclamos por afiliado-año |
-| **Switchers** | quien ya se cambió de AFP antes lleva +0,55 en el logit del hazard | "el que se cambió una vez se vuelve a cambiar"; es **observable** (la antigüedad en la AFP es menor que la antigüedad en el sistema) |
+| Reclamos | 0,40 % base, ×2,2 si la rentabilidad propia va mal, ×1,6 si la comisión es cara | da 0,12 reclamos por afiliado-año |
+| **Switcher (latente) con proxy imperfecto** | el switcher activo lleva +0,55 en el logit. Es **latente**: `P(switcher \| llegó de otra AFP) = 0,60` y `P(switcher \| sin brecha de antigüedad) = 0,22`, porque parte de los que se movieron lo hicieron **una sola vez por asignación** (licitación previa, convenio del empleador) y parte de los que no registran brecha sí son switchers que todavía no se movieron | "el que se cambió una vez se vuelve a cambiar" es real, pero la brecha de antigüedad es sólo un indicio: la concordancia medida entre `llego_por_traspaso` y `lat_switcher` es **0,762** (la ronda 2 tenía 1,0 y el gerente la rechazó) |
 | Uso digital | Poisson(λ=0,55) logins, ×1,8 jóvenes/universitarios | |
-| **Intención de traspaso** | sólo el **35 %** de los afiliados la manifiesta en los canales propios; para ellos los logins se multiplican ×1,7 y la prob. de pedir certificado sube en 6 pp | en Chile **el traspaso lo tramita la AFP de destino**: la de origen muchas veces no ve nada antes de recibir el aviso |
-| Descarga de certificado | 1,0 % base ×2,5 en abril-mayo (Operación Renta), +0,6 pp por crédito hipotecario (30-50 años con renta media-alta), +3,0 pp a menos de 24 meses de la edad legal, +2,0 pp tras finiquito o cambio de empleador | la mayoría de las descargas tiene **causa exógena**, no el traspaso |
+| **Intención de traspaso** | sólo el **35 %** de los afiliados la manifiesta en los canales propios; para ellos los logins se multiplican ×1,7 y la prob. de pedir certificado sube 6 pp | en Chile **el traspaso lo tramita la AFP de destino**: la de origen muchas veces no ve nada antes del aviso |
+| Descarga de certificado | 1,0 % base ×2,5 en abril-mayo (Operación Renta), +0,6 pp por crédito hipotecario (30-50 años, renta media-alta), +3,0 pp a menos de 24 meses de la edad legal, +2,0 pp tras finiquito o cambio de empleador | la mayoría de las descargas tiene **causa exógena**, no el traspaso |
 | Cambio de fondo | 0,55 % base, ×3 afiliado activo, ×1,8 si el fondo va mal | el que cambia de fondo es un afiliado "activo" |
 
 ### Mecanismo del target (hazard mensual, escala logit)
@@ -98,7 +97,7 @@ logit(h) = b0
   + b_joven · (40 − edad)⁺   + b_renta · log(RIM_ref / IMM)   + b_antiguedad · log1p(años en la AFP)
   + b_cambios_fondo_12m · min(cambios de fondo 12 m, 3)
   + b_cesante · cesante      + b_retirado · retirado      + b_marzo / b_agosto
-  + b_u_switcher · ya se cambió de AFP antes
+  + b_u_switcher · switcher latente
   + u_afiliado ~ N(0; sigma_afiliado²)     + ε_mes ~ N(0; sigma_mes²)
 ```
 
@@ -106,7 +105,19 @@ y `h = 0` durante los 24 meses de permanencia obligatoria de los afiliados llega
 La intención se dispara con ese hazard y la solicitud se firma con un retardo de 0 a 4 meses
 (`p_retardo_intencion`); la solicitud es efectiva al mes siguiente.
 
-### Parámetros (tabla generada desde `ParametrosChurn`; un test verifica que no se desvíe)
+### Cuánto aporta cada mecanismo nuevo (contrafactual, semilla 42, 20.000 afiliados)
+
+| Generador | AUC | Lift decil 1 | Captura al 10 % |
+|---|---|---|---|
+| Completo (ronda 3) | 0,720 | 3,50 | 34,9 % |
+| **Sin switcher ni campañas por empleador** | **0,694** | **2,71** | **27,1 %** |
+
+Sin esos dos mecanismos **fallarían los dos criterios de aceptación** (AUC ≥ 0,70 y captura ≥ 30 %),
+lo que es consistente con lo que midió el revisor (0,685 y 2,77). Son los dos mecanismos que el
+gerente revisó uno por uno en la ronda 2: aceptó las campañas por empleador y exigió degradar el
+proxy del switcher, que es lo que se hizo.
+
+### Parámetros (tabla generada desde `ParametrosChurn`; un test falla si el README se desvía)
 
 <!-- PARAMS:INICIO -->
 | Parametro | Valor | Que representa |
@@ -163,6 +174,8 @@ La intención se dispara con ese hazard y la solicitud se firma con un retardo d
 | `b_marzo` | 0.35 | Estacionalidad de marzo |
 | `b_agosto` | 0.3 | Estacionalidad de agosto |
 | `b_u_switcher` | 0.55 | Desplazamiento de la propension para quien ya se cambio de AFP antes |
+| `p_switcher_dado_traspaso` | 0.6 | P(switcher activo | llego de otra AFP): el resto se movio por asignacion |
+| `p_switcher_sin_traspaso` | 0.22 | P(switcher activo | sin brecha de antiguedad): switcher que aun no se movio |
 | `sigma_afiliado` | 0.4 | Desviacion del efecto aleatorio NO observable por afiliado |
 | `sigma_mes` | 0.15 | Desviacion del ruido idiosincratico mensual |
 | `p_retardo_intencion` | 0.1, 0.22, 0.28, 0.25, 0.15 | Distribucion del retardo (meses) entre la intencion y la firma |
@@ -172,13 +185,15 @@ La intención se dispara con ese hazard y la solicitud se firma con un retardo d
 
 | Indicador | Valor (semilla 42) | Rango en 5 semillas | Lectura |
 |---|---|---|---|
-| Tasa de traspaso anualizada | 4,55 % de la cartera (≈5,6 % de la cartera cotizante) | | brief: 4–7 % de la cotizante |
-| Tasa móvil de 12 meses, mín / máx | 3,83 % / 5,35 % | 3,39 % / 6,86 % | ronda 1: 1,6 % / 12,6 % |
+| Tasa de traspaso anualizada | 4,72 % de la cartera | | |
+| **Tasa sobre la cartera cotizante** | **6,06 %** | | brief: 4–7 % |
+| Tasa móvil de 12 meses, mín / máx | 3,79 % / 5,92 % | 3,67 % / 6,97 % | ronda 1: 1,6 % / 12,6 % |
 | Rango de rentabilidad 12 m entre AFP (mediana / p95) | 1,78 pp / 2,80 pp | 1,46–1,81 pp | real en Chile: 1–2 pp |
-| `P(y=1 \| certificados_1m>0)` | 2,96 % (tasa base 2,25 %) | | **lift 1,32**, no 33 |
-| AUC de la mejor feature suelta | 0,636 (`rim_ref`) | | muy por debajo del modelo (0,743) |
-| Fracción de filas con score > 0,9 | 0,0 % (score máximo 0,374) | | ronda 1: cola saturada en 0,99 |
-| Contactos / reclamos por afiliado-año | 2,03 / 0,12 | | |
+| `P(y=1 \| certificados_1m>0)` | 3,54 % (tasa base 2,22 %) | | **lift 1,60**, no 33 |
+| AUC de la mejor feature suelta | 0,630 (`rim_ref`) | | modelo completo 0,720 |
+| Fracción de filas con score > 0,9 | 0,0 % (score máximo 0,331) | | ronda 1: cola saturada en 0,99 |
+| **Concordancia `llego_por_traspaso` vs `lat_switcher`** | **0,762** | | ronda 2: 1,0 (rechazado) |
+| Contactos / reclamos por afiliado-año | 2,02 / 0,12 | | |
 
 ## 3. Target, población, horizonte y exclusiones
 
@@ -189,7 +204,7 @@ La intención se dispara con ese hazard y la solicitud se firma con un retardo d
 * **Exclusiones**, todas con información conocida al corte: estado laboral `RETIRADO` en `corte−2`;
   afiliados que **ya presentaron** la solicitud en un mes ≤ corte; cortes sin los 6 meses de
   horizonte completos y los primeros 14 meses de burn-in.
-* Tasa base: 2,29 % (train), 2,41 % (valid), 2,25 % (test) con la semilla 42.
+* Tasa base: 2,39 % (train), 2,39 % (valid), 2,22 % (test) con la semilla 42.
 
 ## 4. Features (72 columnas, todas as-of)
 
@@ -200,8 +215,8 @@ las tablas **operacionales propias de la AFP se leen en `corte`**.
 |---|---|---|
 | Historia laboral y renta | `rim_l1`, `rim_media_3/12`, `rim_cv_12`, `rim_ref`, `rim_tendencia_3_12`, `densidad_6/12`, `meses_desde_ult_cotiza`, `estado_laboral`, `tipo_contrato`, `rubro`, `tamano_empleador`, `meses_con_empleador`, `meses_desde_cambio_empleador`, `n_cambios_empleador_12` | ventanas que terminan en **`corte−2`** |
 | Cuenta | `saldo_obligatorio`, `log_saldo`, `saldo_sobre_rim_ref`, `fondo`, `cambios_fondo_3m/12m`, `meses_desde_cambio_fondo`, `antiguedad_afp_meses` | hasta **`corte`** |
-| Afiliado | `edad`, `sexo`, `region`, `nivel_educacional`, `tipo_afiliado`, `meses_desde_afiliacion`, `meses_hasta_pension`, **`meses_en_otras_afp`**, **`llego_por_traspaso`** | atributos de maestro |
-| Relación comercial | `contactos_{canal}_1m/3m/6m` (4 canales), `contactos_competencia_interesado_6m`, `meses_desde_contacto_competencia`, `meses_desde_contacto_ejecutivo`, **`contactos_competencia_pares_3m`**, **`n_pares_empleador`** | hasta **`corte`**; el empleador que define a los "pares" se lee en `corte−2` |
+| Afiliado | `edad`, `sexo`, `region`, `nivel_educacional`, `tipo_afiliado`, `meses_desde_afiliacion`, `meses_hasta_pension`, `meses_en_otras_afp`, `llego_por_traspaso` | atributos de maestro |
+| Relación comercial | `contactos_{canal}_1m/3m/6m` (4 canales), `contactos_competencia_interesado_6m`, `meses_desde_contacto_competencia`, `meses_desde_contacto_ejecutivo`, `contactos_competencia_pares_3m`, `n_pares_empleador` | hasta **`corte`**; el empleador que define a los "pares" se lee en `corte−2` |
 | Reclamos | `reclamos_6m/12m`, `reclamos_abiertos_12m`, `reclamos_desfavorables_12m`, `meses_desde_reclamo`, `tipo_ultimo_reclamo` (catálogo fijo) | hasta **`corte`** |
 | Uso digital | `logins_1m/3m`, `consultas_saldo_3m`, `certificados_1m/3m`, `ratio_logins_3m_12m` | hasta **`corte`** |
 | Mercado | `comision_propia`, `comision_min_mercado`, `brecha_comision_pp/rel`, `rent_12m_propia_fondo`, `rent_12m_sistema_fondo`, `brecha_rentabilidad_pp`, `afp_licitacion`, `licitacion_propia`, `mes` | mes = **`corte`** |
@@ -209,7 +224,10 @@ las tablas **operacionales propias de la AFP se leen en `corte`**.
 `meses_hasta_pension` **puede ser negativo**: son los pensionados activos y quienes siguen cotizando
 pasada la edad legal (60 mujeres / 65 hombres). El signo es informativo y por eso no se trunca en 0.
 
-Las columnas `lat_*` del universo y de `afiliados_latente_churn` **no entran** (un test lo verifica).
+`columnas_features` excluye **de forma dura** los identificadores, el target y cualquier columna con
+prefijo `lat_` o `p_` (CONVENCIONES §2): si un diagnóstico pega una columna latente al dataset, el
+modelo no la ve por construcción y no por disciplina del autor. El diagnóstico de techo (§6) tiene
+que pasar su lista de columnas a mano para poder usar la latente.
 
 ### Cómo se garantiza que no hay leakage
 
@@ -220,187 +238,192 @@ ventanas que sólo miran hacia atrás. Tres tests:
 * `test_sin_leakage_en_la_ruta_matricial`: multiplica ×17 la RIM posterior al corte, marca todo como
   RETIRADO, borra filas del panel y de saldos, inyecta uso digital extremo y 50 traspasos falsos en
   `corte+1`, y recalcula con **`construir_features_multi`** (que no recorta nada) sobre un corte que
-  **no** es el último → todas las features quedan idénticas. Este test reemplaza al de la ronda 1,
-  que recortaba antes de calcular y por eso era tautológico.
+  **no** es el último → las 72 features quedan idénticas.
 * `test_sin_leakage_alterar_el_futuro_no_cambia_las_features`: lo mismo por la ruta de un corte.
 * `test_features_asof_verificadas_a_mano`: `rim_l1` es la RIM del mes `corte−2` (y **no** la del
   corte) y `contactos_vendedor_competencia_3m` es el conteo exacto en `[corte−2, corte]`.
 
-### Split temporal contiguo con purga (corrige el mayor 5)
+### Split temporal contiguo con purga
 
 La purga es la mínima que elimina el solapamiento: un corte `c` aporta target hasta `c+h`, así que la
-partición siguiente empieza en `c+h+1`. Eso deja la validación **pegada al test** en vez de
-arrastrarla `2h` meses hacia atrás como hacía la ronda 1.
+partición siguiente empieza en `c+h+1`. La validación queda **a lo más `h+2` meses** del primer corte
+de test, en vez de arrastrarse `2h` meses hacia atrás como en la ronda 1.
 
 | Partición | Cortes | Rango | Filas | Tasa base |
 |---|---|---|---|---|
-| train | 31 | 2022-03 → 2024-09 | 476.534 | 2,29 % |
-| valid | 3 | 2025-04 → 2025-06 | 44.897 | 2,41 % |
-| test | 3 | 2026-01 → 2026-03 | 43.278 | 2,25 % |
+| train | 31 | 2022-03 → 2024-09 | 471.733 | 2,39 % |
+| valid | 3 | 2025-04 → 2025-06 | 44.365 | 2,39 % |
+| test | 3 | 2026-01 → 2026-03 | 42.834 | 2,22 % |
 | descartados (purga) | 12 | 2024-10 → 2025-12 | — | — |
 
-De los 49 cortes evaluables se usan **37 y se descartan 12** (ronda 1: 28 usados, 22 descartados, con
-el train terminando 26 meses antes del test; ahora termina 16). El gap entre el último target de
-entrenamiento (2025-03) y el primer corte de test (2026-01) es de 10 meses ≥ 6, como pide
-CONVENCIONES §3. `split_temporal` tiene guardas: con pocos cortes levanta `ValueError` con mensaje en
-vez de `IndexError` o un train vacío en silencio.
+De los 49 cortes evaluables se usan **37 y se descartan 12** (ronda 1: 28 y 22, con el train
+terminando 26 meses antes del test; ahora 16). El gap entre el último target de entrenamiento
+(2025-03) y el primer corte de test (2026-01) es de 10 meses ≥ 6, como pide CONVENCIONES §3.
+`split_temporal` levanta `ValueError` con mensaje si no alcanzan los cortes.
 
 ## 5. Modelo y baselines
 
 * **LightGBM binario** (`num_leaves 48`, `lr 0,03`, `min_data_in_leaf 60`, `feature_fraction 0,75`,
   `bagging 0,80`, `lambda_l2 5`, **`num_threads 2`**), early stopping de 60 rondas por AUC de
-  validación. Los hiperparámetros se eligieron comparando 5 configuraciones **por AUC de validación**
-  (test mirado una sola vez, al final).
-* **Dos calibraciones**, ambas ajustadas sólo con validación:
-  * `uso="ranking"` → **Platt** sobre el log-odds: estrictamente monótona, no genera empates, deja
-    intactos orden, AUC, lift y captura.
-  * `uso="agregado"` → **isotónica por bloques** (40 bloques) para sumar `prob × saldo`.
-  * `model.ajustar_prior(prob, tasa_objetivo)` permite **anclar el nivel** a un pronóstico agregado
-    del flujo mensual sin tocar el orden (§6 y §8).
+  validación (21 árboles en la corrida de referencia). Los hiperparámetros se eligieron entre 5
+  configuraciones **por AUC de validación**; `--experimentos` reproduce la comparación y la deja en
+  `reportes/hiperparametros.csv`:
+
+| Configuración | Árboles | AUC valid | AUC test | Elegida |
+|---|---|---|---|---|
+| lr 0,05 · leaves 48 · min_data 200 | 13 | 0,6973 | 0,7188 | |
+| lr 0,03 · leaves 64 · min_data 200 | 12 | 0,6985 | 0,7170 | |
+| lr 0,05 · leaves 48 · min_data 60 | 10 | 0,6961 | 0,7148 | |
+| **lr 0,03 · leaves 48 · min_data 60** | 21 | **0,7031** | 0,7195 | **sí** |
+| lr 0,03 · leaves 96 · min_data 60 · ff 0,60 | 19 | 0,7027 | 0,7205 | |
+
+* **Dos calibraciones**, ambas ajustadas sólo con validación: `uso="ranking"` → **Platt** sobre el
+  log-odds (monótona, sin empates, deja intactos orden, AUC, lift y captura); `uso="agregado"` →
+  **isotónica por bloques** (40 bloques). `model.ajustar_prior(prob, tasa_objetivo)` permite anclar el
+  nivel a un pronóstico agregado; **queda como diagnóstico**, no como salida (§7).
 * **Baselines**: `baseline_tasa_base` (trivial); `baseline_regla_negocio` (la del brief: reclamo en
   3 m **o** contacto de la competencia en 3 m **o** brecha de rentabilidad 12 m < −1 pp);
-  `baseline_regla_graduada` (cuenta cuántas de las tres condiciones se cumplen, 0–3). Los empates se
-  rompen con un desempate aleatorio reproducible.
+  `baseline_regla_graduada` (cuenta cuántas de las tres condiciones se cumplen, 0–3). Los empates los
+  resuelve `common.metrics` por valor esperado y `captura_top` con un desempate reproducible.
 
-## 6. Resultados (20.000 afiliados, test = 43.278 filas, tasa base 2,25 %)
+## 6. Resultados (20.000 afiliados, test = 42.834 filas, tasa base 2,22 %)
 
-Todo se reporta con **rango sobre 5 semillas** (42, 123, 7, 2024, 99;
-`reportes/estabilidad_semillas.csv`). La columna "semilla 42" es la corrida de referencia.
+Todo con **rango sobre 5 semillas** (42, 123, 7, 2024, 99; `reportes/estabilidad_semillas.csv` y
+`estabilidad_rangos.csv`). La columna "semilla 42" es la corrida de referencia.
 
 ### Tabla principal
 
 | Predictor | AUC (42) | AUC rango 5 semillas | AP | Brier | Lift decil 1 (42 / rango) | KS |
 |---|---|---|---|---|---|---|
-| **Modelo LightGBM** | **0,743** | **0,719 – 0,744** (mediana 0,727) | 0,081 | 0,0213 | **3,53 / 3,23 – 3,58** | 0,364 |
-| Modelo, salida isotónica | 0,742 | | 0,079 | 0,0214 | 3,53 | 0,364 |
-| Baseline tasa base | 0,500 | | 0,022 | 0,0220 | 0,79 | 0,037 |
-| Baseline regla de negocio (brief) | 0,596 | | 0,030 | 0,281 | 1,60 | 0,192 |
-| Baseline regla graduada | 0,601 | | 0,032 | 0,055 | 1,77 | 0,194 |
+| **Modelo LightGBM** | **0,720** | **0,707 – 0,747** (mediana 0,723) | 0,081 | 0,0211 | **3,50 / 3,00 – 3,66** | 0,329 |
+| Modelo, salida isotónica | 0,718 | | 0,074 | 0,0212 | 3,50 | 0,330 |
+| Baseline tasa base | 0,500 | | 0,022 | 0,0217 | 1,00 | 0,037 |
+| Baseline regla de negocio (brief) | 0,592 | | 0,029 | 0,271 | 1,67 | 0,185 |
+| Baseline regla graduada | 0,598 | | 0,033 | 0,053 | 1,99 | 0,184 |
 
-Estable por corte: AUC 0,745 / 0,741 / 0,741 en 2026-01, 2026-02 y 2026-03.
-
-### Techo de predictibilidad del mundo simulado
-
-`reportes/techo_predictibilidad.csv` entrena el mismo modelo **añadiéndole el efecto aleatorio
-latente** `lat_u_traspaso` (la parte de la propensión que la AFP no puede observar). Es el techo:
-
-| Semilla | AUC del modelo | AUC del techo | % del techo alcanzado |
-|---|---|---|---|
-| 42 | 0,7428 | 0,7675 | 96,8 % |
-| 123 | 0,7269 | 0,7433 | 97,8 % |
-| 7 | 0,7442 | 0,7705 | 96,6 % |
-| 2024 | 0,7194 | 0,7465 | 96,4 % |
-| 99 | 0,7236 | 0,7365 | 98,2 % |
-
-El modelo alcanza el **96–98 % del AUC alcanzable**. Lo que queda por encima del techo no es
-modelable: la mayoría de los traspasos de los próximos 6 meses los gatillan visitas, reclamos y
-campañas que **todavía no han ocurrido** cuando se calcula el score.
+Estable por corte: AUC 0,713 / 0,724 / 0,722 en 2026-01, 2026-02 y 2026-03.
 
 ### Métrica de negocio: captura contactando al X % de mayor score
 
 | Predictor | 5 % — traspasos / saldo | **10 % — traspasos / saldo** | 20 % — traspasos / saldo |
 |---|---|---|---|
-| **Modelo (semilla 42)** | **23,2 % / 27,8 %** | **35,3 % / 38,9 %** | **52,2 % / 56,8 %** |
-| Modelo, rango 5 semillas | | **32,3 – 35,8 % / 29,4 – 41,1 %** | |
-| Regla graduada | 11,9 % / 16,3 % | 19,0 % / 23,7 % | 34,7 % / 42,1 % |
-| Regla graduada, rango | | 17,3 – 23,3 % | |
-| Regla de negocio (brief) | 8,3 % / 10,6 % | 17,6 % / 20,8 % | 33,4 % / 39,8 % |
-| Regla de negocio, rango | | 12,4 – 21,1 % | |
-| Tasa base (aleatorio) | 4,8 % / 5,4 % | 9,0 % / 8,8 % | 19,1 % / 18,4 % |
+| **Modelo (semilla 42)** | **24,2 % / 24,8 %** | **35,0 % / 38,2 %** | **51,0 % / 54,6 %** |
+| Modelo, rango 5 semillas | | **30,0 – 36,6 % / 35,6 – 38,2 %** | |
+| Regla graduada | 12,6 % / 15,0 % | 19,4 % / 21,6 % | 34,7 % / 38,7 % |
+| Regla graduada, rango | | 18,5 – 22,8 % | |
+| Regla de negocio (brief) | 9,3 % / 9,7 % | 17,6 % / 20,3 % | 33,6 % / 35,8 % |
+| Regla de negocio, rango | | 11,1 – 23,0 % | |
+| Tasa base (aleatorio) | 5,7 % / 6,8 % | 11,5 % / 13,1 % | 21,9 % / 22,6 % |
+| **Razón modelo / mejor regla al 10 %** | | **1,80 (42); rango 1,30 – 1,85** | |
 
-**El modelo gana a las dos reglas en las 5 semillas** (peor caso del modelo 32,3 % contra mejor caso
-de la regla del brief 21,1 %).
+Detalle por semilla (el caso límite es la 99, ver §8):
+
+| Semilla | AUC | Lift decil 1 | Captura 10 % | Mejor regla | Razón | Fracción de la cartera que marca la regla del brief |
+|---|---|---|---|---|---|---|
+| 42 | 0,7195 | 3,50 | 34,9 % | 19,4 % | 1,80 | 26,9 % |
+| 123 | 0,7348 | 3,39 | 33,9 % | 20,4 % | 1,67 | 51,0 % |
+| 7 | 0,7232 | 3,28 | 32,8 % | 18,5 % | 1,77 | 49,3 % |
+| 2024 | 0,7472 | 3,66 | 36,6 % | 19,8 % | 1,85 | 18,3 % |
+| **99** | **0,7068** | **3,00** | **30,0 %** | **23,0 %** | **1,30** | **13,7 %** |
 
 ### Por segmento
 
-**El modelo gana en los 24 segmentos grandes (≥ 5 % de las filas)**, por entre +0,058 y +0,209 de
-AUC (`reportes/segmentos_modelo_vs_baseline.csv`). La columna `comparable` marca los segmentos donde
-el AUC es NaN por falta de positivos: esos **no** cuentan como victoria (antes pasaban en silencio).
+**El modelo gana en los 23 segmentos grandes (≥ 5 % de las filas)**, por entre +0,012 y +0,156 de
+AUC, y los 23 son comparables (`reportes/segmentos_modelo_vs_baseline.csv`). La columna `comparable`
+marca los segmentos con AUC NaN por falta de positivos: esos **no** cuentan como victoria. Los
+márgenes más estrechos son LICENCIA (+0,012), CESANTE (+0,040) y saldo 40 MM+ (+0,061).
 
-| Segmento | AUC modelo | AUC baseline |
+### Techo de predictibilidad (diagnóstico, no criterio de aceptación)
+
+`reportes/techo_predictibilidad.csv` entrena el mismo modelo añadiéndole el efecto aleatorio latente
+`lat_u_traspaso`: **0,733 contra 0,720 del modelo** (semilla 42). Es un diagnóstico útil para saber
+si queda señal observable sin explotar, pero **no** es criterio de aceptación: el gerente verificó
+que se cumple en cualquier configuración (96,4 % en un mundo con AUC 0,685) y que sube a 99 %
+simplemente bajando `sigma_afiliado`. Lo que queda por encima del techo son visitas, reclamos y
+campañas que **todavía no han ocurrido** cuando se calcula el score.
+
+### Calibración y nivel agregado
+
+La isotónica queda dentro de ±0,5 pp en los 10 deciles, así que **la forma está bien**. El problema
+es el **nivel**:
+
+| Versión | Sesgo del saldo en riesgo (42) | Rango 5 semillas |
 |---|---|---|
-| Estado laboral: EMPLEADO (68,8 %) / CESANTE (15,7 %) | 0,735 / 0,768 | 0,607 / 0,596 |
-| Tramo de saldo 5–15 MM (44,6 %) / 15–40 MM (29,9 %) / 40 MM+ (7,5 %) | 0,754 / 0,731 / 0,761 | 0,593 / 0,591 / 0,682 |
-| Tramo de renta 0–600k (24,1 %) / 600k–1,2 MM (43,3 %) / 2,5 MM+ (8,3 %) | 0,683 / 0,738 / 0,710 | 0,568 / 0,580 / 0,622 |
-| Tramo de edad <30 / 30–39 / 40–49 / 50–59 / 60+ | 0,673 / 0,728 / 0,732 / 0,769 / 0,698 | 0,615 / 0,584 / 0,592 / 0,587 / 0,562 |
-| Fondo A / B / C / D / E | 0,700 / 0,719 / 0,742 / 0,787 / 0,751 | 0,577 / 0,592 / 0,595 / 0,578 / 0,575 |
-| Tipo de afiliado: DEPENDIENTE (89,7 %) / INDEPENDIENTE (7,8 %) | 0,747 / 0,758 | 0,605 / 0,594 |
+| Sin calibrar | −5,1 % | −16,1 % … +36,0 % |
+| Isotónica (ventana reciente, horizonte cerrado) | −3,6 % | −3,6 % … +40,2 % |
+| Isotónica + ancla de nivel (`ajustar_prior`, **diagnóstico**) | −9,6 % | −12,2 % … +1,2 % |
 
-Los más flojos son **<30 años** (0,673, pocas filas y poca historia) y **60+** (0,698).
+Por corte (semilla 42): −9,8 %, −0,8 %, +0,8 %; entre semillas el sesgo por corte va de −9,8 % a
++45,4 %. Que el ancla lleve el rango de 44 pp a 13 pp confirma que **casi todo el error es de nivel
+agregado y no de forma**.
 
-### Calibración y saldo en riesgo — el punto débil, con los números reales
+**Diagnóstico del drift validación → test.** La tasa base cae de validación a test en las 5
+semillas. La descomposición del revisor sobre el logit medio identifica dos componentes
+**sistemáticos** (presentes en 5/5 semillas) y uno aleatorio:
 
-Curva de calibración (semilla 42): la isotónica queda dentro de ±0,5 pp en los 10 deciles. El
-problema **no es la forma sino el nivel**:
-
-| Versión | Sesgo del saldo en riesgo (42) | **Rango 5 semillas** |
+| Componente | Efecto en el logit medio | Sistemático |
 |---|---|---|
-| Sin calibrar | +2,2 % | −15,1 % … +36,7 % |
-| Isotónica (ventana reciente, horizonte cerrado) | **−3,1 %** | **−3,1 % … +38,0 %** (mediana +26,4 %) |
-| **Isotónica + ancla de nivel** (`ajustar_prior`, diagnóstico) | −11,3 % | **−11,3 % … +4,8 %** (mediana −5,3 %) |
+| Recorte de comisión de la AFP propia (2024-01 y 2025-07) | −0,05 | sí, 5/5 |
+| Envejecimiento de la cartera (la antigüedad media sube con el tiempo) | −0,06 | sí, 5/5 |
+| Brecha de rentabilidad (fin del castigo en 2025-12) | +0,02 en la semilla 42, de signo variable | no, aleatorio |
 
-Por corte (semilla 42): −4,8 %, −4,0 %, −0,5 %. Rango del sesgo por corte entre semillas: −4,8 %
-… +43,7 %.
+Los dos primeros son predecibles y el modelo los tiene como features (`comision_propia`,
+`brecha_comision_pp`, `antiguedad_afp_meses`), pero los árboles no extrapolan el **nivel** a
+combinaciones que no vieron en entrenamiento: de ahí que el orden sea estable y el nivel no.
 
-**Diagnóstico**: la tasa base de la ventana de validación es **sistemáticamente mayor que la del
-test en las 5 semillas** (2,41 vs 2,25 / 3,26 vs 2,53 / 3,32 vs 2,16 / 2,75 vs 1,83 / 2,48 vs 1,78).
-No es ruido ni "selección de supervivencia": es la **fase de la onda del mercado que está en el
-diseño** — la AFP propia baja la comisión en 2024-01 y 2025-07 y el castigo de rentabilidad termina
-en 2025-12, de modo que el hazard cae justo en el tramo de test, igual en todas las semillas.
-Ninguna calibración sobre datos pasados puede adivinar ese nivel; la tabla lo confirma: al anclar el
-nivel con `ajustar_prior` el sesgo cae de +26 % (mediana) a −5 % y lo que queda es sólo la
-correlación entre la probabilidad y el saldo. Por eso `saldo_en_riesgo` reporta también
-`sesgo_conteo`, para separar las dos cosas.
-
-Se probó alargar la ventana de calibración (3 → 9 → 12 cortes, `reportes` del experimento en §8):
-mejora la semilla 123 (+15,9 % → +5,2 %), **no** mejora la semilla 7 (+38,0 % → +52,5 %) y cuesta
-AUC en todas (−0,005 a −0,010) porque se pierden cortes de entrenamiento. Se descartó.
+Se probó alargar la ventana de calibración (3 → 9 → 12 cortes, `reportes/ventana_calibracion.csv`):
+en la semilla 42 el sesgo de la isotónica va de −3,6 % a +1,6 % y −0,7 %, y el AUC se mueve entre
+0,7195 y 0,7244; sobre 5 semillas no dominaba a la ventana de 3 cortes (mejoraba la semilla 123 y
+empeoraba la 7) y costaba entre 6 y 9 cortes de entrenamiento. Se mantuvo en 3.
 
 ### Importancia de features (gain, top 12)
 
 | # | Feature | % gain | | # | Feature | % gain |
 |---|---|---|---|---|---|---|
-| 1 | `meses_en_otras_afp` | 11,8 | | 7 | `meses_desde_contacto_competencia` | 4,3 |
-| 2 | `antiguedad_afp_meses` | 10,6 | | 8 | `brecha_rentabilidad_pp` | 4,0 |
-| 3 | `region` | 5,4 | | 9 | `rim_ref` | 3,5 |
-| 4 | `meses_desde_afiliacion` | 4,9 | | 10 | `llego_por_traspaso` | 3,4 |
-| 5 | `rim_media_12` | 4,7 | | 11 | `edad` | 3,4 |
-| 6 | `rubro` | 4,7 | | 12 | `contactos_vendedor_competencia_3m` | 3,4 |
+| 1 | `antiguedad_afp_meses` | 19,3 | | 7 | `contactos_vendedor_competencia_3m` | 3,7 |
+| 2 | `rim_ref` | 10,3 | | 8 | `llego_por_traspaso` | 3,0 |
+| 3 | `meses_desde_contacto_competencia` | 10,0 | | 9 | `rim_media_12` | 3,0 |
+| 4 | `meses_en_otras_afp` | 8,0 | | 10 | `meses_desde_reclamo` | 2,8 |
+| 5 | `meses_desde_afiliacion` | 8,0 | | 11 | `rim_media_3` | 2,8 |
+| 6 | `rim_l1` | 4,3 | | 12 | `brecha_rentabilidad_pp` | 2,7 |
 
-Ninguna feature del bloque digital entra al top 25 (en la ronda 1 ocupaban 5 de los 7 primeros
-lugares y ~48 % del gain). Ahora manda el riesgo estructural: haber estado en otra AFP, la
-antigüedad, el rubro y la región, y como señal próxima la presión de la competencia.
+**Nota de redundancia**: `meses_en_otras_afp` es por construcción `meses_desde_afiliacion −
+antiguedad_afp_meses`, y `llego_por_traspaso` es su indicador. Las cuatro features (1, 4, 5 y 8)
+describen la misma información de antigüedad y se reparten el gain entre sí: su 38 % combinado **no**
+son cuatro contribuciones independientes. Se mantienen las tres derivadas porque los árboles no
+construyen la diferencia por sí solos, pero la lectura correcta es "la antigüedad en la AFP y en el
+sistema es el bloque más importante del modelo". Ninguna feature del bloque digital entra al top 25
+(en la ronda 1 ocupaban 5 de los 7 primeros lugares).
 
 ### 5 casos explicados (`reportes/casos_explicados.csv`)
 
-| Caso | Afiliado / corte | Prob | Real | Lectura |
-|---|---|---|---|---|
-| `top_1` | 10164 / 2026-01 | 0,374 | 0 | 8 meses en la AFP tras 216 en otras (switcher reciente) + visita de la competencia el mes pasado + brecha de rentabilidad −0,91 pp |
-| `top_2` | 14401 / 2026-03 | 0,370 | 0 | 119 meses en otras AFP, reclamo **este mes**, visita de la competencia hace 2; saldo 51 MM |
-| `falso_positivo` | 9078 / 2026-03 | 0,334 | 0 | el perfil de riesgo es correcto (254 meses en otras AFP, reclamo, visita) y aun así no se fue: con 2,2 % de tasa base, el score más alto de la cartera sigue siendo un "no" en 2 de cada 3 casos |
-| `positivo_mayor_saldo` | 15929 / 2026-03 | 0,125 | 1 | **171 MM CLP** en riesgo, 2 visitas de la competencia en 3 meses; el caso que justifica priorizar por `prob × saldo` y no sólo por probabilidad |
-| `falso_negativo` | 7400 / 2026-03 | 0,006 | 1 | 255 meses de antigüedad, renta baja, sin señales: se fue por el efecto aleatorio no observable. Es el ruido irreducible que mide el techo de §6 |
+Se eligen a propósito casos distintos (los dos de mayor score, el falso positivo más caro, el
+positivo con más saldo y el falso negativo de menor score), no los 5 de mayor score, que son el mismo
+perfil repetido. El score máximo de la cartera es 0,33: con una tasa base de 2,2 %, incluso el
+afiliado más riesgoso se queda en 2 de cada 3 casos.
 
 ## 7. Lectura de negocio
 
-Con la cartera simulada (≈14.400 afiliados vigentes por mes de test, ≈238.000 MM CLP administrados):
+Con la cartera simulada (≈14.280 afiliados vigentes por mes de test, ≈234.700 MM CLP administrados):
 
-* Contactando al **10 % de mayor score (≈1.440 afiliados/mes)** el equipo alcanza el **35 % de los
-  traspasos** y el **39 % del saldo en riesgo** — unos **2.530 MM CLP mensuales** de los ~6.500 MM
-  que se van. La regla del brief captura 17,6 % / 20,8 %: el modelo **duplica la captura con el mismo
-  costo comercial**, y le gana en las 5 semillas.
-* Subir del 10 % al 20 % de cobertura agrega 17 puntos de captura (35 % → 52 %); bajar al 5 % pierde
-  12 (35 % → 23 %). El retorno es aproximadamente lineal en ese tramo, así que la cobertura óptima la
-  fija el costo del contacto, no el modelo.
-* Para el **saldo en riesgo esperado** la recomendación es explícita: publicar el nivel **anclado a un
-  pronóstico agregado del flujo mensual de traspasos** (`model.ajustar_prior`), no al nivel de la
-  última ventana cerrada. Sin ancla el error de nivel llega a +38 %; con ancla queda en ±11 %.
-* Palancas accionables que el modelo ordena: **la cohorte de switchers recientes** (llegaron por
-  traspaso y llevan poco tiempo: primer decil de riesgo), **las empresas en campaña de la
-  competencia** (la feature `contactos_competencia_pares_3m` permite anticipar a los colegas todavía
-  no visitados) y **los fondos con peor rentabilidad relativa** (campaña de comunicación por fondo).
+* Contactando al **10 % de mayor score (≈1.430 afiliados/mes)** el equipo alcanza el **35 % de los
+  traspasos** y el **38 % del saldo en riesgo** — unos **2.390 MM CLP mensuales** de los ~6.250 MM
+  que se van. La regla del brief captura 17,6 % / 20,3 %: el modelo **duplica la captura con el mismo
+  costo comercial** (razón 1,80 en la semilla de referencia, 1,30–1,85 entre semillas).
+* Subir del 10 % al 20 % de cobertura agrega 16 puntos de captura (35 % → 51 %); bajar al 5 % pierde
+  11 (35 % → 24 %). El retorno es aproximadamente lineal en ese tramo, así que la cobertura la fija
+  el costo del contacto, no el modelo.
+* **El saldo en riesgo esperado no se entrega en esta ronda.** El ranking sirve para priorizar por
+  valor dentro de la lista (dos afiliados con la misma probabilidad se ordenan por saldo), pero el
+  **monto agregado** que se publicaría ("se van X mil millones el próximo semestre") no es utilizable:
+  el sesgo va de −4 % a +40 % según la semilla y eso es un error de pronóstico del flujo agregado, no
+  de calibración. `ajustar_prior` queda como diagnóstico; el pronóstico agregado está en §10.
+* Palancas accionables que el modelo ordena: **la cohorte de antigüedad baja que llegó de otra AFP**
+  (primer decil de riesgo), **las empresas en campaña de la competencia** (`contactos_competencia_
+  pares_3m` permite anticipar a los colegas todavía no visitados) y **los fondos con peor
+  rentabilidad relativa**.
 
-## 8. Decisiones tomadas, supuestos y limitaciones
+## 8. Decisiones tomadas, supuestos y criterios de aceptación
 
 **Decisiones**
 
@@ -411,27 +434,46 @@ Con la cartera simulada (≈14.400 afiliados vigentes por mes de test, ≈238.00
 4. Se excluye a quien ya presentó la solicitud en un mes ≤ corte (ceros estructurales, ya no retenibles).
 5. Los afiliados nuevos al sistema entran sólo a la adjudicataria de la licitación → ~7 % del universo
    nunca aparece en la cartera; se modela la permanencia obligatoria de 24 meses.
-6. **Dos calibradores** (Platt para el orden, isotónica para el nivel) más `ajustar_prior` para el
-   ancla agregada.
+6. **El switcher es latente** y `llego_por_traspaso` es un proxy imperfecto (concordancia 0,762), por
+   decisión del gerente en la ronda 2.
 7. Se asume que la AFP ve la historia de RIM previa de un afiliado que entró por traspaso (llega con
    la cuenta y vía Previred). **Supuesto a confirmar**: si no fuera así habría que enmascarar las
    features laborales anteriores a `antiguedad_afp_meses`.
-8. Hiperparámetros elegidos por AUC de validación entre 5 configuraciones; el test se miró una vez.
-9. La ventana de calibración se dejó en 3 cortes tras comparar 3 / 9 / 12 sobre 5 semillas (§6).
+8. Hiperparámetros elegidos por AUC de validación entre 5 configuraciones; el test se miró al final.
+9. Ventana de calibración de 3 cortes tras comparar 3 / 9 / 12 (§6).
 
-**Limitaciones y criterios no alcanzados**
+**Criterios de aceptación vigentes** (fijados por el gerente en la ronda 2): para el banco sintético,
+**AUC ≥ 0,70 en todas las semillas** y, como **criterio principal**, la métrica de negocio —
+**captura al 10 % ≥ 30 % de los traspasos y ≥ 1,5 × la mejor regla, en todas las semillas**. Para
+datos reales se mantiene AUC ≥ 0,75. El "≥ 95 % del techo" **no** es criterio de aceptación.
 
-* **AUC 0,719–0,744 < 0,75** (criterio del brief). No se ajustó la simulación para cruzarlo. El techo
-  medido del mundo simulado es 0,737–0,771, o sea que el modelo captura el 96–98 % de lo alcanzable;
-  el resto son eventos posteriores al corte. **Propuesta de umbral** (§10).
-* **El nivel del saldo en riesgo no es reproducible sin ancla externa**: −3 % a +38 % entre semillas.
-  Es un problema de pronóstico del flujo agregado, no de calibración; queda documentado, medido por
-  corte y con el mecanismo de corrección implementado.
-* La **regla de negocio del brief** sigue siendo un baseline pobre pero por la razón contraria a la
-  ronda 1: ahora la brecha de rentabilidad casi no varía entre afiliados dentro de un mes (sólo por
-  fondo), así que la regla marca a bloques completos de la cartera. La regla graduada es el
-  comparador honesto y el modelo también le gana.
-* Segmentos flojos: menores de 30 (AUC 0,673) y 60+ (0,698).
+| Criterio | Resultado | ¿Cumple? |
+|---|---|---|
+| AUC ≥ 0,70 en las 5 semillas | 0,707 / 0,720 / 0,723 / 0,735 / 0,747 | **sí, 5/5** |
+| Captura al 10 % ≥ 30 % en las 5 semillas | 30,0 % / 32,8 % / 33,9 % / 34,9 % / 36,6 % | **sí, 5/5** (la semilla 99 en 29,99 %, a 0,01 pp del umbral) |
+| Captura ≥ 1,5 × la mejor regla en las 5 semillas | 1,30 / 1,67 / 1,77 / 1,80 / 1,85 | **no: 4/5** (falla la semilla 99) |
+| Lift decil 1 ≥ 3 (criterio original del brief) | 3,00 / 3,28 / 3,39 / 3,50 / 3,66 | 4/5 (la semilla 99 en 2,9993) |
+| Modelo supera a los baselines sin perder segmentos grandes | 23/23 ganados, +0,012 a +0,156 de AUC | sí |
+| Runtime < 5 min y tests < 2 min | 38 s – 2,5 min y 15 – 60 s | sí |
+
+**Criterio no cumplido y su causa.** La razón captura/mejor regla queda en **1,30 en la semilla 99**
+(umbral 1,5). La causa está medida y es del **denominador, no del modelo**: la regla del brief marca
+una fracción de la cartera que oscila entre **13,7 % (semilla 99) y 51,0 % (semilla 123)**, porque la
+condición "brecha de rentabilidad < −1 pp" aplica a bloques enteros de fondos y cuántos cruzan el
+umbral depende del camino de rentabilidad simulado. Cuando marca poco (13,7 %) es un grupo pequeño y
+bien dirigido y su captura al 10 % sube a 23,0 %, su máximo entre semillas; cuando marca la mitad de
+la cartera baja a 11,1 %. El modelo, en cambio, se mueve entre 30,0 % y 36,6 %. Es decir: **el
+criterio de razón es inestable porque su denominador lo es** (varía ×2), y la semilla 99 combina el
+peor AUC del modelo con la mejor regla. Propuesta concreta en §10.
+
+**Otras limitaciones**
+
+* **Saldo en riesgo esperado: no entregado** (pregunta secundaria del brief). Sesgo −3,6 % … +40,2 %
+  entre semillas; con ancla de nivel −12,2 % … +1,2 %, lo que localiza el problema en el pronóstico
+  del flujo agregado.
+* La **regla de negocio del brief** es un baseline pobre e inestable (ver arriba). La regla graduada
+  es el comparador estable (18,5 – 22,8 %) y el modelo le gana en las 5 semillas.
+* Segmentos con margen estrecho: LICENCIA (+0,012 de AUC) y CESANTE (+0,040).
 * No se modela la reentrada de un afiliado que se fue y vuelve, ni el efecto de red (familiares que
   se traspasan juntos), ni el traspaso por cambio de empleador con convenio.
 * Los parámetros macro, comisiones y rentabilidades son **supuestos razonables para Chile**, no
@@ -443,108 +485,114 @@ Con la cartera simulada (≈14.400 afiliados vigentes por mes de test, ≈238.00
 cd /home/user/afp-analytics-lab
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --semillas-estabilidad 42,123,7,2024,99
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos
 python -m pytest afp_lab/churn_traspaso/tests -q
 ```
 
 Opciones: `--salida DIR`, `--seed`, `--periodo-inicio`, `--periodo-fin`, `--n-test`, `--n-valid`,
-`--sin-fuentes`, `--sin-techo`, `--semillas-estabilidad`.
+`--sin-fuentes`, `--sin-techo`, `--semillas-estabilidad`, `--experimentos`.
+
+`reportes/estabilidad_semillas.csv` y `estabilidad_rangos.csv` **requieren
+`--semillas-estabilidad`**; `hiperparametros.csv` y `ventana_calibracion.csv` **requieren
+`--experimentos`**. Los cuatro archivos van incluidos en `salidas/churn_traspaso/reportes/` de la
+corrida de referencia (se corrieron los tres comandos, en ese orden).
 
 La máquina de 4 núcleos es **compartida con los otros dos proyectos**, así que se reportan las dos
-mediciones observadas: con la máquina libre y con los otros dos data scientists corriendo. Todo con
-`num_threads=2` y 20.000 afiliados.
+mediciones observadas. Todo con `num_threads=2` y 20.000 afiliados.
 
 | Paso | Máquina libre | Máquina cargada |
 |---|---|---|
-| `generar_tablas` + `construir_dataset` (37 cortes, 564.709 filas × 72 features) | 14,4 s | 17,5 s |
+| `generar_tablas` + `construir_dataset` (37 cortes, 558.932 filas × 72 features) | 14,4 s | 17,5 s |
 | Guardar fuentes y dataset en parquet | 1,8 s | 2,0 s |
 | `entrenar` (LightGBM + 2 calibradores) | 9,6 s | 30,9 s |
 | Evaluar (métricas, segmentos, calibración, SHAP) | 2,9 s | 3,7 s |
-| `techo_predictibilidad` (un modelo extra de diagnóstico) | 13,4 s | 90,9 s |
-| **Total corrida estándar** | **42,5 s** | **2 min 29 s** (límite: 5 min) |
-| Barrido de 5 semillas (`--semillas-estabilidad`) | +101 s → 2 min 25 s | +141 s → 4 min 24 s |
+| `techo_predictibilidad` (modelo extra de diagnóstico) | 13,4 s | 90,9 s |
+| **Total corrida estándar** | **38 s** | **2 min 29 s** (límite: 5 min) |
+| `--semillas-estabilidad` (4 corridas extra) | +102 s → 2 min 21 s | 4 min 24 s |
+| `--experimentos` (5 configuraciones + 3 ventanas) | +94 s → 2 min 12 s | — |
 
-`python -m pytest afp_lab/churn_traspaso/tests -q` → **24 tests**, 13 s con la máquina libre y 60 s
-con la máquina cargada (límite: 2 min).
+`python -m pytest afp_lab/churn_traspaso/tests -q` → **27 tests**, 15 s con la máquina libre y ~60 s
+con la máquina cargada (límite: 2 min). `--sin-techo` y `--semillas-estabilidad ""` (el valor por
+defecto) dan margen adicional si hace falta.
 
-Si hace falta margen adicional, `--sin-techo` saca el modelo de diagnóstico (el paso más caro después
-del entrenamiento) y `--semillas-estabilidad ""` (el valor por defecto) omite el barrido.
-
-Salidas en `salidas/churn_traspaso/` (en `.gitignore`): `fuentes/*.parquet`, `dataset.parquet`,
-`modelo/` y `reportes/*.csv` (parámetros, resumen de simulación y determinismo, split, métricas,
-captura, por corte, por segmento, calibración, saldo en riesgo total y por corte, importancias, casos
-explicados, techo de predictibilidad, estabilidad por semilla y rangos, tiempos).
+Salidas en `salidas/churn_traspaso/` (en `.gitignore`): `fuentes/*.parquet` (11 tablas; **la latente
+no se escribe**), `dataset.parquet`, `modelo/` y 19 `reportes/*.csv`.
 
 ## 10. Propuestas para `common/`, umbrales y próximos pasos
 
 **Propuestas para `common/`** (no se tocó nada fuera de `afp_lab/churn_traspaso/`):
 
-1. *(ya incorporadas por el gerente en la ronda 1: `groupby(..., observed=True)` y el desempate
-   aleatorio de `lift_decil_1`.)*
-2. `common/metrics.py`: agregar **captura por percentil** (`captura_top(y, score, peso, fracciones)`
-   → % de eventos y % de peso capturados, con desempate reproducible). Es la métrica de negocio
-   natural de cualquier proyecto de propensión; implementada en `churn_traspaso/evaluate.py`.
-3. `common/metrics.py`: agregar `curva_calibracion`, `CalibradorPlatt` y `ajustar_prior` (prior
-   shift). Todo proyecto que agregue montos necesita separar **orden** de **nivel**.
+1. *(ya incorporadas por el gerente: `groupby(..., observed=True)` y el lift del decil 1 con empates
+   por valor esperado.)*
+2. `common/metrics.py`: agregar **captura por percentil** (`captura_top(y, score, peso, fracciones)`)
+   con desempate reproducible. Es la métrica de negocio natural de cualquier proyecto de propensión;
+   implementada en `churn_traspaso/evaluate.py`.
+3. `common/metrics.py`: agregar `curva_calibracion`, `CalibradorPlatt` y `ajustar_prior`. Todo
+   proyecto que agregue montos necesita separar **orden** de **nivel**.
 4. `common/calendario.py`: mover las funciones puras de periodo (`add_months`, `periodo_to_idx`,
-   `rango_periodos`) fuera de `rim_nowcasting.calendario`, que importa PySpark; hoy cualquier
-   proyecto pandas arrastra Spark sólo para sumar meses.
+   `rango_periodos`) fuera de `rim_nowcasting.calendario`, que importa PySpark.
 5. `common/splits.py`: `split_temporal` con purga y guardas sirve igual a los proyectos 03 y 04.
 6. `common/diagnostico.py`: los **chequeos de determinismo** (`P(y|feature)`, AUC de la mejor feature
-   suelta, fracción de scores saturados) deberían correr en todos los proyectos sintéticos. Son los
-   que habrían detectado el bloqueante 1 de esta revisión sin necesidad de una revisión adversarial.
+   suelta, fracción de scores saturados y **concordancia entre una feature y el latente que la
+   inspira**) deberían correr en todos los proyectos sintéticos. Son los que habrían detectado los
+   bloqueantes 1 y 2 de la ronda 1 y el proxy perfecto de la ronda 2 sin revisión adversarial.
 
-**Umbrales de aceptación: propuesta**
+**Umbrales: propuesta de ajuste al criterio de razón.** El criterio "≥ 1,5 × la mejor regla" tiene un
+denominador que varía ×2 entre semillas por una razón ajena al modelo (la fracción de cartera que
+marca la regla binaria, 13,7 % – 51,0 %). Propongo una de estas dos variantes, ambas verificables con
+`reportes/estabilidad_semillas.csv`:
 
-El brief pide AUC ≥ 0,75 y lift decil 1 ≥ 3. El lift se cumple en las 5 semillas (3,23–3,58); el AUC
-no (0,719–0,744). Con la simulación corregida el techo medido es 0,737–0,771, así que **0,75 no es
-alcanzable de forma estable** y sólo se alcanzaba antes gracias al bloque digital que regalaba el
-target. Propongo, con argumento:
-
-* Mantener **AUC ≥ 0,75 para datos reales** (una cartera real tiene mucha más heterogeneidad
-  observable y persistente que un efecto aleatorio N(0; 0,40²)).
-* Para el banco de pruebas sintético, reemplazarlo por **AUC ≥ 0,70 y ≥ 95 % del techo medido**
-  (`reportes/techo_predictibilidad.csv`): mide lo que el modelo puede hacer, no lo que la simulación
-  regala. Hoy: 0,719–0,744 de AUC y 96–98 % del techo en las 5 semillas.
-* Y ascender a criterio principal la **métrica de negocio**, que es de la que depende la decisión:
-  **captura al 10 % ≥ 30 % de los traspasos y ≥ 1,5 × la mejor regla de negocio**, en todas las
-  semillas. Hoy: 32,3–35,8 % y 1,7–2,8 ×.
+* medir la razón contra la **regla graduada**, cuya captura es estable (18,5 – 22,8 %): daría
+  1,32 – 1,85 y la semilla 99 seguiría bajo 1,5, pero por una diferencia real y no por ruido del
+  comparador; o
+* exigir la razón **sobre la mediana de las semillas** (hoy 1,77) y, por semilla, el criterio
+  absoluto de captura ≥ 30 % (que sí se cumple 5/5). Esta es la que recomiendo: separa "el modelo
+  sirve" (captura absoluta, estable) de "el modelo es mejor que la regla" (razón, con comparador
+  ruidoso).
 
 **Próximos pasos del proyecto**
 
-* **Pronóstico del flujo agregado** de traspasos (serie mensual con comisiones y rentabilidades
-  conocidas al corte) para alimentar `ajustar_prior`. Es el mayor error pendiente del nivel.
+* **Pronóstico del flujo agregado** de traspasos (serie mensual con comisiones, rentabilidades y
+  antigüedad media de la cartera conocidas al corte) para alimentar `ajustar_prior` y poder entregar
+  el saldo en riesgo esperado. Es el entregable pendiente del brief.
 * **Uplift / incrementalidad**: el modelo predice riesgo, no el efecto del contacto. Como el ejecutivo
   propio es reactivo, el modelo puede aprender que "contacto del ejecutivo" correlaciona con riesgo.
-  Un test A/B de retención y un modelo de uplift responderían a quién conviene llamar.
 * **Modelo de tiempo hasta el evento** (hazard mensual discreto) para responder "¿cuándo?".
 * **Alerta por empresa**: cuando `contactos_competencia_pares_3m` sube en un empleador, avisar antes
   de que la campaña alcance al resto de la dotación.
-* Optimización de la lista por saldo retenido esperado sujeto a capacidad, en vez de ordenar sólo por
-  probabilidad.
+* Reducir la redundancia del bloque de antigüedad (4 features para la misma información) y medir si
+  una sola parametrización mejora la estabilidad entre semillas.
 
 ## 11. Qué cambió respecto de la ronda 1
 
 | # | Hallazgo de la revisión | Qué se hizo | Evidencia |
 |---|---|---|---|
-| 1 (bloq.) | Bloque digital = observación del target | Intención visible sólo para el **35 %** de los afiliados; logins ×1,7 (antes ×3,5) y certificado +6 pp (antes 40 %, ×33 sobre la base); **causas exógenas** del certificado (Operación Renta, crédito, trámite de pensión, cambio de empleo); chequeos de determinismo en `resumen_simulacion` | `lift_certificado` 1,32; `auc_mejor_feature_suelta` 0,636; `frac_score > 0,9` = 0; ninguna feature digital en el top 25 de gain |
-| 2 (bloq.) | Dispersión de rentabilidad irreal (6 pp) | Innovación del AR(1) a 1/4 (`sigma_ar_rentabilidad` ahora es parámetro); test del máximo/mínimo móvil de 12 meses y del dominio del castigo | rango entre AFP 1,46–1,81 pp (mediana), p95 2,80 pp; tasa móvil 12 m 3,4 %–6,9 % (antes 1,6 %–12,6 %) |
-| 3 (bloq.) | Saldo en riesgo no reproducible | Calibración sobre ventana reciente contigua con horizonte cerrado; `ajustar_prior` para anclar el nivel; sesgo **por corte** y sobre 5 semillas; `sesgo_conteo` separa nivel de forma | rango con isotónica −3 % … +38 %; **con ancla −11 % … +5 %**; documentado como problema de pronóstico agregado |
-| 4 (mayor) | Explicación falsa del drift | Reescrita: es la **fase de la onda del mercado** (recortes de comisión 2024-01 y 2025-07 y fin del castigo en 2025-12), idéntica en las 5 semillas (validación > test siempre) | §6, tabla de tasas base por semilla |
-| 5 (mayor) | Split con dos gaps encadenados | **Split contiguo con purga**: la validación queda a 7 meses del test; train pasa de 21 a 31 cortes y los descartados de 22 a 12 | §4, `test_split_temporal_purga_y_guardas` |
-| 6 (mayor) | Regla del brief degenerada | Se mantiene la regla graduada como comparador exigente y se documenta que ahora la degeneración es por bloques (la brecha de rentabilidad sólo varía por fondo) | §5 y §8 |
-| 7 (mayor) | README y código no coinciden | La tabla de parámetros se **genera desde `ParametrosChurn`** (`tabla_parametros_markdown`) y un test falla si el README se desvía | `test_readme_documenta_los_parametros_vigentes` |
-| 8 | `split_temporal` sin guardas | `ValueError` con mensaje cuando faltan cortes | `test_split_temporal_purga_y_guardas` |
+| 1 (bloq.) | Bloque digital = observación del target | Intención visible sólo para el **35 %**; logins ×3,5 → **×1,7**; certificado 40 % → **+6 pp** sobre una base con **causas exógenas** | `lift_certificado` 1,60 (antes ×33 de multiplicador); `auc_mejor_feature_suelta` 0,630; `frac_score>0,9` = 0; score máximo 0,331; ninguna feature digital en el top 25 de gain |
+| 2 (bloq.) | Dispersión de rentabilidad irreal (6 pp) | Innovación del AR(1) a 1/4 (`sigma_ar_rentabilidad` es parámetro); tests del máximo/mínimo móvil y del dominio del castigo | rango entre AFP 1,46–1,81 pp, p95 2,80; tasa móvil 12 m 3,7 %–7,0 % (antes 1,6 %–12,6 %); castigo −0,45 pp dentro vs +0,15 pp fuera |
+| 3 (bloq.) | Saldo en riesgo no reproducible | Calibración sobre ventana reciente contigua; `ajustar_prior`; sesgo por corte y sobre 5 semillas; `sesgo_conteo` separa nivel de forma. **Se declara no entregado** | isotónica −3,6 % … +40,2 %; con ancla −12,2 % … +1,2 % |
+| 4 (mayor) | Explicación falsa del drift | Reescrita con la descomposición medida: recorte de comisión (−0,05 del logit) y envejecimiento de la cartera (−0,06) son sistemáticos en 5/5; la rentabilidad es aleatoria (+0,02 en la semilla 42) | §6 |
+| 5 (mayor) | Split con dos gaps encadenados | **Split contiguo con purga**: validación a 7 meses del test; train 21 → 31 cortes; descartados 22 → 12 | §4, `test_split_temporal_purga_y_guardas` |
+| 6 (mayor) | Regla del brief degenerada | Se mantiene la regla graduada como comparador y se documenta que la fracción marcada oscila 13,7 % – 51,0 % entre semillas | §5, §6 y §8 |
+| 7 (mayor) | README y código no coinciden | Tabla de parámetros **generada desde `ParametrosChurn`**; un test falla si el README se desvía | `test_readme_documenta_los_parametros_vigentes` |
+| 8 | `split_temporal` sin guardas | `ValueError` con mensaje | `test_split_temporal_purga_y_guardas` |
 | 9 | Cortes descartados en silencio | `construir_features_multi` levanta `ValueError` | `test_cortes_sin_historia_fallan_explicitamente` |
 | 10 | Categorías desde el slice | Catálogo fijo `TIPOS_RECLAMO` y `FONDOS` | `test_catalogo_fijo_de_tipos_de_reclamo` |
-| 11 | `lift_decil_1` sin desempate | *(corregido por el gerente en `common`)* | |
-| 12 | Segmento con AUC NaN pasaba el check | `comparar_segmentos` agrega `comparable` / `gana_modelo`; `segmentos_no_superados` los reporta | `test_segmento_sin_positivos_no_se_da_por_ganado` |
-| 13 | Métricas sin sensibilidad a semilla | Barrido de 5 semillas integrado al `run`, con tabla de rangos | `reportes/estabilidad_semillas.csv`, `estabilidad_rangos.csv` |
+| 11 | `lift_decil_1` sin desempate | *(corregido por el gerente en `common`; ahora empates por valor esperado, score constante = 1,0)* | `metricas_test.csv`: `baseline_tasa_base` lift 1,00 |
+| 12 | Segmento con AUC NaN pasaba el check | `comparable` / `gana_modelo` y `segmentos_no_superados` | `test_segmento_sin_positivos_no_se_da_por_ganado` |
+| 13 | Métricas sin sensibilidad a semilla | Barrido de 5 semillas con tabla de rangos | `estabilidad_semillas.csv`, `estabilidad_rangos.csv` |
 | 14 | `meses_hasta_pension` negativo | Documentado en §4 y en el código | `test_meses_hasta_pension_negativo_es_intencional` |
-| 15 | Test de leakage tautológico | Nuevo test que muta el futuro y recalcula con `construir_features_multi` (la ruta que no recorta) | `test_sin_leakage_en_la_ruta_matricial` |
+| 15 | Test de leakage tautológico | Test que muta el futuro y recalcula con `construir_features_multi` | `test_sin_leakage_en_la_ruta_matricial` |
 
-**Cambios de realismo añadidos en la ronda 2** (decididos antes de medir si cruzaban los umbrales, y
-reportados igual aunque el AUC quedó bajo 0,75): campañas de venta de la competencia **por
-empleador** (así trabaja la fuerza de venta en Chile) con su feature de pares, y **persistencia del
-switcher** (quien ya se cambió una vez se vuelve a cambiar), que es observable porque la antigüedad
-en la AFP es menor que la antigüedad en el sistema. Sin ellos el AUC quedaba en 0,696 y el lift en
-3,06; con ellos, 0,743 y 3,53 con un techo de 0,767.
+## 12. Ronda 3: correcciones sobre la revisión de la ronda 2
+
+| Punto | Antes | Ahora |
+|---|---|---|
+| **Umbrales** (decisión 1 del gerente) | §8/§10 proponían "AUC ≥ 0,70 **y ≥ 95 % del techo**" | El techo es **sólo diagnóstico** (§6); los criterios son AUC ≥ 0,70 en todas las semillas y la métrica de negocio como principal; ≥ 0,75 se mantiene para datos reales (§8 y §10) |
+| **Proxy del switcher** (decisión 2) | `llego_por_traspaso` reproducía `lat_switcher` con concordancia **1,0** | El switcher es latente con `P(sw \| brecha)=0,60` y `P(sw \| sin brecha)=0,22`; concordancia medida **0,762**, incluida en `resumen_simulacion` y con test. Re-medido: AUC 0,743 → **0,720** (semilla 42), 0,707–0,747 en 5 semillas |
+| **Saldo en riesgo** (decisión 3) | §7 lo presentaba como recomendación operativa | **No entregado en esta ronda**; `ajustar_prior` es diagnóstico y el pronóstico agregado pasó a §10 |
+| **Drift** (corrección 1) | "fase de la onda del mercado", negando la composición | Descomposición medida: comisión −0,05 y **envejecimiento de la cartera** −0,06 sistemáticos en 5/5; rentabilidad aleatoria |
+| **Contrafactual** (corrección 2) | "sin switcher ni campañas: 0,696 / 3,06" | Medido de nuevo con el generador corregido: **0,694 / 2,71 / captura 27,1 %**, fallarían los dos criterios (§2). Cifras del castigo (−0,45 / +0,15 pp) y tasa sobre cotizantes (**6,06 %**, indicador nuevo `tasa_traspaso_anualizada_cotizantes`) |
+| **Reportes** (corrección 3) | `estabilidad_*.csv` requerían el flag y no se entregaban | Los cuatro archivos van en `reportes/`; §9 marca qué flag necesita cada uno |
+| **Latentes** (corrección 4) | `columnas_features` sólo excluía por nombre; el techo pegaba `lat_u_traspaso`; la tabla latente se escribía en `fuentes/` | Exclusión **dura** por prefijo `lat_`/`p_`; el techo pasa lista de columnas explícita; la tabla latente no se persiste (3 tests) |
+| **Menores** (corrección 5) | — | Test del castigo con `add_months`; docstring de `split_temporal` ("a lo más `h+2`"); **nota de redundancia** de `meses_en_otras_afp` junto a las importancias; `reportes/hiperparametros.csv` (5 configuraciones) y `ventana_calibracion.csv` vía `--experimentos` |
+| **Lift de `common`** (corrección 6) | lift del baseline trivial 0,79–1,14 según el orden de las filas | `baseline_tasa_base` da exactamente **1,00**; todas las tablas de baselines se re-corrieron con la métrica nueva |

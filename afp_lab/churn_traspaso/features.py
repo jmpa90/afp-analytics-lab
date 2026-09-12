@@ -426,8 +426,18 @@ def construir_dataset(tablas: dict[str, pd.DataFrame], cortes: list[int],
     return construir_target(tablas, df, horizonte)
 
 
+PREFIJOS_PROHIBIDOS = ("lat_", "p_")   # latentes del universo y parametros de pago del empleador
+
+
 def columnas_features(df: pd.DataFrame) -> list[str]:
-    return [c for c in df.columns if c not in COLUMNAS_NO_FEATURE]
+    """Columnas que puede usar el modelo.
+
+    Excluye de forma dura los identificadores, el target y **cualquier** columna con prefijo
+    `lat_` o `p_` (CONVENCIONES §2): si un diagnostico pega una columna latente al dataset, el
+    modelo de produccion no la ve por construccion y no por disciplina del autor.
+    """
+    return [c for c in df.columns
+            if c not in COLUMNAS_NO_FEATURE and not c.startswith(PREFIJOS_PROHIBIDOS)]
 
 
 def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
@@ -440,7 +450,8 @@ def split_temporal(cortes: list[int], n_test: int = 3, n_valid: int = 3,
     encadenaba dos gaps y terminaba entrenando 26 meses antes del test.
 
     Se sigue respetando CONVENCIONES §3 (gap >= `horizonte` entre el ultimo target de entrenamiento
-    y el primer corte de test): con esta construccion el gap efectivo es `horizonte + 2`.
+    y el primer corte de test). La validacion queda **a lo mas `horizonte + 2` meses** del primer
+    corte de test (exactamente `horizonte + 2` cuando los cortes son mensuales y contiguos).
 
     Devuelve `train`, `valid`, `test` y `descartados` (los cortes que caen en las zonas de purga).
     """

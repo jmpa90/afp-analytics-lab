@@ -126,13 +126,15 @@ def ajustar_prior(prob: np.ndarray, tasa_objetivo: float, tol: float = 1e-9) -> 
 
 # --------------------------------------------------------------------- entrenamiento
 def entrenar(df_train: pd.DataFrame, df_valid: pd.DataFrame, seed: int = 42,
-             params: dict | None = None, n_arboles: int = N_ARBOLES_MAX) -> dict:
+             params: dict | None = None, n_arboles: int = N_ARBOLES_MAX,
+             columnas: list[str] | None = None) -> dict:
     """Entrena LightGBM binario con early stopping en validacion y ajusta los dos calibradores.
 
-    Devuelve un dict con el booster, las columnas usadas, el calibrador de ranking (Platt) y el
-    calibrador de agregados (isotonica por bloques).
+    `columnas` permite pasar una lista explicita (solo la usan los diagnosticos, que necesitan una
+    columna latente que `columnas_features` excluye de forma dura). Devuelve un dict con el booster,
+    las columnas usadas, el calibrador de ranking (Platt) y el de agregados (isotonica por bloques).
     """
-    cols = columnas_features(df_train)
+    cols = list(columnas) if columnas is not None else columnas_features(df_train)
     p = dict(PARAMS_LGBM)
     if params:
         p.update(params)

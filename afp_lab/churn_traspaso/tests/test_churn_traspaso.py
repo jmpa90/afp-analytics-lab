@@ -74,6 +74,8 @@ def test_mercado_y_olas_de_traspaso_plausibles(tablas):
     # en Chile la diferencia de rentabilidad 12 m entre AFP es de 1-2 pp, no de 6
     assert 0.5 <= r["rango_rentabilidad_12m_entre_afp_mediana_pp"] <= 3.0
     assert r["rango_rentabilidad_12m_entre_afp_p95_pp"] <= 5.0
+    # la tasa sobre la cartera cotizante debe quedar en el rango del brief (4-7 %)
+    assert 0.035 <= r["tasa_traspaso_anualizada_cotizantes"] <= 0.075, r["tasa_traspaso_anualizada_cotizantes"]
     # y la tasa movil de 12 meses no puede oscilar entre 1,6 % y 12,6 % como en la ronda 1
     assert 0.02 <= r["tasa_traspaso_12m_min"], r["tasa_traspaso_12m_min"]
     assert r["tasa_traspaso_12m_max"] <= 0.09, r["tasa_traspaso_12m_max"]
@@ -89,10 +91,12 @@ def test_castigo_de_rentabilidad_domina_su_ventana(tablas):
         piv = m.pivot(index="periodo", columns="afp", values=f"rent_12m_{f}")
         brechas.append(piv[AFP_PROPIA] - piv[list(AFP_TODAS)].mean(axis=1))
     br = pd.concat(brechas, axis=1).mean(axis=1)
-    dentro = br[(br.index >= int(par["castigo_desde"]) + 6) & (br.index <= int(par["castigo_hasta"]))]
+    dentro = br[(br.index >= add_months(int(par["castigo_desde"]), 6))
+                & (br.index <= int(par["castigo_hasta"]))]
     fuera = br[br.index < int(par["castigo_desde"])]
     assert dentro.mean() < fuera.mean() - 0.4, (dentro.mean(), fuera.mean())
     assert dentro.mean() < -0.3
+    assert fuera.mean() > -0.2
 
 
 # --------------------------------------------------------------------- leakage
@@ -353,6 +357,29 @@ def test_metrica_de_negocio_captura():
     assert riesgo["saldo_riesgo_real_mm"].iloc[0] == pytest.approx(150 / 1e6)
 
 
+def test_columnas_features_excluye_latentes_de_forma_dura(dataset):
+    """Menor 7 de la ronda 2: aunque un diagnostico pegue una columna latente, el modelo no la ve."""
+    d = dataset.copy()
+    d["lat_u_traspaso"] = 1.0
+    d["p_dnp"] = 0.5
+    cols = F.columnas_features(d)
+    assert "lat_u_traspaso" not in cols and "p_dnp" not in cols
+    assert not any(c.startswith(("lat_", "p_")) for c in cols)
+    assert len(cols) == len(F.columnas_features(dataset))
+
+
+def test_llego_por_traspaso_es_proxy_imperfecto(tablas, dataset):
+    """Decision 2 del gerente en la ronda 2: la feature no puede reproducir `lat_switcher`."""
+    lat = tablas["afiliados_latente_churn"].set_index("afiliado_id")
+    m = dataset[["afiliado_id", "llego_por_traspaso"]].copy()
+    m["lat"] = m["afiliado_id"].map(lat["lat_switcher"])
+    concordancia = float((m["llego_por_traspaso"] == m["lat"]).mean())
+    assert 0.60 <= concordancia <= 0.85, concordancia
+    # y falla en los dos sentidos (no es el latente con otro nombre)
+    assert 0.05 < float(m.loc[m["llego_por_traspaso"] == 1, "lat"].mean()) < 0.95
+    assert 0.05 < float(m.loc[m["llego_por_traspaso"] == 0, "lat"].mean()) < 0.95
+
+
 def test_chequeos_de_determinismo(tablas, dataset):
     """Ronda 2, bloqueante 1: ninguna feature puede ser una observacion disfrazada del target."""
     from afp_lab.churn_traspaso.synthetic import chequeos_determinismo
@@ -365,6 +392,7 @@ def test_chequeos_de_determinismo(tablas, dataset):
     # y el resumen de simulacion debe traer los chequeos cuando se le pasa el dataset
     r = resumen_simulacion(tablas, dataset).set_index("indicador")
     assert "auc_mejor_feature_suelta" in r.index and "p_target_dado_certificado" in r.index
+    assert 0.60 <= r.loc["concordancia_proxy_switcher", "valor"] <= 0.85
 
 
 def test_segmento_sin_positivos_no_se_da_por_ganado():
@@ -414,9 +442,24 @@ def test_run_end_to_end(tmp_path):
         assert (rep / f).exists(), f
     assert (tmp_path / "modelo" / "lightgbm.txt").exists()
     met = pd.read_csv(rep / "metricas_test.csv").set_index("predictor")
-    assert met.loc["modelo_lgbm", "auc"] > met.loc["baseline_regla_negocio", "auc"]
+    # con 900 afiliados el modelo no tiene senal suficiente (AUC ~0,5): este test verifica que el
+    # pipeline corre y escribe todo, no la calidad. La comparacion contra los baselines se exige en
+    # `test_modelo_supera_baselines_y_persiste`, con una muestra donde el modelo si puede aprender.
+    for pred in ("modelo_lgbm", "baseline_tasa_base", "baseline_regla_negocio", "baseline_regla_graduada"):
+        assert pred in met.index
+        assert 0.0 <= met.loc[pred, "auc"] <= 1.0
+    assert met.loc["baseline_tasa_base", "lift_decil_1"] == pytest.approx(1.0)
     for f in ("parametros.csv", "resumen_simulacion.csv", "saldo_en_riesgo_por_corte.csv"):
         assert (rep / f).exists(), f
+
+
+def test_run_no_escribe_tablas_latentes(tmp_path):
+    """Menor 7 de la ronda 2: `afiliados_latente_churn` es latente y no se persiste con las fuentes."""
+    assert run_main(["--n-afiliados", "700", "--salida", str(tmp_path), "--sin-techo",
+                     "--semillas-estabilidad", ""]) == 0
+    fuentes = {f.name for f in (tmp_path / "fuentes").glob("*.parquet")}
+    assert "afiliados_latente_churn.parquet" not in fuentes
+    assert "saldos.parquet" in fuentes and "traspasos.parquet" in fuentes
 
 
 def test_run_con_techo_y_estabilidad(tmp_path):

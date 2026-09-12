@@ -193,6 +193,31 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
         rel[f"contactos_{base}_3m"] = _suma_movil(m, 3)
         rel[f"contactos_{base}_6m"] = _suma_movil(m, 6)
     rel["meses_desde_contacto_competencia"] = _meses_desde(canal_mat["VENDEDOR_COMPETENCIA"] > 0)
+
+    # Presion de la competencia sobre los COMPANEROS de empresa: la fuerza de venta de la
+    # competencia trabaja por empresa (charlas), asi que que a los colegas los hayan visitado es una
+    # senal anticipada y persistente. Empleador leido en `corte-2` (panel) y contactos en
+    # [corte-2, corte] (operacional): ambas as-of.
+    vc3_prop = _suma_movil(canal_mat["VENDEDOR_COMPETENCIA"], 3)
+    emp_lab = emp_id.astype(np.int64)
+    n_emp = int(emp_lab.max()) + 1
+    pares_frac = np.full((n, n_t), np.nan, dtype=np.float32)
+    pares_n = np.zeros((n, n_t), dtype=np.float32)
+    for t in range(desf, n_t):
+        e = emp_lab[:, t - desf]
+        valido = vig[:, t] & (e > 0)
+        if not valido.any():
+            continue
+        cnt = np.bincount(e[valido], minlength=n_emp).astype(np.float32)
+        suma = np.bincount(e[valido], weights=(vc3_prop[valido, t] > 0).astype(np.float64),
+                           minlength=n_emp).astype(np.float32)
+        ce, se = cnt[e], suma[e]
+        otros = np.maximum(ce - 1.0, 0.0)
+        frac = np.where(otros > 0, (se - (vc3_prop[:, t] > 0)) / np.maximum(otros, 1.0), np.nan)
+        pares_frac[:, t] = np.where(e > 0, frac, np.nan)
+        pares_n[:, t] = np.where(e > 0, otros, 0.0)
+    rel["contactos_competencia_pares_3m"] = pares_frac
+    rel["n_pares_empleador"] = pares_n
     rel["meses_desde_contacto_ejecutivo"] = _meses_desde(canal_mat["EJECUTIVO_PROPIO"] > 0)
     if len(con):
         sub = con[(con["canal"] == "VENDEDOR_COMPETENCIA") & (con["resultado"] == "INTERESADO")].assign(_u=1)
@@ -322,7 +347,16 @@ def construir_features_multi(tablas: dict[str, pd.DataFrame], cortes: list[int])
                     df["edad_inicio"].to_numpy() + (jj_lab // 12))
     df["edad"] = edad.astype(np.int16)
     edad_legal = df["sexo"].map(EDAD_LEGAL_PENSION).to_numpy()
+    # `meses_hasta_pension` puede ser NEGATIVO: son los pensionados activos y quienes siguen
+    # cotizando pasada la edad legal (60 mujeres / 65 hombres); el signo es informativo y por eso no
+    # se trunca en 0.
     df["meses_hasta_pension"] = ((edad_legal - df["edad"].to_numpy()) * 12).astype(np.int32)
+    # meses que el afiliado estuvo en OTRA AFP antes de llegar a la propia: el "switcher" que ya se
+    # cambio una vez vuelve a cambiarse. Ambas antiguedades son de maestro, conocidas al corte.
+    en_otras = (df["meses_desde_afiliacion"].to_numpy()
+                - df["antiguedad_afp_meses"].to_numpy()).clip(min=0)
+    df["meses_en_otras_afp"] = en_otras.astype(np.int32)
+    df["llego_por_traspaso"] = (en_otras > 0).astype(np.int8)
     df.drop(columns=["edad_panel", "edad_inicio", "periodo_afiliacion"], inplace=True)
 
     emp = tablas["empleadores"].set_index("empleador_id")[["rubro", "tamano_empleador"]]

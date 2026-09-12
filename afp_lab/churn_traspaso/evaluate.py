@@ -32,6 +32,9 @@ def agregar_segmentos(df: pd.DataFrame) -> pd.DataFrame:
     renta = out["rim_ref"].to_numpy(dtype=float)
     out["tramo_renta"] = pd.cut(np.nan_to_num(renta, nan=-1.0), [-2, 0, 6e5, 1.2e6, 2.5e6, np.inf],
                                 labels=["sin_renta", "0-600k", "600k-1,2M", "1,2-2,5M", "2,5M+"]).astype(str)
+    # a texto: `common.metrics.tabla_metricas_por_segmento` ya agrupa con observed=True (arreglado
+    # por el gerente en la ronda 1), pero dejar los segmentos como texto mantiene estable el join de
+    # `comparar_segmentos` y hace legibles los csv
     for c in ("tipo_afiliado", "fondo", "estado_laboral"):
         if c in out.columns:
             out[c] = out[c].astype(str)
@@ -74,10 +77,19 @@ def comparar_segmentos(tabla_seg: pd.DataFrame, modelo: str, baseline: str,
     """Diferencia modelo - baseline en cada segmento (para el checklist: no perder en segmentos grandes)."""
     m = tabla_seg[tabla_seg["predictor"] == modelo].set_index(["segmento", "valor"])
     b = tabla_seg[tabla_seg["predictor"] == baseline].set_index(["segmento", "valor"])
-    out = m[[metrica, "n", "frac_filas", "segmento_grande"]].join(
+    out = m[[metrica, "n", "tasa_base", "frac_filas", "segmento_grande"]].join(
         b[[metrica]], rsuffix="_baseline", how="inner").reset_index()
     out["dif"] = out[metrica] - out[f"{metrica}_baseline"]
+    # un segmento sin positivos (o sin negativos) devuelve AUC NaN: no puede darse por ganado
+    out["comparable"] = out[metrica].notna() & out[f"{metrica}_baseline"].notna()
+    out["gana_modelo"] = out["comparable"] & (out["dif"] > 0)
     return out.sort_values(["segmento", "valor"]).reset_index(drop=True)
+
+
+def segmentos_no_superados(tabla_comp: pd.DataFrame) -> pd.DataFrame:
+    """Segmentos grandes donde el modelo NO supera al baseline, incluidos los no comparables."""
+    g = tabla_comp[tabla_comp["segmento_grande"]]
+    return g[~g["gana_modelo"]].reset_index(drop=True)
 
 
 # --------------------------------------------------------------------- metrica de negocio
@@ -117,17 +129,33 @@ def saldo_en_riesgo(df: pd.DataFrame, prob: np.ndarray, col_saldo: str = "saldo_
     """Saldo en riesgo esperado (sum p x saldo) contra el saldo efectivamente traspasado."""
     saldo = df[col_saldo].to_numpy(dtype=float)
     y = df["y"].to_numpy()
-    esperado = float((np.asarray(prob, dtype=float) * saldo).sum())
+    p = np.asarray(prob, dtype=float)
+    esperado = float((p * saldo).sum())
     real = float(saldo[y == 1].sum())
     return pd.DataFrame([{
         "saldo_riesgo_esperado_mm": esperado / 1e6,
         "saldo_riesgo_real_mm": real / 1e6,
         "sesgo_relativo": (esperado - real) / max(real, 1.0),
+        # descomposicion: cuanto del sesgo es error de NIVEL (numero de traspasos) y cuanto es la
+        # correlacion entre la probabilidad y el saldo
+        "sesgo_conteo": float(p.sum() - y.sum()) / max(float(y.sum()), 1.0),
         "saldo_total_cartera_mm": float(saldo.sum()) / 1e6,
     }])
 
 
 # --------------------------------------------------------------------- calibracion
+def saldo_en_riesgo_por_corte(df: pd.DataFrame, prob: np.ndarray,
+                              col_saldo: str = "saldo_obligatorio") -> pd.DataFrame:
+    """Saldo en riesgo esperado vs real en cada corte (el sesgo agregado de un solo numero esconde
+    que la calibracion se mueve mes a mes)."""
+    d = df.assign(_p=np.asarray(prob, dtype=float))
+    filas = []
+    for corte, g in d.groupby("periodo_corte", observed=True):
+        r = saldo_en_riesgo(g, g["_p"].to_numpy(), col_saldo).iloc[0].to_dict()
+        filas.append({"periodo_corte": int(corte), **r})
+    return pd.DataFrame(filas)
+
+
 def curva_calibracion(y: np.ndarray, prob: np.ndarray, n_bins: int = 10) -> pd.DataFrame:
     """Tabla de calibracion por decil de score (probabilidad media vs tasa observada)."""
     y = np.asarray(y, dtype=float)

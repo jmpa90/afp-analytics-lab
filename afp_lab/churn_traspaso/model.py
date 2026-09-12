@@ -28,12 +28,14 @@ from sklearn.linear_model import LogisticRegression
 
 from .features import COLUMNAS_CATEGORICAS, columnas_features
 
+# Hiperparametros elegidos por AUC de VALIDACION entre 5 configuraciones (nunca con test):
+# el test solo se mira una vez, al final.
 PARAMS_LGBM = {
     "objective": "binary",
     "metric": ["auc", "average_precision"],
-    "learning_rate": 0.05,
+    "learning_rate": 0.03,
     "num_leaves": 48,
-    "min_data_in_leaf": 200,
+    "min_data_in_leaf": 60,
     "feature_fraction": 0.75,
     "bagging_fraction": 0.80,
     "bagging_freq": 1,
@@ -94,6 +96,32 @@ def calibrador_isotonico(prob: np.ndarray, y: np.ndarray,
     iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
     iso.fit(x, t, sample_weight=w)
     return iso
+
+
+def ajustar_prior(prob: np.ndarray, tasa_objetivo: float, tol: float = 1e-9) -> np.ndarray:
+    """Desplaza el log-odds para que la media de `prob` sea `tasa_objetivo` (prior shift).
+
+    Sirve para **anclar el nivel** de la probabilidad a un pronostico agregado del flujo mensual de
+    traspasos, que es la unica forma de corregir el error de nivel cuando la tasa base del mes que
+    se esta puntuando difiere de la del ultimo mes con horizonte cerrado (ver README §6 y §8: entre
+    semillas la tasa base del test se mueve hasta -54 % respecto de la ventana de calibracion).
+    No cambia el orden del score, asi que no afecta AUC, lift ni captura.
+    """
+    p = np.clip(np.asarray(prob, dtype=float), 1e-9, 1 - 1e-9)
+    if not 0 < tasa_objetivo < 1:
+        raise ValueError("tasa_objetivo debe estar en (0, 1)")
+    z = np.log(p / (1 - p))
+    lo, hi = -20.0, 20.0
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        m = float(np.mean(1.0 / (1.0 + np.exp(-(z + mid)))))
+        if abs(m - tasa_objetivo) < tol:
+            break
+        if m < tasa_objetivo:
+            lo = mid
+        else:
+            hi = mid
+    return 1.0 / (1.0 + np.exp(-(z + mid)))
 
 
 # --------------------------------------------------------------------- entrenamiento

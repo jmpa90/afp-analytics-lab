@@ -91,6 +91,9 @@ class ParametrosChurn:
     factor_saldo_alto_competencia: float = 2.6   # multiplicador en el decil superior de saldo
     factor_retencion_ejecutivo: float = 3.0      # el ejecutivo reacciona a reclamos / visitas de la competencia
     factor_campana_marzo_agosto: float = 1.45
+    p_campana_empleador: float = 0.020       # prob. mensual de que la competencia haga una charla en una empresa
+    meses_campana_empleador: int = 3         # duracion de esa campana
+    factor_campana_empleador: float = 8.0    # multiplicador de la visita de la competencia durante la campana
 
     # --- reclamos
     p_reclamo_base: float = 0.0040
@@ -130,6 +133,7 @@ class ParametrosChurn:
     b_retirado: float = -1.60
     b_marzo: float = 0.35
     b_agosto: float = 0.30
+    b_u_switcher: float = 0.55             # el que ya se cambio de AFP una vez se vuelve a cambiar
     sigma_afiliado: float = 0.40           # efecto aleatorio NO observable (fija el techo de AUC)
     sigma_mes: float = 0.15                # ruido idiosincratico mensual
     p_retardo_intencion: tuple = (0.10, 0.22, 0.28, 0.25, 0.15)  # meses entre la intencion y la solicitud
@@ -157,6 +161,9 @@ DESCRIPCION_PARAMETROS = {
     "factor_saldo_alto_competencia": "Multiplicador de la visita de la competencia en el decil de saldo alto",
     "factor_retencion_ejecutivo": "Multiplicador del contacto propio tras reclamo o visita de la competencia",
     "factor_campana_marzo_agosto": "Estacionalidad de campanas en marzo y agosto",
+    "p_campana_empleador": "Prob. mensual de que la competencia haga una charla de venta en una empresa",
+    "meses_campana_empleador": "Duracion en meses de esa campana por empleador",
+    "factor_campana_empleador": "Multiplicador de la visita de la competencia durante la campana",
     "p_reclamo_base": "Prob. mensual base de reclamo",
     "factor_reclamo_rentabilidad_mala": "Multiplicador del reclamo si la rentabilidad propia va mal",
     "factor_reclamo_comision_alta": "Multiplicador del reclamo si la comision propia es cara",
@@ -188,6 +195,7 @@ DESCRIPCION_PARAMETROS = {
     "b_retirado": "Efecto de estar retirado",
     "b_marzo": "Estacionalidad de marzo",
     "b_agosto": "Estacionalidad de agosto",
+    "b_u_switcher": "Desplazamiento de la propension para quien ya se cambio de AFP antes",
     "sigma_afiliado": "Desviacion del efecto aleatorio NO observable por afiliado",
     "sigma_mes": "Desviacion del ruido idiosincratico mensual",
     "p_retardo_intencion": "Distribucion del retardo (meses) entre la intencion y la firma",
@@ -332,6 +340,7 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
     universo = generar_universo(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
                                 periodo_fin=periodo_fin, seed=seed)
     afiliados = universo["afiliados"]
+    empleadores_id_max = int(universo["empleadores"]["empleador_id"].max())
     panel = universo["panel_mensual"]
     macro = universo["macro"]
     mercado = generar_mercado(periodo_inicio, periodo_fin, seed, par)
@@ -429,8 +438,19 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
         serie = rent_propia[:, k] / 100.0
         rent_mensual[:, k] = np.power(1.0 + np.clip(serie, -0.5, 2.0), 1 / 12.0) - 1.0
 
-    # ---- efectos aleatorios no observables
-    u_afil = rng.normal(0, par.sigma_afiliado, n)
+    # ---- efectos aleatorios: parte NO observable + el desplazamiento de los "switchers"
+    # (quien ya se cambio de AFP antes: la AFP lo ve porque su antiguedad en la AFP es menor que su
+    # antiguedad en el sistema, asi que es un driver OBSERVABLE aunque persistente)
+    es_switcher = via_traspaso | (~nuevo_sistema & (antig_ini < np.maximum(-idx_afil, 0)))
+    u_afil = rng.normal(0, par.sigma_afiliado, n) + par.b_u_switcher * es_switcher
+
+    # ---- campanas de venta de la competencia por empleador (charlas en la empresa): los contactos
+    # se agrupan por empleador y mes, que es como trabaja la fuerza de venta en Chile
+    emp_mat = _matriz_panel(panel.assign(empleador_id=panel["empleador_id"].fillna(0).astype("int64")),
+                            afil_pos, per_pos, "empleador_id", np.int64, 0)
+    emp_mat = np.clip(emp_mat, 0, None)
+    n_emp_max = int(max(emp_mat.max(), empleadores_id_max)) + 1
+    campana_emp = np.zeros(n_emp_max, dtype=np.int32)
 
     # ---- estado dinamico
     en_afp = np.zeros(n, dtype=bool)
@@ -513,10 +533,18 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
             saldo_pct[act] = orden / max(len(act) - 1, 1)
         estac = par.factor_campana_marzo_agosto if mes in (3, 8) else 1.0
 
+        campana_emp[campana_emp > 0] -= 1
+        nuevas = rng.random(n_emp_max) < par.p_campana_empleador
+        nuevas[0] = False                                   # 0 = sin empleador
+        campana_emp[nuevas] = par.meses_campana_empleador
+        en_campana = campana_emp[emp_mat[:, t]] > 0
+        en_campana[emp_mat[:, t] == 0] = False
+
         p_vc = np.zeros(n)
         p_vc[act] = (par.p_vendedor_competencia * estac
                      * (1.0 + (par.factor_saldo_alto_competencia - 1.0) * saldo_pct[act] ** 3)
-                     * (1.0 + 0.5 * (renta_rel[act] > 1.0)))
+                     * (1.0 + 0.5 * (renta_rel[act] > 1.0))
+                     * np.where(en_campana[act], par.factor_campana_empleador, 1.0))
         vc = (rng.random(n) < p_vc) & en_afp
 
         reactivo = (mat_vc[:, max(0, t - 2):t].any(axis=1) | mat_rec[:, max(0, t - 3):t].any(axis=1))
@@ -721,7 +749,8 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
                            inplace=True, ignore_index=True)
 
     latente = pd.DataFrame({"afiliado_id": af_ids, "lat_u_traspaso": u_afil,
-                            "lat_intencion_visible": intencion_visible.astype(int)})
+                            "lat_intencion_visible": intencion_visible.astype(int),
+                            "lat_switcher": es_switcher.astype(int)})
     return {
         "afiliados": afiliados,
         "afiliados_latente_churn": latente,
@@ -738,22 +767,93 @@ def generar_tablas(n_afiliados: int = 20_000, periodo_inicio: int = 202101,
     }
 
 
-def resumen_simulacion(tablas: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Chequeos rapidos de plausibilidad de la simulacion (se imprime y guarda en el run)."""
+def resumen_simulacion(tablas: dict[str, pd.DataFrame], dataset: pd.DataFrame | None = None,
+                       prob: np.ndarray | None = None) -> pd.DataFrame:
+    """Chequeos de plausibilidad y de **determinismo** de la simulacion.
+
+    Los de plausibilidad salen de las tablas (tasa de traspaso y su maximo/minimo movil de 12 meses,
+    dispersion de rentabilidad entre AFP, frecuencia de contactos y reclamos). Los de determinismo
+    necesitan el dataset ya armado (y opcionalmente el score del modelo) y responden a la pregunta
+    "¿hay alguna feature que sea una observacion disfrazada del target?":
+
+      * `p_target_dado_certificado` y su lift: si pedir el certificado casi garantizara el traspaso,
+        la simulacion estaria regalando el target;
+      * `auc_mejor_feature_suelta`: ninguna feature individual deberia ordenar casi tan bien como el
+        modelo completo;
+      * `frac_score_mayor_0_9`: una cola de probabilidades saturadas indica un mundo determinista.
+    """
     tr = tablas["traspasos"]
     salidas = tr[tr["tipo"] == "SALIDA"] if len(tr) else tr
     saldos = tablas["saldos"]
     cartera_mes = saldos.groupby("periodo")["afiliado_id"].count()
     salidas_mes = salidas.groupby("periodo_solicitud")["afiliado_id"].count().reindex(cartera_mes.index).fillna(0)
-    tasa_anual = (salidas_mes / cartera_mes).mean() * 12
+    tasa_12m = (salidas_mes.rolling(12).sum() / cartera_mes.rolling(12).mean()).dropna()
+    merc = tablas["mercado"]
+    rangos = []
+    for f in FONDOS:
+        piv = merc.pivot(index="periodo", columns="afp", values=f"rent_12m_{f}")
+        rangos.append(piv.max(axis=1) - piv.min(axis=1))
+    rango_rent = pd.concat(rangos)
+    n_anios = max(len(cartera_mes) / 12, 1e-9)
     filas = [
-        {"indicador": "afiliados_en_cartera_promedio", "valor": float(cartera_mes.mean())},
-        {"indicador": "tasa_traspaso_anualizada", "valor": float(tasa_anual)},
-        {"indicador": "traspasos_salida_total", "valor": float(len(salidas))},
-        {"indicador": "traspasos_entrada_total", "valor": float((tr["tipo"] == "ENTRADA").sum()) if len(tr) else 0.0},
-        {"indicador": "saldo_mediano_clp", "valor": float(saldos["saldo_obligatorio"].median())},
-        {"indicador": "contactos_por_afiliado_ano", "valor": float(len(tablas["contactos"]) / max(cartera_mes.mean(), 1) / (len(cartera_mes) / 12))},
-        {"indicador": "reclamos_por_afiliado_ano", "valor": float(len(tablas["reclamos"]) / max(cartera_mes.mean(), 1) / (len(cartera_mes) / 12))},
-        {"indicador": "p_descarga_certificado_mes", "valor": float(tablas["uso_digital"]["descargas_certificado"].mean())},
+        {"indicador": "afiliados_en_cartera_promedio", "valor": float(cartera_mes.mean()), "detalle": ""},
+        {"indicador": "tasa_traspaso_anualizada", "valor": float((salidas_mes / cartera_mes).mean() * 12), "detalle": "sobre la cartera total"},
+        {"indicador": "tasa_traspaso_12m_min", "valor": float(tasa_12m.min()), "detalle": "minimo movil de 12 meses"},
+        {"indicador": "tasa_traspaso_12m_max", "valor": float(tasa_12m.max()), "detalle": "maximo movil de 12 meses"},
+        {"indicador": "rango_rentabilidad_12m_entre_afp_mediana_pp", "valor": float(rango_rent.median()), "detalle": "real en Chile: 1-2 pp"},
+        {"indicador": "rango_rentabilidad_12m_entre_afp_p95_pp", "valor": float(rango_rent.quantile(0.95)), "detalle": ""},
+        {"indicador": "traspasos_salida_total", "valor": float(len(salidas)), "detalle": ""},
+        {"indicador": "traspasos_entrada_total", "valor": float((tr["tipo"] == "ENTRADA").sum()) if len(tr) else 0.0, "detalle": ""},
+        {"indicador": "saldo_mediano_clp", "valor": float(saldos["saldo_obligatorio"].median()), "detalle": ""},
+        {"indicador": "contactos_por_afiliado_ano", "valor": float(len(tablas["contactos"]) / max(cartera_mes.mean(), 1) / n_anios), "detalle": ""},
+        {"indicador": "reclamos_por_afiliado_ano", "valor": float(len(tablas["reclamos"]) / max(cartera_mes.mean(), 1) / n_anios), "detalle": ""},
+        {"indicador": "p_descarga_certificado_mes", "valor": float(tablas["uso_digital"]["descargas_certificado"].mean()), "detalle": ""},
     ]
+    if dataset is not None and len(dataset):
+        filas.extend(chequeos_determinismo(dataset, prob))
     return pd.DataFrame(filas)
+
+
+def chequeos_determinismo(dataset: pd.DataFrame, prob: np.ndarray | None = None,
+                          max_filas_auc: int = 60_000) -> list[dict]:
+    """Chequeos de que ninguna feature sea una observacion directa del target futuro."""
+    from sklearn.metrics import roc_auc_score
+
+    from .features import columnas_features
+
+    y = dataset["y"].to_numpy()
+    base = float(y.mean())
+    out = [{"indicador": "tasa_base_dataset", "valor": base, "detalle": ""}]
+    if "certificados_1m" in dataset.columns:
+        con_cert = dataset["certificados_1m"].to_numpy() > 0
+        p_cert = float(y[con_cert].mean()) if con_cert.any() else float("nan")
+        out += [
+            {"indicador": "frac_filas_con_certificado_1m", "valor": float(con_cert.mean()), "detalle": ""},
+            {"indicador": "p_target_dado_certificado", "valor": p_cert, "detalle": "P(y=1 | certificados_1m>0)"},
+            {"indicador": "lift_certificado", "valor": p_cert / max(base, 1e-9), "detalle": "vs tasa base"},
+        ]
+    # AUC de la mejor feature numerica suelta (sobre una muestra, para no encarecer el run)
+    d = dataset if len(dataset) <= max_filas_auc else dataset.sample(max_filas_auc, random_state=0)
+    yy = d["y"].to_numpy()
+    mejor, mejor_auc = "", 0.5
+    if 0 < yy.mean() < 1:
+        for c in columnas_features(d):
+            v = d[c]
+            if str(v.dtype) == "category" or v.dtype == object:
+                continue
+            x = v.to_numpy(dtype=float)
+            if not np.isfinite(x).any() or np.nanstd(x) == 0:
+                continue
+            a = roc_auc_score(yy, np.nan_to_num(x, nan=float(np.nanmedian(x))))
+            a = max(a, 1 - a)
+            if a > mejor_auc:
+                mejor, mejor_auc = c, a
+    out.append({"indicador": "auc_mejor_feature_suelta", "valor": float(mejor_auc), "detalle": mejor})
+    if prob is not None:
+        pr = np.asarray(prob, dtype=float)
+        out += [
+            {"indicador": "frac_score_mayor_0_9", "valor": float((pr > 0.9).mean()), "detalle": ""},
+            {"indicador": "frac_score_mayor_0_5", "valor": float((pr > 0.5).mean()), "detalle": ""},
+            {"indicador": "score_maximo", "valor": float(pr.max()), "detalle": ""},
+        ]
+    return out

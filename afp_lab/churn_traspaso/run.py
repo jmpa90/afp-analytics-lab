@@ -2,8 +2,13 @@
 
     python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --salida salidas/churn_traspaso
 
-Genera el universo sintetico, arma el dataset as-of, entrena LightGBM con split temporal,
-compara contra los baselines obligatorios e imprime/guarda todas las tablas de resultados.
+Genera el universo sintetico, arma el dataset as-of, entrena LightGBM con split temporal contiguo y
+purgado, compara contra los baselines obligatorios y mide el techo de predictibilidad del mundo
+simulado.
+
+    # barrido de estabilidad (rangos en vez de puntos): ~3 minutos adicionales
+    python -m afp_lab.churn_traspaso.run --n-afiliados 20000 \
+        --semillas-estabilidad 42,123,7,2024,99
 """
 from __future__ import annotations
 
@@ -17,11 +22,13 @@ from . import HORIZONTE_MESES
 from . import evaluate as E
 from . import features as F
 from . import model as M
-from .synthetic import generar_tablas, resumen_simulacion
+from .synthetic import generar_tablas, resumen_simulacion, tabla_parametros
 
 SALIDA_POR_DEFECTO = "salidas/churn_traspaso"
+SEMILLAS_ESTABILIDAD = (42, 123, 7, 2024, 99)
 TABLAS_FUENTE = ("afiliados", "empleadores", "panel_mensual", "macro", "mercado", "saldos",
-                 "cambios_fondo", "traspasos", "contactos", "reclamos", "uso_digital")
+                 "cambios_fondo", "traspasos", "contactos", "reclamos", "uso_digital",
+                 "afiliados_latente_churn")
 
 
 def _mostrar(titulo: str, df: pd.DataFrame, ruta: Path | None = None, max_filas: int = 40) -> None:
@@ -34,6 +41,81 @@ def _mostrar(titulo: str, df: pd.DataFrame, ruta: Path | None = None, max_filas:
         df.to_csv(ruta, index=False)
 
 
+def preparar(n_afiliados: int, seed: int, periodo_inicio: int, periodo_fin: int,
+             n_test: int, n_valid: int) -> tuple[dict, dict, pd.DataFrame, dict]:
+    """Genera las tablas, arma el dataset as-of y devuelve las particiones del split temporal."""
+    tablas = generar_tablas(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
+                            periodo_fin=periodo_fin, seed=seed)
+    cortes = F.cortes_evaluables(tablas, horizonte=HORIZONTE_MESES)
+    split = F.split_temporal(cortes, n_test=n_test, n_valid=n_valid, horizonte=HORIZONTE_MESES)
+    ds = F.construir_dataset(tablas, split["train"] + split["valid"] + split["test"],
+                             horizonte=HORIZONTE_MESES)
+    partes = {k: ds[ds["periodo_corte"].isin(split[k])] for k in ("train", "valid", "test")}
+    return tablas, split, ds, partes
+
+
+def resumen_corrida(tablas: dict, split: dict, partes: dict, seed: int) -> dict:
+    """Metricas clave de una corrida completa (una fila del barrido de semillas)."""
+    tr, va, te = partes["train"], partes["valid"], partes["test"]
+    modelo = M.entrenar(tr, va, seed=seed)
+    prob = M.predecir(modelo, te, uso="ranking")
+    prob_agg = M.predecir(modelo, te, uso="agregado")
+    prob_bruta = M.predecir(modelo, te, uso="bruto")
+    m = E.tabla_comparativa(te, {"m": prob}).iloc[0]
+    preds = {"modelo": prob, "regla": M.baseline_regla_negocio(te),
+             "regla_graduada": M.baseline_regla_graduada(te)}
+    cap = E.captura_top(te, preds, fracciones=(0.10,)).set_index("predictor")
+    por_corte = E.saldo_en_riesgo_por_corte(te, prob_agg)
+    tasas = resumen_simulacion(tablas).set_index("indicador")["valor"]
+    return {
+        "seed": seed,
+        "tasa_base_valid": float(va["y"].mean()),
+        "tasa_base_test": float(te["y"].mean()),
+        "auc": float(m["auc"]),
+        "average_precision": float(m["average_precision"]),
+        "brier": float(m["brier"]),
+        "lift_decil_1": float(m["lift_decil_1"]),
+        "ks": float(m["ks"]),
+        "captura_10_modelo": float(cap.loc["modelo", "pct_traspasos_capturados"]),
+        "captura_10_regla": float(cap.loc["regla", "pct_traspasos_capturados"]),
+        "captura_10_regla_graduada": float(cap.loc["regla_graduada", "pct_traspasos_capturados"]),
+        "captura_10_saldo_modelo": float(cap.loc["modelo", "pct_saldo_riesgo_capturado"]),
+        "sesgo_saldo_sin_calibrar": float(E.saldo_en_riesgo(te, prob_bruta)["sesgo_relativo"].iloc[0]),
+        "sesgo_saldo_isotonica": float(E.saldo_en_riesgo(te, prob_agg)["sesgo_relativo"].iloc[0]),
+        "sesgo_saldo_con_ancla": float(E.saldo_en_riesgo(
+            te, M.ajustar_prior(prob_agg, float(te["y"].mean())))["sesgo_relativo"].iloc[0]),
+        "sesgo_saldo_corte_min": float(por_corte["sesgo_relativo"].min()),
+        "sesgo_saldo_corte_max": float(por_corte["sesgo_relativo"].max()),
+        "tasa_traspaso_12m_min": float(tasas["tasa_traspaso_12m_min"]),
+        "tasa_traspaso_12m_max": float(tasas["tasa_traspaso_12m_max"]),
+        "rango_rentabilidad_pp": float(tasas["rango_rentabilidad_12m_entre_afp_mediana_pp"]),
+        "cortes_train": len(split["train"]),
+        "cortes_descartados": len(split["descartados"]),
+    }
+
+
+def techo_predictibilidad(tablas: dict, partes: dict, seed: int, auc_modelo: float) -> pd.DataFrame:
+    """AUC alcanzable si el modelo pudiera ver el efecto aleatorio latente `lat_u_traspaso`.
+
+    Es el techo del mundo simulado: lo que queda por encima de ese numero es ruido que ocurre
+    DESPUES del corte (visitas, reclamos y campanas que todavia no existen cuando se calcula el
+    score). La columna latente se usa SOLO para este diagnostico y nunca entra al modelo.
+    """
+    lat = tablas["afiliados_latente_churn"].set_index("afiliado_id")["lat_u_traspaso"]
+    partes2 = {}
+    for k, d in partes.items():
+        d = d.copy()
+        d["lat_u_traspaso"] = d["afiliado_id"].map(lat).astype("float32")
+        partes2[k] = d
+    modelo = M.entrenar(partes2["train"], partes2["valid"], seed=seed)
+    prob = M.predecir(modelo, partes2["test"])
+    m = E.tabla_comparativa(partes2["test"], {"techo": prob}).iloc[0]
+    return pd.DataFrame([
+        {"escenario": "modelo (solo informacion observable al corte)", "auc": auc_modelo},
+        {"escenario": "techo: + efecto aleatorio latente del afiliado", "auc": float(m["auc"])},
+    ])
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Demo de propension a traspaso a otra AFP")
     ap.add_argument("--n-afiliados", type=int, default=20_000)
@@ -43,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--periodo-fin", type=int, default=202609)
     ap.add_argument("--n-test", type=int, default=3)
     ap.add_argument("--n-valid", type=int, default=3)
+    ap.add_argument("--semillas-estabilidad", type=str, default="",
+                    help=f"barrido de estabilidad, p.ej. {','.join(map(str, SEMILLAS_ESTABILIDAD))}; "
+                         "vacio (por defecto) lo omite para que la corrida estandar sea corta")
     ap.add_argument("--sin-fuentes", action="store_true", help="no escribir las tablas sinteticas")
+    ap.add_argument("--sin-techo", action="store_true", help="omitir el diagnostico de techo")
     args = ap.parse_args(argv)
 
     salida = Path(args.salida)
@@ -55,41 +141,37 @@ def main(argv: list[str] | None = None) -> int:
     def marca(paso: str, t0: float) -> None:
         tiempos.append({"paso": paso, "segundos": round(time.perf_counter() - t0, 2)})
 
-    # ------------------------------------------------------------------ 1. datos
+    par = tabla_parametros()
+    par.to_csv(rep / "parametros.csv", index=False)
+    print(f"Parametros de la simulacion: {len(par)} (fuente unica ParametrosChurn -> "
+          f"reportes/parametros.csv, tabla del README generada desde ahi)")
+
+    # ------------------------------------------------------------------ 1. datos y dataset
     t0 = time.perf_counter()
-    tablas = generar_tablas(n_afiliados=args.n_afiliados, periodo_inicio=args.periodo_inicio,
-                            periodo_fin=args.periodo_fin, seed=args.seed)
-    marca("generar_tablas", t0)
-    _mostrar("Chequeos de la simulacion", resumen_simulacion(tablas), rep / "resumen_simulacion.csv")
+    tablas, split, ds, partes = preparar(args.n_afiliados, args.seed, args.periodo_inicio,
+                                         args.periodo_fin, args.n_test, args.n_valid)
+    marca("generar_tablas + construir_dataset", t0)
     if not args.sin_fuentes:
         t0 = time.perf_counter()
         (salida / "fuentes").mkdir(parents=True, exist_ok=True)
         for nombre in TABLAS_FUENTE:
             tablas[nombre].to_parquet(salida / "fuentes" / f"{nombre}.parquet", index=False)
+        ds.to_parquet(salida / "dataset.parquet", index=False)
         marca("guardar_fuentes", t0)
 
-    # ------------------------------------------------------------------ 2. dataset as-of
-    t0 = time.perf_counter()
-    cortes = F.cortes_evaluables(tablas, horizonte=HORIZONTE_MESES)
-    split = F.split_temporal(cortes, n_test=args.n_test, n_valid=args.n_valid, horizonte=HORIZONTE_MESES)
-    usados = split["train"] + split["valid"] + split["test"]
-    ds = F.construir_dataset(tablas, usados, horizonte=HORIZONTE_MESES)
-    marca("construir_dataset", t0)
-    ds.to_parquet(salida / "dataset.parquet", index=False)
+    tr, va, te = partes["train"], partes["valid"], partes["test"]
+    resumen_split = pd.DataFrame(
+        [{"particion": k, "n_cortes": len(split[k]), "corte_min": min(split[k]), "corte_max": max(split[k]),
+          "n_filas": int(len(d)), "tasa_base": float(d["y"].mean())}
+         for k, d in (("train", tr), ("valid", va), ("test", te))]
+        + [{"particion": "descartados (purga)", "n_cortes": len(split["descartados"]),
+            "corte_min": min(split["descartados"]) if split["descartados"] else None,
+            "corte_max": max(split["descartados"]) if split["descartados"] else None,
+            "n_filas": 0, "tasa_base": float("nan")}])
+    _mostrar("Split temporal contiguo con purga de 6 meses entre particiones", resumen_split,
+             rep / "split.csv")
 
-    tr = ds[ds["periodo_corte"].isin(split["train"])]
-    va = ds[ds["periodo_corte"].isin(split["valid"])]
-    te = ds[ds["periodo_corte"].isin(split["test"])].copy()
-    resumen_split = pd.DataFrame([
-        {"particion": k, "n_cortes": len(v), "corte_min": min(v), "corte_max": max(v),
-         "n_filas": int(len(d)), "tasa_base": float(d["y"].mean())}
-        for k, v, d in (("train", split["train"], tr), ("valid", split["valid"], va),
-                        ("test", split["test"], te))
-    ])
-    _mostrar("Split temporal (gap de 6 meses entre el ultimo target y el corte siguiente)",
-             resumen_split, rep / "split.csv")
-
-    # ------------------------------------------------------------------ 3. modelo
+    # ------------------------------------------------------------------ 2. modelo
     t0 = time.perf_counter()
     modelo = M.entrenar(tr, va, seed=args.seed)
     marca("entrenar", t0)
@@ -106,10 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         "baseline_regla_negocio": M.baseline_regla_negocio(te),
         "baseline_regla_graduada": M.baseline_regla_graduada(te),
     }
-    te_seg = E.agregar_segmentos(te)   # `te` conserva los dtypes categoricos que necesita LightGBM
+    te_seg = E.agregar_segmentos(te)
 
-    # ------------------------------------------------------------------ 4. evaluacion
+    # ------------------------------------------------------------------ 3. evaluacion
     t0 = time.perf_counter()
+    _mostrar("Chequeos de la simulacion y de determinismo",
+             resumen_simulacion(tablas, te, prob), rep / "resumen_simulacion.csv", max_filas=30)
+
     principal = E.tabla_comparativa(te_seg, predicciones)
     _mostrar("Metricas en test (modelo vs baselines)", principal, rep / "metricas_test.csv")
 
@@ -117,19 +202,20 @@ def main(argv: list[str] | None = None) -> int:
     _mostrar("Metrica de negocio: captura contactando al X % de mayor score",
              captura.sort_values(["frac_contactada", "predictor"]), rep / "captura_negocio.csv")
 
-    por_corte = E.resumen_por_corte(te_seg, prob)
-    _mostrar("Modelo por corte de test", por_corte, rep / "metricas_por_corte.csv")
+    _mostrar("Modelo por corte de test", E.resumen_por_corte(te_seg, prob),
+             rep / "metricas_por_corte.csv")
 
     seg = E.metricas_por_segmento(te_seg, predicciones)
     seg.to_csv(rep / "metricas_por_segmento.csv", index=False)
     comp = E.comparar_segmentos(seg, "modelo_lgbm", "baseline_regla_graduada", "auc")
-    grandes = comp[comp["segmento_grande"]].copy()
+    grandes = comp[comp["segmento_grande"]]
     _mostrar("AUC por segmento: modelo vs mejor baseline de reglas (segmentos >= 5 % de las filas)",
-             grandes[["segmento", "valor", "n", "frac_filas", "auc", "auc_baseline", "dif"]],
+             grandes[["segmento", "valor", "n", "frac_filas", "auc", "auc_baseline", "dif",
+                      "comparable", "gana_modelo"]],
              rep / "segmentos_modelo_vs_baseline.csv")
-    perdidos = grandes[grandes["dif"] < 0]
+    perdidos = E.segmentos_no_superados(comp)
     if len(perdidos):
-        _mostrar("ATENCION: segmentos grandes donde el modelo NO supera al baseline", perdidos,
+        _mostrar("ATENCION: segmentos grandes no superados (o no comparables)", perdidos,
                  rep / "segmentos_perdidos.csv")
 
     calibs = []
@@ -141,17 +227,50 @@ def main(argv: list[str] | None = None) -> int:
     _mostrar("Calibracion por decil de score", pd.concat(calibs, ignore_index=True),
              rep / "calibracion.csv", max_filas=40)
 
+    # diagnostico: cuanto del sesgo queda si el nivel agregado estuviera bien anclado (el orden del
+    # score no cambia). Usa la tasa realizada del test, asi que NO es una salida de produccion.
+    prob_anclado = M.ajustar_prior(prob_agregado, float(te["y"].mean()))
     riesgo = pd.concat([
         E.saldo_en_riesgo(te_seg, prob_bruta).assign(version="sin_calibrar"),
         E.saldo_en_riesgo(te_seg, prob).assign(version="platt_ranking"),
         E.saldo_en_riesgo(te_seg, prob_agregado).assign(version="isotonica_agregado"),
+        E.saldo_en_riesgo(te_seg, prob_anclado).assign(version="isotonica+ancla (diagnostico)"),
     ], ignore_index=True)
     _mostrar("Saldo en riesgo esperado vs real (test completo)", riesgo, rep / "saldo_en_riesgo.csv")
+    _mostrar("Saldo en riesgo por corte (salida isotonica)",
+             E.saldo_en_riesgo_por_corte(te_seg, prob_agregado), rep / "saldo_en_riesgo_por_corte.csv")
 
     _mostrar("Importancia de features (gain)", M.importancias(modelo, 25), rep / "importancias.csv")
     _mostrar("Casos explicados (5 afiliados representativos del test)",
              M.explicar_casos(modelo, te, prob, n_casos=5), rep / "casos_explicados.csv", max_filas=30)
     marca("evaluar", t0)
+
+    # ------------------------------------------------------------------ 4. techo y estabilidad
+    if not args.sin_techo:
+        t0 = time.perf_counter()
+        auc_modelo = float(principal.set_index("predictor").loc["modelo_lgbm", "auc"])
+        _mostrar("Techo de predictibilidad del mundo simulado",
+                 techo_predictibilidad(tablas, partes, args.seed, auc_modelo),
+                 rep / "techo_predictibilidad.csv")
+        marca("techo_predictibilidad", t0)
+
+    semillas = [int(x) for x in args.semillas_estabilidad.split(",") if x.strip()]
+    if semillas:
+        t0 = time.perf_counter()
+        filas = []
+        for sd in semillas:
+            if sd == args.seed:
+                filas.append(resumen_corrida(tablas, split, partes, sd))
+            else:
+                tb, sp, _, pt = preparar(args.n_afiliados, sd, args.periodo_inicio, args.periodo_fin,
+                                         args.n_test, args.n_valid)
+                filas.append(resumen_corrida(tb, sp, pt, sd))
+        est = pd.DataFrame(filas)
+        _mostrar(f"Estabilidad sobre {len(semillas)} semillas", est, rep / "estabilidad_semillas.csv")
+        rangos = est.drop(columns=["seed"]).agg(["min", "median", "max"]).T.reset_index()
+        rangos.columns = ["metrica", "min", "mediana", "max"]
+        _mostrar("Rangos entre semillas", rangos, rep / "estabilidad_rangos.csv", max_filas=30)
+        marca("estabilidad_semillas", t0)
 
     tiempos.append({"paso": "TOTAL", "segundos": round(time.perf_counter() - t_ini, 2)})
     _mostrar("Tiempos", pd.DataFrame(tiempos), rep / "tiempos.csv")

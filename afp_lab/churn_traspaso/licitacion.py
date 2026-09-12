@@ -12,7 +12,12 @@ sistema.
 Este modulo tiene tres partes:
 
 1. `simular_licitacion_stock`: la tabla sintetica `licitacion_stock` (un registro por afiliado
-   sorteado: mes de sorteo, plazo de opcion, mes efectivo, probabilidad de irse y decision).
+   sorteado: mes de sorteo, plazo de opcion, mes efectivo, probabilidad de irse y decision) Y,
+   desde la ronda 3, la cartera **actualizada**: quien decide SE_VA y sigue vigente al mes efectivo
+   sale de `saldos`/`uso_digital`/`contactos`/`reclamos`/`cambios_fondo` desde ese mes (sin AUM, sin
+   eventos propios nuevos) y queda registrado en `traspasos` con tipo `SALIDA_LICITACION`. Antes de
+   la ronda 3 la tabla se calculaba pero no tocaba la cartera (limitacion documentada en la ronda 2);
+   `aplicar_salida=False` reproduce ese comportamiento anterior para poder medir el efecto del cambio.
 2. `escenarios_licitacion`: afiliados y saldo en riesgo por sorteo, efecto de una campana de
    retencion con capacidad limitada y priorizada por `saldo x P(se va)`, y sensibilidad al supuesto
    de salida pasiva.
@@ -99,20 +104,39 @@ def _logit(p: float) -> float:
     return float(np.log(p / (1 - p)))
 
 
-def sorteos_en_ventana(periodo_inicio: int, periodo_fin: int) -> list[tuple[int, int, int]]:
-    """Sorteos cuyo mes de sorteo y mes efectivo caben en la ventana simulada."""
-    return [s for s in SORTEOS if periodo_inicio <= s[0] and s[2] <= periodo_fin]
+def sorteos_en_ventana(periodo_inicio: int, periodo_fin: int,
+                       sorteos: tuple[tuple[int, int, int], ...] = SORTEOS
+                       ) -> list[tuple[int, int, int]]:
+    """Sorteos cuyo MES DE SORTEO cae dentro de la ventana simulada.
+
+    Ronda 3 (objetivo 1): solo se exige `periodo_inicio <= mes_sorteo <= periodo_fin` (antes tambien
+    se exigia que el mes EFECTIVO cupiera en la ventana). Asi se puede simular un segundo sorteo
+    (`sorteos=(202708, ...), (202908, ...)`) cuya decision se sortea dentro de la ventana aunque el
+    traspaso efectivo caiga despues de `periodo_fin`: no hay nada que truncar mas alla de la ventana
+    (no existen filas ahi), pero el sorteo igual se reporta (decision, riesgo) en `licitacion_stock`.
+    `sorteos` reemplaza el default `SORTEOS` para poder simular calendarios alternativos.
+    """
+    return [s for s in sorteos if periodo_inicio <= s[0] <= periodo_fin]
+
+
+# Tablas propias de la cartera de la AFP: las que dejan de tener filas para quien sale por licitacion
+# y no ejerce el derecho a quedarse (todas tienen columna `periodo`; `traspasos` se maneja aparte
+# porque ahi se AGREGA un registro en vez de truncarse).
+TABLAS_CARTERA_PROPIA = ("saldos", "uso_digital", "contactos", "reclamos", "cambios_fondo")
 
 
 # --------------------------------------------------------------------- tabla sintetica
 def simular_licitacion_stock(tablas: dict[str, pd.DataFrame], u_latente: pd.Series,
                              periodo_inicio: int, periodo_fin: int, seed: int,
                              par: ParametrosLicitacion | None = None,
-                             fraccion_sorteada: float = FRACCION_SORTEADA) -> pd.DataFrame:
-    """Tabla `licitacion_stock`: un registro por afiliado sorteado en cada licitacion de stock.
+                             fraccion_sorteada: float = FRACCION_SORTEADA,
+                             sorteos: tuple[tuple[int, int, int], ...] = SORTEOS,
+                             aplicar_salida: bool = True,
+                             ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Tabla `licitacion_stock` (un registro por afiliado sorteado) y la cartera actualizada.
 
-    La poblacion elegible es la de afiliados **vigentes en la AFP al mes del sorteo y no
-    pensionados** (estado laboral distinto de RETIRADO y `tipo_afiliado` distinto de
+    La poblacion elegible de CADA sorteo es la de afiliados **vigentes en la AFP al mes del sorteo y
+    no pensionados** (estado laboral distinto de RETIRADO y `tipo_afiliado` distinto de
     PENSIONADO_ACTIVO). El sorteo es aleatorio simple, como manda la ley.
 
     La decision se simula con una propension a IRSE en escala logit, anclada en
@@ -120,17 +144,30 @@ def simular_licitacion_stock(tablas: dict[str, pd.DataFrame], u_latente: pd.Seri
     la propension latente al churn del afiliado. `p_se_va_pasiva` es la probabilidad **sin** contacto
     de retencion: la campana es un escenario que se evalua despues (`escenarios_licitacion`), no algo
     que ya este en la tabla.
+
+    Ronda 3 (objetivo 1): con `aplicar_salida=True` (por defecto), quien decide SE_VA y sigue vigente
+    justo antes del mes efectivo **sale de la cartera desde ese mes**: sin mas filas en `saldos` (por
+    lo tanto fuera del AUM y no vigente para `features.py`, la misma convencion que ya usa el
+    traspaso voluntario) ni en las demas tablas operacionales propias, y con un registro de salida en
+    `traspasos` con tipo `SALIDA_LICITACION` (no `SALIDA`, para no contaminar el target de churn
+    voluntario: `features.cortes_evaluables(excluir_licitacion=True)` ya trunca por separado los
+    cortes cuya ventana de target toca el mes efectivo). Cuando hay mas de un sorteo en la ventana
+    (`sorteos`), el efecto se aplica de forma SECUENCIAL: quien ya salio en el primer sorteo no vuelve
+    a aparecer vigente (ni por lo tanto elegible) en el segundo. `aplicar_salida=False` reproduce el
+    comportamiento de la ronda 2 (la licitacion se sortea y reporta pero no toca la cartera) y sirve
+    solo para medir el efecto del cambio (ver `run.py` y el README, objetivo 1).
     """
     par = par or ParametrosLicitacion()
     rng = np.random.default_rng(seed + 909)
-    saldos, panel = tablas["saldos"], tablas["panel_mensual"]
     afiliados = tablas["afiliados"].set_index("afiliado_id")
     macro = tablas["macro"].set_index("periodo")
-    reclamos = tablas["reclamos"]
-    dig = tablas["uso_digital"]
 
+    tablas_iter = dict(tablas)   # copia superficial: cada sorteo puede reemplazar algunas entradas
     filas = []
-    for periodo_sorteo, periodo_opcion, periodo_efectivo in sorteos_en_ventana(periodo_inicio, periodo_fin):
+    for periodo_sorteo, periodo_opcion, periodo_efectivo in sorteos_en_ventana(
+            periodo_inicio, periodo_fin, sorteos):
+        saldos, panel = tablas_iter["saldos"], tablas_iter["panel_mensual"]
+        reclamos, dig = tablas_iter["reclamos"], tablas_iter["uso_digital"]
         vig = saldos[saldos["periodo"] == periodo_sorteo]
         if not len(vig):
             continue
@@ -174,9 +211,9 @@ def simular_licitacion_stock(tablas: dict[str, pd.DataFrame], u_latente: pd.Seri
              + rng.normal(0, par.sigma_ruido, len(af)))
         p_va = 1.0 / (1.0 + np.exp(-z))
         decision = np.where(rng.random(len(af)) < p_va, "SE_VA", "SE_QUEDA")
-        destino_defecto = _afp_mas_barata(tablas["mercado"], periodo_sorteo)
+        destino_defecto = _afp_mas_barata(tablas_iter["mercado"], periodo_sorteo)
 
-        filas.append(pd.DataFrame({
+        tabla_sorteo = pd.DataFrame({
             "afiliado_id": af,
             "periodo_sorteo": periodo_sorteo,
             "periodo_limite_opcion": periodo_opcion,
@@ -187,12 +224,60 @@ def simular_licitacion_stock(tablas: dict[str, pd.DataFrame], u_latente: pd.Seri
             "p_se_va_pasiva": p_va,
             "decision": decision,
             "afp_destino": np.where(decision == "SE_VA", destino_defecto, ""),
-        }))
-    if not filas:
-        return pd.DataFrame(columns=["afiliado_id", "periodo_sorteo", "periodo_limite_opcion",
-                                     "periodo_efectivo", "saldo_obligatorio", "antiguedad_afp_meses",
-                                     "rim_referencia", "p_se_va_pasiva", "decision", "afp_destino"])
-    return pd.concat(filas, ignore_index=True)
+        })
+        filas.append(tabla_sorteo)
+        if aplicar_salida:
+            tablas_iter = _aplicar_salida_licitacion(tablas_iter, tabla_sorteo, periodo_efectivo)
+
+    cols = ["afiliado_id", "periodo_sorteo", "periodo_limite_opcion", "periodo_efectivo",
+           "saldo_obligatorio", "antiguedad_afp_meses", "rim_referencia", "p_se_va_pasiva",
+           "decision", "afp_destino"]
+    lic = pd.concat(filas, ignore_index=True) if filas else pd.DataFrame(columns=cols)
+    return lic, tablas_iter
+
+
+def _aplicar_salida_licitacion(tablas: dict[str, pd.DataFrame], sorteo: pd.DataFrame,
+                               periodo_efectivo: int) -> dict[str, pd.DataFrame]:
+    """Saca de la cartera, desde `periodo_efectivo` (inclusive), a quien decidio SE_VA.
+
+    Solo se trunca a quien seguia vigente el mes ANTERIOR al efectivo: si alguien sorteado ya se
+    habia traspasado por su cuenta antes (un `SALIDA` voluntario entre el sorteo y el mes efectivo),
+    sus filas ya terminan antes y no hay nada que hacer ni que registrar dos veces.
+    """
+    se_va = sorteo.loc[sorteo["decision"] == "SE_VA"]
+    if not len(se_va):
+        return tablas
+    saldos = tablas["saldos"]
+    mes_previo = add_months(int(periodo_efectivo), -1)
+    vigentes_mes_previo = set(saldos.loc[saldos["periodo"] == mes_previo, "afiliado_id"].to_numpy())
+    af_salen = np.array(sorted(set(int(a) for a in se_va["afiliado_id"]) & vigentes_mes_previo))
+    if not len(af_salen):
+        return tablas
+
+    out = dict(tablas)
+    af_set = set(af_salen.tolist())
+    for nombre in TABLAS_CARTERA_PROPIA:
+        df = tablas[nombre]
+        if not len(df):
+            continue
+        fuera = df["afiliado_id"].isin(af_set) & (df["periodo"] >= periodo_efectivo)
+        if fuera.any():
+            out[nombre] = df.loc[~fuera].reset_index(drop=True)
+
+    merc = tablas["mercado"]
+    afp_propia = str(merc.loc[merc["es_propia"] == 1, "afp"].iloc[0])
+    destino = se_va.set_index("afiliado_id")["afp_destino"].reindex(af_salen).to_numpy()
+    nuevo = pd.DataFrame({
+        "afiliado_id": af_salen,
+        "periodo_solicitud": np.full(len(af_salen), periodo_efectivo),
+        "periodo_efectivo": np.full(len(af_salen), periodo_efectivo),
+        "afp_origen": np.full(len(af_salen), afp_propia),
+        "afp_destino": destino,
+        "tipo": np.full(len(af_salen), "SALIDA_LICITACION"),
+    })
+    tr = tablas["traspasos"]
+    out["traspasos"] = pd.concat([tr, nuevo], ignore_index=True) if len(tr) else nuevo
+    return out
 
 
 def _afp_mas_barata(mercado: pd.DataFrame, periodo: int) -> str:

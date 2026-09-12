@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import roc_auc_score
 
 from afp_lab.common.metrics import metricas_clasificacion, tabla_metricas_por_segmento
 
 SEGMENTOS = ["tramo_saldo", "tramo_edad", "tipo_afiliado", "fondo", "tramo_renta", "estado_laboral"]
 FRACCIONES_CONTACTO = (0.05, 0.10, 0.20)
+N_BOOT_REFERENCIA = 200          # ronda 3: minimo pedido por el brief para el reporte
+SEGMENTOS_BOOTSTRAP = ["tramo_edad", "tramo_saldo"]      # brief: "al menos" estos dos
 
 
 # --------------------------------------------------------------------- segmentos
@@ -90,6 +93,107 @@ def segmentos_no_superados(tabla_comp: pd.DataFrame) -> pd.DataFrame:
     """Segmentos grandes donde el modelo NO supera al baseline, incluidos los no comparables."""
     g = tabla_comp[tabla_comp["segmento_grande"]]
     return g[~g["gana_modelo"]].reset_index(drop=True)
+
+
+# --------------------------------------------------------------------- ronda 3: bootstrap por segmento
+def _auc_o_nan(y: np.ndarray, p: np.ndarray) -> float:
+    """AUC, o NaN si el remuestreo dejo un segmento sin positivos o sin negativos."""
+    return float(roc_auc_score(y, p)) if 0 < y.mean() < 1 else float("nan")
+
+
+def _captura_frac(y: np.ndarray, p: np.ndarray, saldo: np.ndarray | None, frac: float,
+                  objetivo: str) -> float:
+    """Captura contactando el `frac` de mayor score DENTRO del segmento (sin desempate: pensado para
+    correrse cientos de veces en el bootstrap, no como sustituto de `captura_top` en el reporte principal)."""
+    n = len(y)
+    k = max(1, int(round(frac * n)))
+    sel = np.argsort(-p)[:k]
+    if objetivo == "saldo":
+        total = float(saldo[y == 1].sum())
+        return float(saldo[sel][y[sel] == 1].sum() / total) if total > 0 else float("nan")
+    total = float(y.sum())
+    return float(y[sel].sum() / total) if total > 0 else float("nan")
+
+
+def bootstrap_ic_segmento(df: pd.DataFrame, prob: np.ndarray, segmento: str, metrica: str = "auc",
+                          n_boot: int = N_BOOT_REFERENCIA, seed: int = 42, alpha: float = 0.05,
+                          frac_captura: float = 0.10, objetivo_captura: str = "traspasos",
+                          umbral_aceptacion: float | None = None,
+                          col_saldo: str = "saldo_obligatorio") -> pd.DataFrame:
+    """Intervalo bootstrap percentil de `metrica` ('auc' o 'captura') por valor de `segmento`.
+
+    Remuestrea CON REEMPLAZO `n_boot` veces (semilla fija, reproducible), DENTRO de cada valor del
+    segmento (el tamano de cada segmento es el que es: no tiene sentido mezclar el error estandar del
+    segmento grande con el del chico). `metrica="captura"` mide, dentro del segmento, la fraccion de
+    `objetivo_captura` ('traspasos' o 'saldo') capturada contactando el `frac_captura` de mayor score.
+
+    Backlog de la ronda 2 (revision, punto 2 de la seccion 12): "reportar el AUC por segmento con
+    intervalo (bootstrap) y no dar por perdido un segmento con menos de ~100 eventos". `cruza_0_5`
+    (solo para AUC) y `cruza_umbral_aceptacion` (si se pasa `umbral_aceptacion`) marcan exactamente
+    eso: un intervalo que cruza el umbral no permite concluir que el segmento es distinto de el.
+    """
+    if metrica not in ("auc", "captura"):
+        raise ValueError("metrica debe ser 'auc' o 'captura'")
+    if n_boot < 2:
+        raise ValueError("n_boot debe ser >= 2")
+    rng = np.random.default_rng(seed)
+    y_all = df["y"].to_numpy()
+    p_all = np.asarray(prob, dtype=float)
+    saldo_all = df[col_saldo].to_numpy(dtype=float) if metrica == "captura" else None
+
+    def _calc(y: np.ndarray, p: np.ndarray, saldo: np.ndarray | None) -> float:
+        if metrica == "auc":
+            return _auc_o_nan(y, p)
+        return _captura_frac(y, p, saldo, frac_captura, objetivo_captura)
+
+    filas = []
+    # `.indices`: posiciones ENTERAS (0-based) de cada valor del segmento en `df`, alineadas con
+    # `y_all`/`p_all` (que salen de `.to_numpy()` en el mismo orden que las filas de `df`).
+    for valor, pos in df.groupby(segmento, observed=True).indices.items():
+        pos = np.asarray(pos)
+        y, p = y_all[pos], p_all[pos]
+        saldo = saldo_all[pos] if saldo_all is not None else None
+        n = len(y)
+        punto = _calc(y, p, saldo)
+        boot = np.empty(n_boot, dtype=float)
+        for b in range(n_boot):
+            sel = rng.integers(0, n, n)
+            boot[b] = _calc(y[sel], p[sel], saldo[sel] if saldo is not None else None)
+        validos = boot[~np.isnan(boot)]
+        if len(validos) >= 2:
+            lo, hi = (float(x) for x in np.percentile(validos, [100 * alpha / 2, 100 * (1 - alpha / 2)]))
+        else:
+            lo = hi = float("nan")
+        fila = {segmento: valor, "n": int(n), "n_eventos": int(y.sum()), "metrica": metrica,
+               "punto": punto, "ic_low": lo, "ic_high": hi, "n_boot_validos": int(len(validos))}
+        if metrica == "auc":
+            fila["cruza_0_5"] = bool(np.isnan(lo) or (lo <= 0.5 <= hi))
+        if umbral_aceptacion is not None:
+            fila["cruza_umbral_aceptacion"] = bool(np.isnan(lo) or (lo <= umbral_aceptacion <= hi))
+        filas.append(fila)
+    out = pd.DataFrame(filas)
+    return out.sort_values(segmento).reset_index(drop=True)
+
+
+def bootstrap_auc_segmentos(df: pd.DataFrame, prob: np.ndarray,
+                            segmentos: list[str] | None = None,
+                            n_boot: int = N_BOOT_REFERENCIA, seed: int = 42,
+                            umbral_aceptacion: float = 0.70) -> pd.DataFrame:
+    """`bootstrap_ic_segmento` (AUC) apilado para varias familias de segmento a la vez.
+
+    Por defecto `tramo_edad` (incluye 60+) y `tramo_saldo`, que es lo que pide el brief; `df` debe
+    venir de `agregar_segmentos`. `umbral_aceptacion=0,70` es el criterio de aceptacion del proyecto
+    (CONVENCIONES / gerente, ronda 2): un intervalo que lo cruza no permite decir que ESE segmento en
+    particular cumple o no cumple el criterio global.
+    """
+    segmentos = segmentos or SEGMENTOS_BOOTSTRAP
+    filas = [bootstrap_ic_segmento(df, prob, seg, metrica="auc", n_boot=n_boot, seed=seed,
+                                   umbral_aceptacion=umbral_aceptacion).rename(columns={seg: "valor"})
+             .assign(segmento=seg)
+             for seg in segmentos]
+    cols = ["segmento", "valor", "n", "n_eventos", "punto", "ic_low", "ic_high", "n_boot_validos",
+           "cruza_0_5", "cruza_umbral_aceptacion"]
+    return pd.concat(filas, ignore_index=True)[cols]
 
 
 # --------------------------------------------------------------------- metrica de negocio

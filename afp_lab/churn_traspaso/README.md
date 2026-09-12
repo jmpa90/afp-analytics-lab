@@ -1,6 +1,8 @@
 # 02 · Propensión a traspaso a otra AFP (churn de afiliados)
 
-**Ronda 2 del brief** (`BRIEF_RONDA2.md`): perfil **Cuprum** frente al perfil sistema, **licitación de
+**Ronda 3 del brief** (`docs/briefs/ronda_3/churn.md`, todo en §14): la licitación de stock
+retroalimenta la cartera, intervalos bootstrap del AUC por segmento y la búsqueda de la fuga real de
+Cuprum. **Ronda 2** (`BRIEF_RONDA2.md`): perfil **Cuprum** frente al perfil sistema, **licitación de
 afiliados antiguos de la Ley 21.735** y **pronóstico agregado del flujo** — todo en §13. El historial
 de correcciones de la ronda 1 está en §11 y §12. Se trabaja en el worktree `/home/user/wt/churn`.
 
@@ -11,15 +13,19 @@ se salvan.
 
 ```bash
 cd /home/user/wt/churn && export PYTHONPATH=/home/user/wt/churn
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil sistema       # 42 s
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum        # 45 s
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil sistema       # 61 s (ronda 2: 42 s)
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum        # 60 s (ronda 2: 45 s)
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum \
-    --comparar-perfiles 42,123,7                                               # 2 min 42 s
+    --comparar-perfiles 42,123,7                                               # ~3 min (ronda 2: 2 min 42 s)
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos         # 2,2 min
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 \
     --semillas-estabilidad 42,123,7,2024,99                                    # 2,4 min
-python -m pytest afp_lab/churn_traspaso/tests -q                               # 18 s
+python -m pytest afp_lab/churn_traspaso/tests -q                               # 30 s (ronda 2: 18 s; 39 tests)
 ```
+
+Los ~15-18 s adicionales por corrida son el reporte nuevo del objetivo 1 (una segunda llamada a
+`generar_tablas` con `aplicar_salida_licitacion=False`, sólo para comparar); los tests suben de 33 a
+39. Ver §14 para el detalle.
 
 El paquete instalado en modo editable apunta al clon principal, así que **hay que exportar
 `PYTHONPATH=/home/user/wt/churn`** para que importe el worktree. Las salidas del perfil cuprum van a
@@ -536,21 +542,28 @@ mediciones observadas. Todo con `num_threads=2` y 20.000 afiliados.
 | `entrenar` (LightGBM + 2 calibradores) | 9,6 s | 30,9 s |
 | Evaluar (métricas, segmentos, calibración, SHAP) | 2,9 s | 3,7 s |
 | `techo_predictibilidad` (modelo extra de diagnóstico) | 13,4 s | 90,9 s |
-| **Total corrida estándar** (`--perfil sistema`) | **42 s** | **2 min 29 s** (límite: 5 min) |
-| **Total corrida estándar** (`--perfil cuprum`) | **45 s** | — |
-| `--comparar-perfiles 42,123,7` (5 corridas extra) | +117 s → 2 min 42 s | — |
+| `licitacion_efecto_cartera` (ronda 3, objetivo 1: segunda `generar_tablas` de comparación) | 15-18 s | — |
+| **Total corrida estándar** (`--perfil sistema`) | **42 s → 61 s (ronda 3)** | **2 min 29 s** (límite: 5 min) |
+| **Total corrida estándar** (`--perfil cuprum`) | **45 s → 60 s (ronda 3)** | — |
+| `--comparar-perfiles 42,123,7` (5 corridas extra) | +117 s → 2 min 42 s (ronda 2; sube ~1 min con el objetivo 1) | — |
 | `--semillas-estabilidad` (4 corridas extra) | +102 s → 2 min 21 s | 4 min 24 s |
 | `--experimentos` (5 configuraciones + 3 ventanas) | +94 s → 2 min 12 s | — |
 
-`python -m pytest afp_lab/churn_traspaso/tests -q` → **33 tests en 18 s** con la máquina libre y ~60 s
-con la máquina cargada (límite: 2 min). `--sin-techo` y `--semillas-estabilidad ""` (el valor por
-defecto) dan margen adicional si hace falta.
+Los tiempos de `--comparar-perfiles`, `--semillas-estabilidad` y `--experimentos` de la tabla son los
+medidos en la ronda 2 (no se remidieron en la ronda 3: cada uno ya corre bien por debajo del límite de
+5 min y sólo `licitacion_efecto_cartera` — que no depende de esos flags — se ejecuta una vez por
+corrida completa, así que su costo ya está incluido arriba y no se multiplica por semilla o perfil).
+
+`python -m pytest afp_lab/churn_traspaso/tests -q` → **39 tests en ~30 s** con la máquina libre (33 →
+39 y 18 s → 30 s en la ronda 3: intervalos bootstrap y retroalimentación de la licitación) y del orden
+de 60-70 s con la máquina cargada (límite: 2 min). `--sin-techo` y `--semillas-estabilidad ""` (el
+valor por defecto) dan margen adicional si hace falta.
 
 Salidas en `salidas/churn_traspaso/` y `salidas/churn_traspaso_cuprum/` (en `.gitignore`):
 `fuentes/*.parquet` (12 tablas, incluida `licitacion_stock`; **la latente `afiliados_latente_churn` no
-se escribe**), `dataset.parquet`, `modelo/` y hasta 28 `reportes/*.csv` (los de licitación y pronóstico
-salen siempre; `comparacion_perfiles*`, `estabilidad_*`, `hiperparametros` y `ventana_calibracion`
-requieren su flag).
+se escribe**), `dataset.parquet`, `modelo/` y hasta 31 `reportes/*.csv` (los de licitación, pronóstico
+y bootstrap por segmento salen siempre; `comparacion_perfiles*`, `estabilidad_*`, `hiperparametros` y
+`ventana_calibracion` requieren su flag).
 
 ## 10. Propuestas para `common/`, umbrales y próximos pasos
 
@@ -768,10 +781,11 @@ Lecturas:
   contacto cae de ~14 MM al 30 % a ~7 MM al 100 % (la malla de `escenarios_licitacion` incluye ahora
   10/30/50/70/100 %; `reportes/licitacion_escenarios.csv`). La inversión se justifica tramo a tramo con
   ese rendimiento marginal, no con la cota del 30 %.
-* Limitación: `licitacion_stock` se genera después de la cartera y no retroalimenta `saldos`,
-  `panel_mensual` ni `traspasos`; los afiliados que se van en 2028-06 siguen en la cartera simulada.
-  No afecta a esta ronda (los cortes se truncan antes) pero hay que resolverlo antes de simular el
-  segundo sorteo (2029-08) o de mover `licitacion.py` a `common/`.
+* Limitación **(resuelta en la ronda 3, §14.A)**: `licitacion_stock` se generaba después de la
+  cartera y no retroalimentaba `saldos`, `panel_mensual` ni `traspasos`; los afiliados que se iban en
+  2028-06 seguían en la cartera simulada. No afectaba a esta ronda (los cortes se truncan antes) pero
+  había que resolverlo antes de simular el segundo sorteo (2029-08) o de mover `licitacion.py` a
+  `common/`.
 
 **Combinación con el score** (`combinar_con_score`, `reportes/licitacion_ranking_combinado.csv`):
 `p_ir = p_sorteo_se_va · sorteado + p_churn · (1 − sorteado)`. El resultado operativo es contundente:
@@ -894,3 +908,193 @@ entregado** como salida operativa (§7).
 9. `common/calendario.py`: la macro se extrapola plana desde 2027. Si los otros proyectos van a
    simular la reforma (cotización adicional 3,5 % → 8,5 %, fondos generacionales desde 2027-04), hace
    falta extender las anclas y agregar la tasa de cotización como serie, no como constante.
+
+## 14. Ronda 3: la licitación retroalimenta la cartera, intervalos bootstrap por segmento y la fuga de Cuprum
+
+Tres encargos del brief de la ronda 3 (`docs/briefs/ronda_3/churn.md`), a partir de los tres
+pendientes que dejó la revisión de la ronda 2 (`docs/revisiones/ronda_2/churn_traspaso_ronda2.md`).
+**Los 33 tests de la ronda 2 siguen pasando y se agregaron 6 nuevos (39 en total, ~30 s).** La corrida
+de referencia (`--perfil cuprum`) sigue siendo la misma que en §13: **train 2023-11→2026-05 (31
+cortes), valid 2026-12→2027-02, test 2027-09→2027-11 (35.694 filas)**; ninguno de los cambios de esta
+ronda toca esos cortes, así que **las métricas principales (AUC, captura, segmentos, importancias,
+casos explicados) quedan byte a byte idénticas a la ronda 2** — es la confirmación de que el arreglo
+del objetivo 1 está bien acotado a los cortes que ya se excluían del entrenamiento.
+
+```bash
+cd /home/user/wt/churn && export PYTHONPATH=/home/user/wt/churn
+python3 -m pytest afp_lab/churn_traspaso/tests -q                     # 42 tests, ~30 s
+python3 -m afp_lab.churn_traspaso.run --perfil cuprum                  # ~60 s (antes: ~45 s; ver abajo)
+```
+
+### A. Objetivo 1 — la licitación de stock retroalimenta la cartera
+
+**Antes** (ronda 2): `licitacion_stock` se calculaba con el sorteo, la decisión (SE_VA/SE_QUEDA) y el
+riesgo de saldo, pero **no tocaba** `saldos`/`traspasos`/`uso_digital`/etc.: un afiliado sorteado que
+decidía irse seguía apareciendo vigente, cotizando y acumulando saldo en la cartera simulada como si
+la ley no hubiera pasado (limitación documentada explícitamente en la ronda 2, §13.B).
+
+**Ahora**: `simular_licitacion_stock` procesa los sorteos de forma **secuencial** y, para cada uno,
+saca de la cartera desde el **mes efectivo** a quien decide `SE_VA` y seguía vigente el mes anterior
+(si ya se había traspasado por su cuenta antes, no hay nada que tocar ni que registrar dos veces):
+sin más filas en `saldos`/`uso_digital`/`contactos`/`reclamos`/`cambios_fondo` (fuera del AUM, ya no
+vigente para `features.py`, exactamente la misma convención que ya usa el traspaso voluntario) y con
+un registro nuevo en `traspasos` con tipo **`SALIDA_LICITACION`** (no `SALIDA`, para no tocar el
+target de churn voluntario). El procesamiento secuencial importa cuando hay más de un sorteo: quien
+salió en el primero ya no aparece vigente —y por lo tanto no es elegible— en el segundo
+(`test_licitacion_segundo_sorteo_parametrizable`).
+
+`sorteos` (antes fijo a `SORTEOS`) es ahora un parámetro de `simular_licitacion_stock` y de
+`generar_tablas` (`sorteos_licitacion`), y `sorteos_en_ventana` sólo exige que el **mes de sorteo**
+quepa en la ventana simulada (antes exigía también el mes efectivo): así se puede simular el segundo
+sorteo (2029-08) extendiendo la ventana, aunque su traspaso efectivo (2030-06) quede fuera. Con
+`periodo_fin=203006` (`test_licitacion_segundo_sorteo_parametrizable`, 20.000 afiliados, perfil
+cuprum) ambos sorteos se simulan y retroalimentan la cartera; con la ventana **por defecto** (hasta
+2028-12) sólo el primero cae dentro y el segundo no se reporta.
+
+**Decisión: no se extendió la ventana por defecto a 2029-12.** El brief lo condicionaba a que la
+corrida siguiera bajo 5 min, y sobra margen (60 s con la ventana actual), pero extenderla NO es
+gratis: `generar_mercado` saca la rentabilidad de cada AFP y fondo con llamadas `rng.normal(..., size=
+n_t)` donde `n_t` es el largo de la ventana; alargar `n_t` desplaza el punto de partida en el stream
+de números aleatorios de **todas** las llamadas siguientes (afp × fondo), así que la rentabilidad —y
+en cascada reclamos, contactos y el hazard— de los meses que **ya estaban** en la ventana cambiaría
+también. Eso rompería la comparabilidad byte a byte con la ronda 2 sin necesidad: como se confirma
+abajo, el segundo sorteo (2029-08→2030-06) no altera ningún corte evaluable de todos modos (su mes
+efectivo es muchísimo más tarde que el primero, que ya es el que trunca `cortes_evaluables`), así que
+extender la ventana por defecto no habría agregado ninguna fila útil de entrenamiento. La capacidad de
+simular el segundo sorteo queda demostrada con una ventana extendida en el test, no en la corrida de
+referencia.
+
+**`cortes_evaluables(excluir_licitacion=True)` sigue excluyendo bien**: sigue truncando por el
+**primer** mes efectivo (2028-06) sin importar si hay un segundo sorteo más adelante en
+`licitacion_stock` (`test_cortes_excluyen_la_licitacion_con_dos_sorteos`), porque usa el **mínimo** de
+`periodo_efectivo` sobre toda la tabla. Confirmado también con la corrida de referencia: `split.csv`,
+`metricas_test.csv`, `captura_negocio.csv`, `segmentos_modelo_vs_baseline.csv`,
+`saldo_en_riesgo.csv` e `importancias.csv` quedan **idénticos** antes/después del cambio.
+
+**Efecto sobre la tasa del target en los cortes posteriores al sorteo** (excluidos del entrenamiento;
+`reportes/licitacion_efecto_cartera.csv`, generado comparando `aplicar_salida_licitacion=True` vs
+`False` con la misma semilla): 20.000 afiliados, perfil cuprum, primer sorteo (efectivo 2028-06).
+
+| Corte | Filas con retro. | Filas sin retro. (= ronda 2) | Afiliados removidos | Tasa base con retro. | Tasa base sin retro. |
+|---|---|---|---|---|---|
+| 2028-06 | 11.163 | 11.895 | 732 | 2,365 % | 2,337 % |
+| 2028-07 | 11.166 | 11.894 | 728 | 1,961 % | 1,934 % |
+| 2028-08 | 11.171 | 11.895 | 724 | 1,540 % | 1,505 % |
+| 2028-09 | 11.180 | 11.902 | 722 | 1,145 % | 1,117 % |
+| 2028-10 | 11.185 | 11.905 | 720 | 0,706 % | 0,689 % |
+| 2028-11 | 11.207 | 11.925 | 718 | 0,366 % | 0,352 % |
+
+La cartera pierde entre 718 y 732 afiliados por corte (los ~1.194 sorteados de Cuprum × ~68 % que
+decide `SE_VA`, menos los pocos que ya se habían ido por su cuenta antes del mes efectivo) y la tasa
+base sube entre +1,0 pp y +4,0 pp relativos (los que se van por licitación no son un sorteo perfecto
+de riesgo: su probabilidad de irse incluye el efecto de la propensión latente al churn, así que
+retirarlos de la cartera deja, en promedio, una población ligeramente más propensa que la que
+simulaba —incorrectamente— la ronda 2). El efecto agregado sobre `resumen_simulacion.csv` (que
+promedia sobre las 69 cortes evaluables 2022-03→2027-11, de los cuales sólo 6 caen después del
+sorteo) es, como se esperaba, pequeño: `afiliados_en_cartera_promedio` 12.076,7 → 12.023,2 (-53,4),
+`tasa_traspaso_anualizada` 5,492 % → 5,515 %, `tasa_salida_mensual` 0,4577 % → 0,4596 %.
+`traspasos_netos_total` (1.205, sin cambios) no se mueve porque `SALIDA_LICITACION` no cuenta como
+`SALIDA` en ese indicador, tal como se documenta.
+
+### B. Objetivo 2 — intervalos bootstrap del AUC (y de la captura) por segmento
+
+`evaluate.bootstrap_ic_segmento(df, prob, segmento, metrica="auc"|"captura", n_boot=200, seed=42)`
+remuestrea **con reemplazo, dentro de cada valor del segmento** (no del dataset completo: el error
+estándar de un segmento chico no tiene por qué mezclarse con el de uno grande), calcula el punto y el
+intervalo percentil `[2,5 %, 97,5 %]`, y marca `cruza_0_5` (AUC no informativo) y
+`cruza_umbral_aceptacion` (si se pasa un umbral) — la lectura que pedía la revisión de la ronda 2 para
+no dar por perdido un segmento con pocos eventos (el backlog original hablaba del 60+, con 37-73
+eventos según el perfil). `bootstrap_auc_segmentos` apila `tramo_edad` (incluye 60+) y `tramo_saldo`
+en una sola tabla; el reporte usa `n_boot=200` (`N_BOOT_REFERENCIA`, el mínimo del brief) y los tests
+usan 25-40 remuestreos para que corran rápido.
+
+**Test (perfil cuprum, semilla 42, `reportes/bootstrap_auc_segmento.csv`)**, umbral de aceptación 0,70:
+
+| Segmento | n | Eventos | AUC | IC 95 % | ¿Cruza 0,5? | ¿Cruza 0,70? |
+|---|---|---|---|---|---|---|
+| edad 30-39 | 6.183 | 182 | 0,705 | 0,666 – 0,739 | no | **sí** |
+| edad 40-49 | 14.442 | 392 | 0,756 | 0,736 – 0,780 | no | no (por sobre 0,70) |
+| edad 50-59 | 12.035 | 348 | 0,677 | 0,648 – 0,703 | no | **sí** |
+| **edad 60+** | **2.726** | **74** | **0,696** | **0,643 – 0,756** | no | **sí** |
+| edad <30 | 308 | 16 | 0,740 | 0,628 – 0,842 | no | **sí** |
+| saldo 0-5M | 2.046 | 70 | 0,672 | 0,615 – 0,736 | no | **sí** |
+| saldo 5-15M | 9.125 | 203 | 0,729 | 0,695 – 0,762 | no | **sí** |
+| saldo 15-40M | 15.091 | 419 | 0,743 | 0,719 – 0,765 | no | no (por sobre 0,70) |
+| **saldo 40M+** | **9.432** | **320** | **0,667** | **0,640 – 0,696** | no | **no (por debajo de 0,70)** |
+
+Lectura: el segmento **60+** (2.726 filas, 74 eventos — el mismo orden que los 37 (sistema) / 73
+(cuprum) que medía la revisión de la ronda 2) tiene un intervalo que **cruza 0,70 sin cruzar 0,5**: no se puede
+concluir que el modelo *no sirva* ahí, pero tampoco que cumpla con holgura el criterio de aceptación;
+exactamente el caso que motivó el pendiente de la ronda 2. El hallazgo más claro es **saldo 40M+**: su
+intervalo completo (0,640–0,696) queda **por debajo** de 0,70 — es el único segmento grande donde el
+AUC absoluto está confiablemente bajo el umbral (coherente con que en §6 ya era el margen más estrecho
+contra el baseline, +0,061). Los segmentos con más filas (edad 40-49, saldo 15-40M) sí quedan
+confiablemente por sobre 0,70. La tabla completa (con `captura` al 10 %, `reportes/
+bootstrap_captura_segmento.csv`) va en la corrida de referencia.
+
+### C. Objetivo 3 — el supuesto de 0,446 % mensual de Cuprum
+
+Se buscó con WebSearch una cifra pública 2024-2026 de **traspasos brutos** (salidas) de Cuprum para
+reemplazar el supuesto de trabajo (README §13.A: 0,446 %/mes, ancla al promedio del sistema completo
+de la Ficha N° 165). `spensiones.cl` y `cuprum.cl` están bloqueados por el proxy de la sandbox, como
+anticipa el brief, y **también `latercera.com`** (confirmado con `curl`/`WebFetch` → `EGRESS_BLOCKED`
+en los tres casos): sólo quedan disponibles los snippets que devuelve WebSearch y la Ficha N° 165 que
+ya estaba descargada en `data/sp/`.
+
+**Consultas hechas** (todas el 12-sep-2026): *"AFP Cuprum traspasos 2025 salidas entradas netos
+mensual Superintendencia Pensiones"*, *"Cuprum tasa de traspaso AFP 2024 2025 fuga afiliados"*,
+*"'Cuprum' traspasos brutos afiliados que salen 2025 AFP origen destino"*, *"traspasos entre AFP 2025
+origen destino Cuprum Habitat Capital cifras"*, *"'traspasos netos' Cuprum 2025 La Tercera OR 'Diario
+Financiero' mensual"*, *"AFP traspasos mensuales 2025 Uno Cuprum ranking cuentas cambiadas"*, más dos
+búsquedas de cierre sobre salidas/porcentaje mensual y sobre `df.cl`. Ninguna devolvió una cifra de
+**fuga bruta mensual** de Cuprum con URL verificable.
+
+**Lo que sí se encontró** (dos cifras NETAS —entradas menos salidas—, con fuente y fecha, cada una en
+una ventana distinta y no comparable entre sí):
+
+| Fuente | Fecha de acceso | Periodo | Traspasos netos Cuprum |
+|---|---|---|---|
+| Ficha Estadística Previsional N° 165 (SP, ago-2026; `data/sp/`, verificado extrayendo el PDF) | ya en el repo | junio 2026 (1 mes) | **+4.128** cuentas |
+| [La Tercera — "Pensiones: fondo A lideró..."](https://www.latercera.com/pulso/noticia/pensiones-fondo-a-lidero-las-preferencias-de-traspasos-en-2024-y-el-e-fue-el-que-mas-afiliados-perdio/OA36QNL5TZFWZGUZJ7RJPBYN4U/) | 12-sep-2026 (snippet; `latercera.com` bloqueado para abrir el artículo completo) | año 2024 completo | **+4.699** cuentas |
+
+La Ficha también confirma que el total **bruto** traspasado entre AFP en el sistema completo en junio
+de 2026 fue de 56.974 cuentas (dato ya usado para el perfil `sistema`), pero, igual que reporta el
+brief, la SP **sólo publica el neto por AFP**, nunca el bruto por AFP de origen. Ninguna cifra
+encontrada permite aislar la fuga bruta de Cuprum específicamente, y las dos que sí se encontraron
+corresponden a ventanas no comparables (un mes vs. un año calendario), así que no alcanzan ni para
+recalibrar ni para construir una tendencia limpia — sólo confirman, de forma consistente con la
+simulación (`traspasos_netos_total` > 0), que el neto de Cuprum es positivo.
+
+**Decisión: el supuesto se mantiene sin cambios** (0,446 %/mes, `PARAMETROS_POR_PERFIL["cuprum"]
+["b0"] = -6,32`, test `test_perfil_cuprum_vs_sistema` con rango 0,35-0,60 %). Se documenta
+explícitamente en el código (comentario junto a `PARAMETROS_POR_PERFIL` en `synthetic.py`) qué se
+buscó, qué se encontró y por qué no se recalibra, para que quede a mano cuando exista la serie de
+traspasos por AFP de origen y destino que pide el brief.
+
+### D. Archivos tocados
+
+| Archivo | Qué cambió |
+|---|---|
+| `licitacion.py` | `simular_licitacion_stock` ahora devuelve `(licitacion_stock, tablas_actualizadas)`, procesa los sorteos secuencialmente y aplica `_aplicar_salida_licitacion`; `sorteos_en_ventana` acepta `sorteos` y sólo exige el mes de sorteo dentro de la ventana |
+| `synthetic.py` | `generar_tablas(sorteos_licitacion=SORTEOS, aplicar_salida_licitacion=True)`; comentario de fuentes junto a `PARAMETROS_POR_PERFIL` (objetivo 3) |
+| `evaluate.py` | `bootstrap_ic_segmento`, `bootstrap_auc_segmentos`, `N_BOOT_REFERENCIA`, `SEGMENTOS_BOOTSTRAP` |
+| `run.py` | reporte `licitacion_efecto_cartera.csv` (objetivo 1) y `bootstrap_auc_segmento.csv` / `bootstrap_captura_segmento.csv` (objetivo 2) |
+| `tests/` | 6 tests nuevos (39 en total): retroalimentación de la cartera, segundo sorteo parametrizable, `cortes_evaluables` con dos sorteos, bootstrap por segmento (×3: cruce de 0,5, reproducibilidad, edad+saldo); `test_run_end_to_end` ampliado para verificar los 2 reportes nuevos |
+
+### E. Runtime y limitaciones
+
+`python3 -m afp_lab.churn_traspaso.run --perfil cuprum` pasó de ~45 s (ronda 2) a **~60 s**: los ~15 s
+adicionales son una segunda llamada a `generar_tablas` (con `aplicar_salida_licitacion=False`) sólo
+para el reporte comparativo del objetivo 1, y unos segundos más de los 2×200 remuestreos bootstrap del
+objetivo 2 (9 segmentos × 200 × 2 métricas). Sigue muy por debajo del límite de 5 min.
+`python3 -m pytest afp_lab/churn_traspaso/tests -q` corre los 42 tests en ~30 s (límite: 2 min).
+
+**Limitaciones de esta ronda**:
+
+* El objetivo 3 queda **acotado**: no se obtuvo la fuga bruta mensual de Cuprum (limitación de las
+  fuentes públicas accesibles, no de tiempo), así que el parámetro no se recalibró. Ver §C.
+* El segundo sorteo (2029-08) sólo se simula con una ventana extendida en un test; la corrida de
+  referencia no lo incluye (decisión justificada en §A, no es una limitación de tiempo).
+* `bootstrap_ic_segmento` no aplica desempate reproducible en `metrica="captura"` (a diferencia de
+  `captura_top`): con probabilidades continuas de LightGBM los empates son prácticamente inexistentes,
+  pero si se usara con un score con muchos valores repetidos habría que agregarlo.

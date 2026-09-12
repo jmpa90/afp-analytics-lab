@@ -39,11 +39,11 @@ PERFILES = {
         "p_multi_empleador": 0.05, "p_jornada_parcial": 0.12, "p_masa_imm": 0.15,
     },
     "cuprum": {
-        "desplaz_productividad": 0.45,
+        "desplaz_productividad": 0.52,
         "p_educacion": [0.03, 0.27, 0.25, 0.45],
         "p_region_rm": 0.62, "p_region_v": 0.08, "p_region_viii": 0.05,
         "pesos_rubro": [0.02, 0.10, 0.10, 0.06, 0.08, 0.05, 0.02, 0.15, 0.12, 0.10, 0.07, 0.12, 0.01],
-        "edad_min": 22, "edad_rango": 43, "edad_sesgo": 0.15,
+        "edad_min": 22, "edad_rango": 43, "edad_sesgo": 0.04,
         "p_independiente": 0.10, "p_voluntario": 0.02,
         "p_multi_empleador": 0.07, "p_jornada_parcial": 0.06, "p_masa_imm": 0.03,
     },

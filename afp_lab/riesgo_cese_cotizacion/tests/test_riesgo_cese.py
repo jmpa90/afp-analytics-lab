@@ -6,11 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from afp_lab.riesgo_cese_cotizacion.evaluate import (curva_calibracion, evaluar,
+from afp_lab.riesgo_cese_cotizacion.evaluate import (cobertura_poblacion_cese, curva_calibracion, evaluar,
                                                       metrica_negocio_agregado, metrica_negocio_captura)
 from afp_lab.riesgo_cese_cotizacion.features import (FEATURES_CATEGORICAS, FEATURES_NUMERICAS,
+                                                      TIPOS_DEPENDENCIA, VENTANA_HISTORIA,
                                                       agregar_targets, construir_features)
 from afp_lab.riesgo_cese_cotizacion.model import ModeloCese, baseline_tasa_base, predecir_tasa_base
+from afp_lab.riesgo_cese_cotizacion.run import _cortes_validos, _split_temporal
 from afp_lab.riesgo_cese_cotizacion.synthetic import add_months, generar_datos, periodo_to_idx
 
 N_AFILIADOS = 1500
@@ -52,13 +54,18 @@ def test_features_sin_nulos_ni_infinitos(features):
 
 
 def test_poblaciones_bien_definidas(features):
-    # Modelo A: cotizando en corte-2 segun lo conocido (rim_l1 = RIM en corte-2)
-    assert (features.loc[features["pop_cese"] == 1, "rim_l1"] > 0).all()
-    assert (features.loc[features["pop_cese"] == 0, "rim_l1"] == 0).all()
-    # Modelo B: dependientes, sin RIM en corte-2 pero con al menos 1 cotizacion en 24m previos
+    # Modelo A: cotizando en corte-2 segun lo conocido, solo dependientes/pensionados
+    # activos (bloqueante #2, ronda 1: independientes y voluntarios excluidos)
+    pob_a = features[features["pop_cese"] == 1]
+    assert (pob_a["rim_l1"] > 0).all()
+    assert pob_a["tipo_afiliado"].isin(TIPOS_DEPENDENCIA).all()
+    assert not pob_a["tipo_afiliado"].isin(["INDEPENDIENTE", "VOLUNTARIO"]).any()
+    # Modelo B: dependientes, sin RIM en corte-2 NI en corte-3 (mayor #4, ronda 1) y con al
+    # menos 1 cotizacion en 24m previos
     pob_b = features[features["pop_reingreso"] == 1]
     assert (pob_b["tipo_afiliado"] == "DEPENDIENTE").all()
     assert (pob_b["rim_l1"] == 0).all()
+    assert (pob_b["rim_l2"] == 0).all()
     assert (pob_b["n_cotiza_24"] > 0).all()
     # ambas poblaciones son disjuntas
     assert (features["pop_cese"] * features["pop_reingreso"]).sum() == 0
@@ -75,16 +82,26 @@ def test_targets_consistentes_con_poblacion(tablas, features):
 
 
 # ---------------------------------------------------------------- sin leakage
-def test_leakage_alterar_panel_futuro_no_cambia_features(tablas):
-    """CONVENCIONES #3: alterar o borrar cualquier registro posterior al corte no debe
-    cambiar las features. Se ensucian los movimientos y giros con periodo > corte y se
-    revisa que `construir_features(corte)` no cambie ni una celda."""
+#
+# Nota de metodologia (ronda 2): las pruebas de leakage mutan las tablas DERIVADAS
+# (`cotizaciones_conocidas`, `afc_eventos`, `licencias`, `prestaciones_cesantia`)
+# directamente, sin volver a llamar a `synthetic.construir_*` sobre un panel alterado.
+# Regenerar esas tablas desde un panel con valores cambiados altera tambien el LARGO de
+# las tablas intermedias, y como el desfase de recepcion se sortea con
+# `rng.random(n)` (n = filas vigentes), dos corridas con distinto `n` reasignan el rezago
+# a filas *no relacionadas*, produciendo diffs que no son leakage sino ruido del
+# generador. Mutar la tabla ya construida in-place evita ese artefacto y aisla lo que de
+# verdad importa: si `construir_features` respeta `periodo_recepcion` y `periodo`.
+def test_leakage_alterar_futuro_no_cambia_features(tablas):
+    """CONVENCIONES #3: alterar cualquier registro con periodo posterior al corte
+    (o con periodo == corte, para RIM y giros) no debe cambiar ni una celda de
+    `construir_features(corte)`."""
     base = construir_features(tablas, CORTE)
 
     t2 = dict(tablas)
     cot = tablas["cotizaciones_conocidas"].copy()
     fut = cot["periodo"] > CORTE
-    cot.loc[fut, "rim"] = cot.loc[fut, "rim"] * 0 + 999_999_999.0
+    cot.loc[fut, "rim"] = 999_999_999.0
     t2["cotizaciones_conocidas"] = cot
 
     afc = tablas["afc_eventos"].copy()
@@ -97,13 +114,50 @@ def test_leakage_alterar_panel_futuro_no_cambia_features(tablas):
 
     giros = tablas["prestaciones_cesantia"].copy()
     giros.loc[giros["periodo"] > CORTE, "monto"] = 123.0
-    t2["prestaciones_cesantia"] = giros
+    t2["prestaciones_cesantia"] = giros  # no se usa en features.py, pero no debe importar si igual se altera
 
     alt = construir_features(t2, CORTE)
     pd.testing.assert_frame_equal(
         base.sort_values("afiliado_id").reset_index(drop=True),
         alt.sort_values("afiliado_id").reset_index(drop=True),
     )
+
+
+def test_leakage_cesantia_no_lee_rim_futura(tablas):
+    """Bloqueante #1 de la revision de ronda 1: el generador de `prestaciones_cesantia`
+    paga un giro en el mes p solo si la RIM real (no conocida) es 0 en p; leer esa tabla
+    con periodo <= corte (en vez de <= corte-1) filtraba esa informacion. La correccion
+    (`_features_eventos`) ya no lee `prestaciones_cesantia`: la cobertura de cesantia se
+    deriva solo del TERMINO AFC conocido + tipo de contrato + tasas legales. Se verifica
+    alterando el panel en `corte` y `corte-1` (los meses del bug original) y comprobando
+    que `cesantia_en_curso`, `cesantia_giros_restantes` y `cesantia_tasa_actual` no
+    cambian ni un poquito, aunque se le anada un giro/una RIM enorme falsa exactamente en
+    esos meses en las tablas derivadas."""
+    base = construir_features(tablas, CORTE)
+    cols_cesantia = ["cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual"]
+
+    t2 = dict(tablas)
+    cot = tablas["cotizaciones_conocidas"].copy()
+    m = cot["periodo"].isin([add_months(CORTE, -1), CORTE])
+    cot.loc[m, "rim"] = 999_999_999.0
+    cot.loc[m, "periodo_recepcion"] = CORTE  # "se sabe" altiro, no solo en el futuro
+    t2["cotizaciones_conocidas"] = cot
+
+    afiliado_id0 = base["afiliado_id"].iloc[0]
+    giros = tablas["prestaciones_cesantia"].copy()
+    extra = giros.iloc[[0]].copy() if len(giros) else pd.DataFrame(
+        {"afiliado_id": [afiliado_id0], "periodo": [CORTE], "n_giro": [1],
+         "monto": [1.0], "periodo_recepcion": [CORTE]})
+    extra["afiliado_id"] = afiliado_id0
+    extra["periodo"] = CORTE
+    extra["monto"] = 555_555.0
+    extra["periodo_recepcion"] = CORTE
+    t2["prestaciones_cesantia"] = pd.concat([giros, extra], ignore_index=True)
+
+    alt = construir_features(t2, CORTE)
+    b = base.set_index("afiliado_id")[cols_cesantia]
+    a = alt.set_index("afiliado_id")[cols_cesantia]
+    pd.testing.assert_frame_equal(b, a.reindex(b.index))
 
 
 def test_leakage_recepcion_tardia_no_se_usa(tablas):
@@ -143,6 +197,115 @@ def test_afc_conocido_hasta_corte_menos_1(tablas):
     alt = construir_features(t2, CORTE)
     pd.testing.assert_frame_equal(base.sort_values("afiliado_id").reset_index(drop=True),
                                   alt.sort_values("afiliado_id").reset_index(drop=True))
+
+
+def test_termino_en_corte_menos_1_si_actualiza_cesantia(tablas):
+    """Control positivo del test anterior: un TERMINO fechado en `corte-1` (el mes mas
+    reciente que SI se debe conocer) debe actualizar `afc_termino_l1` y la cobertura de
+    cesantia derivada de el. Sin este control, un test de leakage que siempre da "sin
+    cambios" podria estar ocultando una feature rota (que nunca reacciona a nada)."""
+    afiliados = tablas["afiliados"]
+    af_id = afiliados.loc[afiliados["periodo_afiliacion"] <= add_months(CORTE, -13), "afiliado_id"].iloc[0]
+    afc = tablas["afc_eventos"].copy()
+    afc = afc[~((afc["afiliado_id"] == af_id) & (afc["tipo_evento"] == "TERMINO"))]
+    nuevo = pd.DataFrame({"afiliado_id": [af_id], "periodo": [add_months(CORTE, -1)],
+                         "empleador_id": [afc["empleador_id"].dropna().iloc[0]], "tipo_evento": ["TERMINO"],
+                         "tipo_contrato": ["INDEFINIDO"], "periodo_recepcion": [CORTE]})
+    t2 = dict(tablas)
+    t2["afc_eventos"] = pd.concat([afc, nuevo], ignore_index=True)
+    alt = construir_features(t2, CORTE).set_index("afiliado_id").loc[af_id]
+    assert alt["afc_termino_l1"] == 1
+    assert alt["meses_desde_afc_termino"] == 1
+    assert alt["cesantia_en_curso"] == 1
+    assert alt["cesantia_giros_restantes"] == 4          # max 5 (INDEFINIDO) - 1 mes transcurrido
+    assert alt["cesantia_tasa_actual"] == pytest.approx(0.70)  # primera tasa de TASAS_GIRO["INDEFINIDO"]
+
+
+# ------------------------------------------------------ empleador (menores #5 y #9)
+def test_features_empleador_sin_nan_y_crecimiento_no_sesgado(tablas, features):
+    """Bug de ronda 1: `reindex(..., fill_value=0)` no rellenaba los NaN que `unstack` deja
+    cuando un empleador conocido no tiene planilla un mes puntual, y la censura de
+    recepcion del mes mas reciente (solo ~95% de las planillas llegan a tiempo) sesgaba
+    `emp_crecimiento_12` sistematicamente a la baja (mediana ~0,90 para TODOS los
+    empleadores, un artefacto, no dotacion real)."""
+    con_empleador = features[features["emp_n_trabajadores"] > 0]
+    assert con_empleador["emp_crecimiento_12"].notna().all()
+    assert con_empleador["emp_tasa_salida_12"].notna().all()
+    # corregido por madurez de recepcion: la mediana debe quedar razonablemente cerca de 1,
+    # no sesgada ~5% hacia abajo como antes de la correccion.
+    mediana = con_empleador["emp_crecimiento_12"].median()
+    assert 0.95 <= mediana <= 1.10, f"mediana de emp_crecimiento_12 sospechosamente sesgada: {mediana}"
+    assert features["emp_sin_planilla_conocida"].isin([0.0, 1.0]).all()
+
+
+# --------------------------------------------------- tipo de contrato vigente (menor #8)
+def test_tipo_contrato_no_describe_relacion_terminada(tablas):
+    """Menor #8, ronda 1: el tipo de contrato debe describir la relacion VIGENTE (el
+    empleador de referencia de la RIM conocida), no cualquier INICIO pasado del afiliado
+    aunque pertenezca a un empleador distinto y ya cerrado. Se toma un afiliado con
+    empleador de referencia vigente y se reescribe su (unico) aviso INICIO conocido para
+    que apunte a OTRO empleador (simula una relacion anterior, ya terminada): el
+    tipo_contrato resultante no debe ser el de ese INICIO viejo."""
+    f = construir_features(tablas, CORTE)
+    con_ref = f[f["tipo_contrato"] != "SIN_EMPLEADOR"]
+    assert len(con_ref) > 0
+    af_id = con_ref["afiliado_id"].iloc[0]
+
+    afc = tablas["afc_eventos"]
+    inicio_af = afc[(afc["afiliado_id"] == af_id) & (afc["tipo_evento"] == "INICIO")]
+    if inicio_af.empty:
+        pytest.skip("el afiliado elegido no tiene aviso INICIO conocido (ya es SIN_DATO_AFC)")
+    otros_empleadores = tablas["empleadores"]["empleador_id"]
+    distinto = otros_empleadores[~otros_empleadores.isin(inicio_af["empleador_id"])].iloc[0]
+    tipo_original = inicio_af["tipo_contrato"].iloc[0]
+    tipo_forzado = "PLAZO_FIJO" if tipo_original == "INDEFINIDO" else "INDEFINIDO"
+
+    afc2 = afc.copy()
+    afc2.loc[inicio_af.index, "empleador_id"] = distinto
+    afc2.loc[inicio_af.index, "tipo_contrato"] = tipo_forzado
+    t2 = dict(tablas)
+    t2["afc_eventos"] = afc2
+    alt = construir_features(t2, CORTE).set_index("afiliado_id").loc[af_id]
+    assert alt["tipo_contrato"] != tipo_forzado
+    assert alt["tipo_contrato"] == "SIN_DATO_AFC"
+
+
+# --------------------------------------------------------- split temporal (mayor #3)
+def test_split_gap_es_2h_no_h():
+    """Mayor #3, ronda 1: el gap real entre el ULTIMO TARGET de train/val (`corte+h`) y el
+    primer corte de test debe ser >= h, lo que exige `corte_train <= test_min - 2h` (no
+    `test_min - h - 1`, que solo garantizaba 1 mes de gap real)."""
+    cortes = _cortes_validos(202201, 202609)
+    for h in (3, 6):
+        splits = _split_temporal(pd.DataFrame({"periodo_corte": cortes}), cortes, h)
+        ultimo_train_val = max(splits["cortes"]["train"] + splits["cortes"]["val"])
+        primer_test = min(splits["cortes"]["test"])
+        gap_meses = periodo_to_idx(primer_test) - (periodo_to_idx(ultimo_train_val) + h)
+        assert gap_meses >= h, f"horizonte={h}: gap real={gap_meses} (se exige >= {h})"
+
+
+def test_cortes_validos_no_pisa_periodo_inicio():
+    """Menor #7, ronda 1: el primer corte usable debe dejar toda la ventana de historia
+    (`VENTANA_HISTORIA` meses) dentro de `[periodo_inicio, periodo_fin]`."""
+    cortes = _cortes_validos(202201, 202609)
+    primer_corte_rim = add_months(min(cortes), -2)
+    primer_mes_ventana = add_months(primer_corte_rim, -(VENTANA_HISTORIA - 1))
+    assert periodo_to_idx(primer_mes_ventana) >= periodo_to_idx(202201)
+
+
+# ------------------------------------------------------- cobertura (mayor #4, segunda parte)
+def test_cobertura_poblacion_a_es_subconjunto_de_cotizantes_reales(tablas):
+    """`pop_cese` (RIM CONOCIDA) es, por diseño, un subconjunto de los cotizantes REALES
+    (censura de recepcion): la cobertura nunca debe superar 1, y debe rondar el 90-99%
+    (no un numero patologico como 50% o 100% exacto, que indicaria que la comparacion esta
+    mal armada)."""
+    cortes = [CORTE, add_months(CORTE, 1)]
+    filas = [construir_features(tablas, c) for c in cortes]
+    dataset = pd.concat(filas, ignore_index=True)
+    cobertura = cobertura_poblacion_cese(dataset, tablas["panel_mensual"], TIPOS_DEPENDENCIA)
+    assert (cobertura["n_pop_cese"] <= cobertura["n_cotizantes_reales"]).all()
+    assert (cobertura["cobertura"] <= 1.0).all()
+    assert (cobertura["cobertura"] > 0.85).all()
 
 
 # ------------------------------------------------------------- modelo (mini)

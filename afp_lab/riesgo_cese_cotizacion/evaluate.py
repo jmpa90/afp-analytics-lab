@@ -41,6 +41,26 @@ def evaluar_por_segmento(df: pd.DataFrame, col_y: str, col_pred: str,
     return salida
 
 
+def evaluar_segmentos_multi(df: pd.DataFrame, col_y: str, predictores: dict[str, str],
+                            segmentos: list[str] = SEGMENTOS_COMUNES) -> dict[str, pd.DataFrame]:
+    """Igual que `evaluar_por_segmento`, pero para varios predictores a la vez (modelo y
+    los baselines), concatenados en una sola tabla por segmento con una columna
+    `predictor` (menor #10, ronda 1: antes solo se reportaba el modelo, y CONVENCIONES #4
+    exige poder comparar "no perder en ningun segmento grande" contra los baselines)."""
+    df = agregar_tramos(df) if "tramo_edad" not in df.columns else df
+    salida: dict[str, pd.DataFrame] = {}
+    for seg in segmentos:
+        tablas = []
+        for nombre, col_pred in predictores.items():
+            t = tabla_metricas_por_segmento(df, seg, metricas_clasificacion, col_y, col_pred)
+            t.insert(0, "predictor", nombre)
+            tablas.append(t)
+        combinada = pd.concat(tablas, ignore_index=True)
+        combinada["n_filas_pct"] = 100 * combinada["n"] / (combinada["n"].sum() / len(predictores))
+        salida[seg] = combinada.sort_values(["predictor", seg]).reset_index(drop=True)
+    return salida
+
+
 def curva_calibracion(df: pd.DataFrame, col_y: str, col_pred: str, n_deciles: int = 10) -> pd.DataFrame:
     """Curva de calibracion por decil de probabilidad predicha: predicho medio vs. tasa
     observada. Deciles por rango (`qcut` con `duplicates="drop"`, robusto a masas en 0)."""
@@ -53,11 +73,42 @@ def curva_calibracion(df: pd.DataFrame, col_y: str, col_pred: str, n_deciles: in
 
 def metrica_negocio_agregado(df: pd.DataFrame, col_y: str, col_pred: str,
                              col_corte: str = "periodo_corte") -> pd.DataFrame:
-    """Numero esperado (suma de probabilidades calibradas) vs. real de casos positivos, por
-    mes de corte, con el error relativo (WAPE agregado a nivel de corte)."""
+    """Numero esperado (suma de probabilidades calibradas) vs. real de casos positivos,
+    POR MES de corte (el brief pide el error relativo mensual, no un promedio ni un total
+    del periodo de test completo: menor #11, ronda 1). `error_relativo` es un error
+    relativo CON SIGNO de un solo agregado por mes (esperado-real)/real; no es WAPE (esa
+    metrica de `afp_lab.common.metrics` es Σ|error|/Σ|y| sobre muchas filas individuales,
+    una cosa distinta: aqui antes se llamaba "WAPE" por error en el docstring)."""
     g = df.groupby(col_corte).agg(n_esperado=(col_pred, "sum"), n_real=(col_y, "sum"), n_filas=(col_y, "size"))
     g["error_relativo"] = (g["n_esperado"] - g["n_real"]) / g["n_real"].clip(lower=1e-9)
     return g.reset_index()
+
+
+def cobertura_poblacion_cese(dataset: pd.DataFrame, panel: pd.DataFrame,
+                             tipos_dependencia: list[str]) -> pd.DataFrame:
+    """Cobertura de `pop_cese` (RIM CONOCIDA > 0 en `corte-2`) respecto de los cotizantes
+    REALES (RIM verdadera, del panel, > 0 en `corte-2`) entre dependientes/pensionados
+    activos, por corte. La diferencia es puramente censura de recepcion (cotizaciones
+    tardias que a `corte-1` aun no se conocen), no error del modelo: pop_cese es, por
+    diseño, un subconjunto de los cotizantes reales (mayor #4, ronda 1). Sirve para
+    escalar el "numero esperado de cesantes" (calculado solo sobre `pop_cese`) al universo
+    completo de cotizantes reales: `factor_correccion = 1/cobertura`."""
+    rim_true = (panel.assign(rim=lambda d: d["rim_emp1"].fillna(0) + d["rim_emp2"].fillna(0))
+                [["afiliado_id", "periodo", "rim"]])
+    elegibles = dataset[dataset["tipo_afiliado"].isin(tipos_dependencia)]
+    filas = []
+    for corte, g in elegibles.groupby("periodo_corte"):
+        corte_rim = int(g["corte_rim"].iloc[0])
+        verdad = rim_true[rim_true["periodo"] == corte_rim].set_index("afiliado_id")["rim"]
+        rim_real = verdad.reindex(g["afiliado_id"]).fillna(0.0).to_numpy()
+        n_reales = int((rim_real > 0).sum())
+        n_pop = int(g["pop_cese"].sum())
+        filas.append({"periodo_corte": corte, "corte_rim": corte_rim, "n_pop_cese": n_pop,
+                      "n_cotizantes_reales": n_reales,
+                      "cobertura": n_pop / n_reales if n_reales else float("nan")})
+    out = pd.DataFrame(filas)
+    out["factor_correccion"] = 1.0 / out["cobertura"]
+    return out
 
 
 def metrica_negocio_captura(df: pd.DataFrame, col_y: str, col_pred: str, frac: float = 0.10) -> dict[str, float]:

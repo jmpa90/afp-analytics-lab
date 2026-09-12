@@ -17,7 +17,9 @@ informacion real de una AFP.
     licencias                dias de licencia medica, conocidos en periodo+1 (aviso COMPIN
                              mas rapido que el pago del subsidio).
     prestaciones_cesantia    giros del seguro de cesantia tras un termino: hasta 5 giros
-                             decrecientes (contrato indefinido) o 2 (plazo fijo / por obra),
+                             decrecientes (contrato indefinido) o 2 (contrato a plazo fijo;
+                             el universo simulado no genera contratos "por obra" como
+                             categoria aparte, solo INDEFINIDO/PLAZO_FIJO),
                              sobre la remuneracion imponible media de los ultimos 12 meses
                              de la relacion terminada; se detienen si el afiliado reingresa
                              antes de agotarlos. Conocidos al mes (sin rezago adicional).
@@ -60,9 +62,10 @@ TARDIO_EXTRA_MIN, TARDIO_EXTRA_MAX = 1, 6
 # Giros del Seguro de Cesantia (Ley 19.728): tasas legales simplificadas sobre la
 # remuneracion imponible promedio de los ultimos 12 meses de la relacion terminada.
 # Contrato indefinido: hasta 5 giros decrecientes (aprox. 70/55/45/40/35%); contrato a
-# plazo fijo o por obra: hasta 2 giros (aprox. 70/55%, financiados por el Fondo de
-# Cesantia Solidario). No son los porcentajes legales exactos (que distinguen aportes
-# del propio afiliado vs. del empleador y el Fondo Solidario) sino una aproximacion
+# plazo fijo: hasta 2 giros (aprox. 70/55%, financiados por el Fondo de Cesantia
+# Solidario; en la ley tambien aplica a contratos "por obra", categoria que este
+# universo simulado no genera por separado). No son los porcentajes legales exactos (que
+# distinguen aportes del propio afiliado vs. del empleador y el Fondo Solidario) sino una aproximacion
 # razonable para dar una senal de "cuanto le queda de cobertura".
 TASAS_GIRO = {
     "INDEFINIDO": [0.70, 0.55, 0.45, 0.40, 0.35],
@@ -119,8 +122,16 @@ def construir_licencias(panel: pd.DataFrame) -> pd.DataFrame:
     return lic.reset_index(drop=True)
 
 
-def construir_prestaciones_cesantia(panel: pd.DataFrame, afc_eventos: pd.DataFrame) -> pd.DataFrame:
-    """Giros del seguro de cesantia tras cada termino elegible (ver docstring del modulo)."""
+def construir_prestaciones_cesantia(panel: pd.DataFrame, afc_eventos: pd.DataFrame, periodo_fin: int) -> pd.DataFrame:
+    """Giros del seguro de cesantia tras cada termino elegible (ver docstring del modulo).
+
+    Esta tabla es la "verdad" de lo efectivamente pagado (usa la RIM real para saber si el
+    afiliado reingreso y dejo de cobrar) y se conserva porque el brief la pide como tabla
+    fuente, pero `features.py` NO la usa para construir features de riesgo: derivarla de
+    la RIM (aunque sea la RIM real, no la conocida) filtro leakage en la ronda 1 (ver
+    README, decision tomada). Las features de cobertura de cesantia se reconstruyen ahi de
+    forma puramente analitica (termino AFC conocido + tipo de contrato + tasas legales),
+    sin leer esta tabla."""
     tmp = pd.DataFrame({
         "afiliado_id": panel["afiliado_id"].to_numpy(),
         "periodo": panel["periodo"].to_numpy(),
@@ -155,7 +166,8 @@ def construir_prestaciones_cesantia(panel: pd.DataFrame, afc_eventos: pd.DataFra
         rim_fut = np.nan_to_num(rim_fut, nan=0.0)  # sin dato futuro (fuera del rango simulado): se asume aun cesante
         reingreso = rim_fut > 0
         activo &= ~reingreso
-        elegible = activo & (k <= max_giros)
+        # un giro no puede pagarse en un mes fuera del rango simulado (menor #13, ronda 1)
+        elegible = activo & (k <= max_giros) & (periodo_k <= periodo_fin)
         if elegible.any():
             tasa = np.where(es_indef, tasas_indef[k - 1], tasas_plazo[k - 1])
             monto = np.round(base * tasa, 0)
@@ -166,7 +178,7 @@ def construir_prestaciones_cesantia(panel: pd.DataFrame, afc_eventos: pd.DataFra
                 "monto": monto[elegible],
                 "periodo_recepcion": periodo_k[elegible],   # conocido al mes: sin rezago adicional
             }))
-        activo &= elegible
+        activo &= (k <= max_giros)   # una vez agotados los giros legales no se reactivan (periodo_fin es monotono)
     return pd.concat(filas, ignore_index=True) if filas else pd.DataFrame(
         columns=["afiliado_id", "periodo", "n_giro", "monto", "periodo_recepcion"])
 
@@ -186,5 +198,5 @@ def generar_datos(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo
         "cotizaciones_conocidas": construir_cotizaciones_conocidas(panel, seed),
         "afc_eventos": afc,
         "licencias": construir_licencias(panel),
-        "prestaciones_cesantia": construir_prestaciones_cesantia(panel, afc),
+        "prestaciones_cesantia": construir_prestaciones_cesantia(panel, afc, periodo_fin),
     }

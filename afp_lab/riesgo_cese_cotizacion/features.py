@@ -14,24 +14,44 @@ Convencion de tiempos de este proyecto (ver README, seccion 3 y 8):
     brief da dos reglas de desfase distintas para RIM vs. eventos; se reproduce tal cual,
     con un corte de recepcion mas laxo para los eventos, que llegan por una via mas rapida
     que la nomina).
-  * Prestaciones de cesantia: "conocidas al mes" (sin rezago adicional de recepcion),
-    tratadas con el mismo corte que los eventos (`corte`).
+  * Cobertura del seguro de cesantia: se reconstruye de forma puramente analitica a partir
+    del TERMINO AFC conocido (<= corte-1), el tipo de contrato de esa relacion y las tasas
+    legales (`synthetic.TASAS_GIRO`): `giros_restantes = max_giros - meses_desde_termino`.
+    **No** se lee la tabla `prestaciones_cesantia` para features (ver correccion de ronda 1
+    mas abajo): esa tabla decide si un giro se paga mirando si el afiliado ya reingreso
+    (RIM real, no conocida), y usarla directamente filtraba informacion del futuro del
+    corte a traves de `cesantia_giro_actual`/`cesantia_n_giros_recibidos` (bloqueante #1 de
+    la revision de ronda 1, ver README §8). La cobertura analitica de este modulo asume
+    "sigue cesante mientras no se demuestre lo contrario con datos ya conocidos" (RIM
+    conocida, eventos AFC), exactamente el mismo principio as-of que el resto del proyecto.
 
 Todas las funciones de esta seccion filtran por `periodo_recepcion` antes de agregar: un
 registro nunca se usa antes de estar "recibido" segun estas reglas. `construir_features`
 NO conoce el panel de verdad ni ninguna tabla mas alla de `corte`; el target se agrega
 aparte con `agregar_targets`, que si usa el panel completo (por definicion, un target habla
-del futuro del corte).
+del futuro del corte). Tampoco se le pasa `prestaciones_cesantia` (ver parrafo anterior).
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-from .synthetic import add_months, periodo_to_idx
+from .synthetic import (P_TARDIO, TARDIO_EXTRA_MAX, TARDIO_EXTRA_MIN, TASAS_GIRO, add_months,
+                        periodo_to_idx)
 
 N_LAGS = 12
-VENTANA_HISTORIA = 30  # meses de historial (>= 24 de densidad + margen para lags/cambios)
+# Ventana de historial: 24 meses de densidad (el maximo que pide el brief) + 2 de margen
+# para poder calcular `_cambio` (necesita el mes anterior al primero de la ventana) y para
+# que `racha_cotiza`/`meses_desde_cambio` no se corten justo en el borde de `n_cotiza_24`.
+# Se redujo de 30 a 26 meses (menor #7, ronda 1: con 30 meses + el desfase de 2 de la RIM,
+# los cortes mas cercanos al inicio de la simulacion pedian meses anteriores a
+# `periodo_inicio`, que no existen: la ventana se rellenaba con ceros "artificiales"
+# indistinguibles de cesantia real, sesgando distinto cada corte). Ahora
+# `construir_features` recorta explicitamente la ventana a `periodo_inicio` (ver
+# `_features_historia_rim`) y `run.py` solo usa cortes donde la ventana completa cabe
+# dentro del rango simulado, asi que el recorte no debiera activarse en una corrida normal;
+# queda como resguardo.
+VENTANA_HISTORIA = 26
 
 FEATURES_NUMERICAS = (
     [f"rim_l{k}" for k in range(1, N_LAGS + 1)]
@@ -40,11 +60,11 @@ FEATURES_NUMERICAS = (
        "racha_cotiza", "racha_cero", "meses_desde_ult_cotiza", "meses_desde_cambio",
        "n_cambios_12", "cv_6", "ratio_l1_l2", "ratio_l1_media12", "tendencia_3_12", "sueldo_fijo",
        "meses_con_empleador", "n_empleadores_12",
-       "emp_n_trabajadores", "emp_crecimiento_12", "emp_tasa_salida_12",
+       "emp_n_trabajadores", "emp_crecimiento_12", "emp_tasa_salida_12", "emp_sin_planilla_conocida",
        "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
        "meses_desde_afc_termino", "meses_desde_afc_inicio",
        "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
-       "cesantia_giro_actual", "cesantia_n_giros_recibidos", "cesantia_en_curso",
+       "cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual",
        "edad", "meses_hasta_pension", "meses_desde_afiliacion",
        "mes_corte", "es_enero", "es_marzo", "es_abril", "es_julio", "es_sept", "es_dic",
        "desempleo_corte", "estacionalidad_rubro"]
@@ -82,16 +102,20 @@ def _grid_ventana(afiliado_ids: np.ndarray, periodo_afiliacion: pd.Series, corte
     return grid[grid["periodo"] >= grid["periodo_afiliacion"]].drop(columns="periodo_afiliacion")
 
 
-def _features_historia_rim(cot: pd.DataFrame, afiliados: pd.DataFrame, corte: int) -> pd.DataFrame:
+def _features_historia_rim(cot: pd.DataFrame, afiliados: pd.DataFrame, corte: int,
+                           periodo_inicio: int) -> pd.DataFrame:
     """Features de historia propia de RIM, evaluadas en `corte-2` (una fila por afiliado)."""
     corte_rim = add_months(corte, -2)
     hasta = add_months(corte, -1)
-    periodo_min = add_months(corte_rim, -(VENTANA_HISTORIA - 1))
+    # la ventana nunca mira antes de periodo_inicio (menor #7, ronda 1): antes de ese mes no
+    # hay universo simulado, y rellenar con "sin cotizacion" ahi seria un cero artificial.
+    periodo_min = max(add_months(corte_rim, -(VENTANA_HISTORIA - 1)), periodo_inicio)
     conocida = _rim_conocida_asof(cot, hasta, periodo_min)
+    n_meses_grid = periodo_to_idx(corte_rim) - periodo_to_idx(periodo_min) + 1
 
     af_ids = afiliados["afiliado_id"].to_numpy()
     grid = _grid_ventana(af_ids, afiliados.set_index("afiliado_id")["periodo_afiliacion"], corte_rim,
-                        VENTANA_HISTORIA)
+                        n_meses_grid)
     df = (grid.merge(conocida, on=["afiliado_id", "periodo"], how="left")
           .fillna({"rim": 0.0, "n_pagadores": 0}))
     df = df.sort_values(["afiliado_id", "periodo"]).reset_index(drop=True)
@@ -180,35 +204,71 @@ def _features_historia_rim(cot: pd.DataFrame, afiliados: pd.DataFrame, corte: in
     return out.reset_index()
 
 
+def _maturity_recepcion(elapsed: np.ndarray) -> np.ndarray:
+    """Fraccion esperada de declaraciones ya recibidas a los `elapsed` meses de emitida la
+    remuneracion, con los mismos parametros de desfase de `synthetic.py` (95 % oportuno a 1
+    mes, 5 % tardio uniforme entre `TARDIO_EXTRA_MIN` y `TARDIO_EXTRA_MAX` meses
+    adicionales). Corrige el sesgo de censura de recepcion en los agregados por empleador
+    (menor #9, ronda 1): sin esto, el mes mas reciente de la ventana (elapsed=1, `corte-2`)
+    solo alcanza a ver el pago oportuno (~95 % de las planillas), mientras que un mes con
+    13 meses de maduracion ya vio practicamente el 100 %; comparar ambos sin corregir hace
+    parecer que TODOS los empleadores encogen ~5 % cada 12 meses (mediana de
+    `emp_crecimiento_12` ~0,90 observada en la ronda 1), un artefacto de recepcion, no una
+    señal real de dotacion."""
+    e = np.asarray(elapsed, dtype=float)
+    p_oportuno = 1.0 - P_TARDIO
+    n_extra = TARDIO_EXTRA_MAX - TARDIO_EXTRA_MIN + 1
+    frac_tardio_conocido = np.clip(e - TARDIO_EXTRA_MIN, 0, n_extra) / n_extra
+    return np.where(e >= 1, p_oportuno, 0.0) + P_TARDIO * frac_tardio_conocido
+
+
 def _features_empleador(cot: pd.DataFrame, empleadores: pd.DataFrame, corte: int) -> pd.DataFrame:
     """Tamano y dinamica reciente (12 m) del empleador de referencia, usando SOLO la RIM
-    conocida (misma logica as-of que la historia individual)."""
+    conocida (misma logica as-of que la historia individual), corregida por madurez de
+    recepcion (`_maturity_recepcion`)."""
     corte_rim = add_months(corte, -2)
     hasta = add_months(corte, -1)
-    periodos_13 = add_months(corte_rim, -np.arange(12, -1, -1))  # corte_rim-12 .. corte_rim
+    periodos_13 = list(add_months(corte_rim, -np.arange(12, -1, -1)))  # corte_rim-12 .. corte_rim
+    cols_vacias = ["empleador_principal", "emp_n_trabajadores", "emp_crecimiento_12",
+                  "emp_tasa_salida_12", "emp_sin_planilla_conocida"]
     vis = cot[(cot["periodo_recepcion"] <= hasta) & cot["periodo"].isin(periodos_13) & (cot["rim"] > 0)]
     if vis.empty or vis["empleador_id"].notna().sum() == 0:
-        return pd.DataFrame(columns=["empleador_principal", "emp_n_trabajadores", "emp_crecimiento_12",
-                                     "emp_tasa_salida_12"])
-    hc = (vis.dropna(subset=["empleador_id"])
-          .groupby(["empleador_id", "periodo"])["afiliado_id"].nunique().unstack("periodo")
-          .reindex(columns=periodos_13, fill_value=0))
-    hc_prev = hc.shift(1, axis=1)
-    sep = (hc_prev - hc).clip(lower=0)
+        return pd.DataFrame(columns=cols_vacias)
+
+    # bug de ronda 1: `reindex(..., fill_value=0)` solo rellena columnas/filas AUSENTES del
+    # index, no los NaN que `unstack` ya deja cuando un empleador conocido no tiene planilla
+    # conocida en un mes puntual de la ventana (quedaban como NaN y arrastraban NaN a
+    # emp_crecimiento_12/emp_tasa_salida_12 para esos empleadores). Se captura ese NaN ANTES
+    # de rellenarlo (bandera `emp_sin_planilla_conocida`, para el mes de referencia) y luego
+    # se rellena explicitamente con `.fillna(0)`.
+    hc_raw = (vis.dropna(subset=["empleador_id"])
+              .groupby(["empleador_id", "periodo"])["afiliado_id"].nunique()
+              .unstack("periodo").reindex(columns=periodos_13))
+    sin_planilla_corte = hc_raw[corte_rim].isna()
+    hc = hc_raw.fillna(0.0)
+
+    elapsed = periodo_to_idx(hasta) - periodo_to_idx(np.array(periodos_13))
+    maturity = pd.Series(_maturity_recepcion(elapsed), index=periodos_13)
+    hc_corr = hc.div(maturity, axis=1)
+
+    hc_prev = hc_corr.shift(1, axis=1)
+    sep = (hc_prev - hc_corr).clip(lower=0)
     tasa_mensual = sep / (hc_prev + 1.0)
     emp = pd.DataFrame({
-        "emp_n_trabajadores": hc[corte_rim],
-        "emp_crecimiento_12": hc[corte_rim] / (hc[periodos_13[0]] + 1.0),
+        "emp_n_trabajadores": hc_corr[corte_rim],
+        "emp_crecimiento_12": hc_corr[corte_rim] / (hc_corr[periodos_13[0]] + 1.0),
         "emp_tasa_salida_12": tasa_mensual.iloc[:, 1:].mean(axis=1),
+        "emp_sin_planilla_conocida": sin_planilla_corte.astype(int),
     }).reset_index().rename(columns={"empleador_id": "empleador_principal"})
     return emp
 
 
-def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, giros: pd.DataFrame,
-                      afiliados: pd.DataFrame, corte: int) -> pd.DataFrame:
-    """Eventos AFC, licencias y giros de cesantia conocidos hasta `corte` (ver docstring
-    del modulo: llegan mas rapido que la RIM, por eso el ultimo mes conocido es `corte-1`
-    y no `corte-2`)."""
+def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, afiliados: pd.DataFrame,
+                      corte: int) -> pd.DataFrame:
+    """Eventos AFC y licencias conocidos hasta `corte` (ver docstring del modulo: llegan
+    mas rapido que la RIM, por eso el ultimo mes conocido es `corte-1` y no `corte-2`), mas
+    la cobertura de cesantia derivada analiticamente del ultimo TERMINO conocido (sin leer
+    `prestaciones_cesantia`: ver correccion de leakage en el docstring del modulo)."""
     af_ids = afiliados["afiliado_id"].to_numpy()
     out = pd.DataFrame({"afiliado_id": af_ids}).set_index("afiliado_id")
     corte_idx = periodo_to_idx(corte)
@@ -219,21 +279,41 @@ def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, giros: pd.Data
     # pero evita que un dato con recepcion mal etiquetada filtre informacion del futuro.
     corte_menos_1 = add_months(corte, -1)
     afc_k = afc[(afc["periodo_recepcion"] <= corte) & (afc["periodo"] <= corte_menos_1)]
+    marcas_termino = None
     for tipo, nombre in (("TERMINO", "afc_termino"), ("INICIO", "afc_inicio")):
         sub = afc_k[afc_k["tipo_evento"] == tipo]
         d = corte_idx - periodo_to_idx(sub["periodo"].to_numpy())
-        marca = pd.DataFrame({"afiliado_id": sub["afiliado_id"].to_numpy(), "_d": d})
+        marca = pd.DataFrame({"afiliado_id": sub["afiliado_id"].to_numpy(), "_d": d,
+                              "tipo_contrato": sub["tipo_contrato"].to_numpy()})
         out[f"{nombre}_l1"] = marca.loc[marca["_d"] == 1].groupby("afiliado_id").size().reindex(out.index, fill_value=0)
         out[f"{nombre}_l2"] = marca.loc[marca["_d"] == 2].groupby("afiliado_id").size().reindex(out.index, fill_value=0)
         ult = marca.groupby("afiliado_id")["_d"].min()
         out[f"meses_desde_{nombre}"] = ult.reindex(out.index)
+        if tipo == "TERMINO":
+            marcas_termino = marca
 
-    # tipo de contrato de la relacion vigente: lo informa el empleador a la AFC al iniciarla
-    # (evento INICIO mas reciente conocido), igual que en rim_nowcasting.
-    inicio = afc_k[afc_k["tipo_evento"] == "INICIO"].copy()
-    inicio["_d"] = corte_idx - periodo_to_idx(inicio["periodo"].to_numpy())
-    ult_inicio = inicio.sort_values("_d").groupby("afiliado_id").first()
-    out["tipo_contrato_afc"] = ult_inicio["tipo_contrato"].reindex(out.index)
+    # Cobertura del seguro de cesantia, 100% analitica: max_giros segun el tipo de contrato
+    # DEL TERMINO mas reciente conocido (no del INICIO: la relacion terminada puede ser
+    # distinta de la vigente) y `meses_desde_termino` (ya calculado arriba). No se lee RIM
+    # futura ni la tabla `prestaciones_cesantia` (ver docstring del modulo).
+    ult_termino = marcas_termino.sort_values("_d").groupby("afiliado_id").first() if marcas_termino is not None else None
+    d_termino = (ult_termino["_d"].reindex(out.index) if ult_termino is not None
+                else pd.Series(np.nan, index=out.index))
+    tipo_termino = (ult_termino["tipo_contrato"].reindex(out.index) if ult_termino is not None
+                   else pd.Series(np.nan, index=out.index, dtype=object))
+    max_giros_map = {t: len(tasas) for t, tasas in TASAS_GIRO.items()}
+    max_giros = tipo_termino.map(max_giros_map)
+    en_curso = d_termino.notna() & (d_termino >= 1) & (d_termino <= max_giros)
+    out["cesantia_en_curso"] = en_curso.fillna(False).astype(int)
+    out["cesantia_giros_restantes"] = np.where(en_curso, max_giros - d_termino, 0.0)
+    tasa_actual = np.zeros(len(out))
+    for tipo_contrato, tasas in TASAS_GIRO.items():
+        tasas_arr = np.asarray(tasas)
+        m = (en_curso & (tipo_termino == tipo_contrato)).to_numpy()
+        if m.any():
+            pos = (d_termino.to_numpy()[m] - 1).astype(int)
+            tasa_actual[m] = tasas_arr[pos]
+    out["cesantia_tasa_actual"] = tasa_actual
 
     lic_k = licencias[(licencias["periodo_recepcion"] <= corte)
                      & (licencias["periodo"] <= corte_menos_1)].copy()
@@ -243,30 +323,57 @@ def _features_eventos(afc: pd.DataFrame, licencias: pd.DataFrame, giros: pd.Data
                     .reindex(out.index, fill_value=0))
     out["licencia_en_curso"] = (out["dias_licencia_l1"] >= 30).astype(int)
 
-    giros_k = giros[(giros["periodo_recepcion"] <= corte) & (giros["periodo"] <= corte)].copy()
-    giros_k["_d"] = corte_idx - periodo_to_idx(giros_k["periodo"].to_numpy())
-    ultimo_giro = giros_k.loc[giros_k["_d"] >= 0].sort_values("_d").groupby("afiliado_id").first()
-    out["cesantia_giro_actual"] = ultimo_giro["monto"].where(ultimo_giro["_d"] <= 1).reindex(out.index).fillna(0.0)
-    out["cesantia_en_curso"] = (out["cesantia_giro_actual"] > 0).astype(int)
-    n_recibidos = giros_k.groupby("afiliado_id")["n_giro"].max()
-    out["cesantia_n_giros_recibidos"] = n_recibidos.reindex(out.index).fillna(0)
-
     return out.reset_index()
 
 
-def _estacionalidad_rubro(afc: pd.DataFrame, empleadores: pd.DataFrame, corte: int, mes_corte: int) -> float:
-    """Indice de estacionalidad: fraccion de los terminos historicos de cada rubro (conocidos
-    hasta `corte`) que ocurren en el mes calendario `mes_corte`. 1/12 si no hay historia."""
+def _tipo_contrato_por_relacion(afc: pd.DataFrame, corte: int) -> pd.DataFrame:
+    """Tipo de contrato del aviso INICIO mas reciente conocido, por cada (afiliado,
+    empleador). Se une en `construir_features` contra el empleador de referencia VIGENTE
+    (el de la RIM conocida), no contra cualquier inicio pasado aunque esa relacion ya haya
+    terminado (menor #8, ronda 1: antes se tomaba el INICIO mas reciente del afiliado sin
+    importar el empleador, y podia describir una relacion ya cerrada)."""
+    corte_idx = periodo_to_idx(corte)
+    corte_menos_1 = add_months(corte, -1)
+    inicio = afc[(afc["tipo_evento"] == "INICIO") & (afc["periodo_recepcion"] <= corte)
+                & (afc["periodo"] <= corte_menos_1)].copy()
+    if inicio.empty:
+        return pd.DataFrame(columns=["afiliado_id", "empleador_id", "tipo_contrato_vigente"])
+    inicio["_d"] = corte_idx - periodo_to_idx(inicio["periodo"].to_numpy())
+    ult = (inicio.sort_values("_d").groupby(["afiliado_id", "empleador_id"]).first()
+           .rename(columns={"tipo_contrato": "tipo_contrato_vigente"}))
+    return ult[["tipo_contrato_vigente"]].reset_index()
+
+
+def _estacionalidad_rubro(afc: pd.DataFrame, empleadores: pd.DataFrame, corte: int) -> dict[str, float]:
+    """Indice de estacionalidad: fraccion de los terminos historicos de cada rubro
+    (conocidos hasta `corte`) que ocurren, en promedio, en los meses calendario de la
+    VENTANA DE TARGET `corte+1..corte+6` (no en el mes del corte mismo: menor #13, ronda 1
+    — el riesgo estacional relevante es el de los meses que se estan prediciendo, y una
+    misma fila alimenta tanto el horizonte de 3 como el de 6 meses). 1/12 (uniforme) si no
+    hay historia para un rubro."""
     afc_k = afc[(afc["periodo_recepcion"] <= corte) & (afc["periodo"] <= add_months(corte, -1))
                & (afc["tipo_evento"] == "TERMINO")]
+    meses_objetivo = [add_months(corte, h) % 100 for h in range(1, 7)]
     if afc_k.empty:
-        return {}
+        return {r: 1 / 12 for r in empleadores["rubro"].unique()}
     conteo = afc_k.merge(empleadores[["empleador_id", "rubro"]], on="empleador_id", how="left")
     conteo["mes"] = conteo["periodo"] % 100
     n_rubro_mes = conteo.groupby(["rubro", "mes"]).size()
     n_rubro = conteo.groupby("rubro").size()
-    idx = (n_rubro_mes / n_rubro).unstack("mes")
-    return idx.get(mes_corte, pd.Series(dtype=float)).reindex(empleadores["rubro"].unique()).fillna(1 / 12).to_dict()
+    idx = (n_rubro_mes / n_rubro).unstack("mes").reindex(columns=range(1, 13))
+    promedio = idx[meses_objetivo].mean(axis=1)
+    return promedio.reindex(empleadores["rubro"].unique()).fillna(1 / 12).to_dict()
+
+
+# Tipos de afiliado que se comportan como una relacion de dependencia (RIM mensual movida
+# por empleo/desempleo real, sujeta a AFC): ambos entran al Modelo A (cese). INDEPENDIENTE
+# y VOLUNTARIO quedan fuera de los dos modelos (ver `_poblaciones` y README §8, bloqueante
+# #2 de la revision de ronda 1): en este universo su RIM es esencialmente aleatoria mes a
+# mes (voluntario) o constante dentro del anio calendario y se redibuja cada enero
+# (independiente, `synthetic._simular_particion`), asi que "cesar"/"reingresar" es, para
+# ellos, un fenomeno distinto (un sorteo anual o mensual, no una perdida de empleo) que un
+# baseline ingenuo por rubro x mes replica mejor que cualquier feature de historia laboral.
+TIPOS_DEPENDENCIA = ["DEPENDIENTE", "PENSIONADO_ACTIVO"]
 
 
 def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> pd.DataFrame:
@@ -277,11 +384,14 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     macro = tablas["macro"]
     corte = periodo_corte
     activos = afiliados[afiliados["periodo_afiliacion"] <= corte].copy()
+    # edad_inicio es la edad al primer periodo simulado (synth_base.generar_afiliados_pandas,
+    # igual que en rim_nowcasting.features): se proyecta al corte contando meses desde ahi.
+    periodo_inicio = int(macro["periodo"].min())
 
-    f_rim = _features_historia_rim(tablas["cotizaciones_conocidas"], activos, corte)
+    f_rim = _features_historia_rim(tablas["cotizaciones_conocidas"], activos, corte, periodo_inicio)
     f_emp = _features_empleador(tablas["cotizaciones_conocidas"], empleadores, corte)
-    f_ev = _features_eventos(tablas["afc_eventos"], tablas["licencias"], tablas["prestaciones_cesantia"],
-                             activos, corte)
+    f_ev = _features_eventos(tablas["afc_eventos"], tablas["licencias"], activos, corte)
+    f_tc = _tipo_contrato_por_relacion(tablas["afc_eventos"], corte)
 
     dim_emp = empleadores[["empleador_id", "rubro", "tamano_empleador", "region_empleador"]] \
         .rename(columns={"empleador_id": "empleador_principal"})
@@ -289,7 +399,11 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     df = (activos.merge(f_rim, on="afiliado_id", how="left")
           .merge(f_ev, on="afiliado_id", how="left")
           .merge(f_emp, on="empleador_principal", how="left")
-          .merge(dim_emp, on="empleador_principal", how="left"))
+          .merge(dim_emp, on="empleador_principal", how="left")
+          # tipo de contrato atado a la relacion VIGENTE (afiliado + su empleador de
+          # referencia), no a cualquier inicio pasado del afiliado (menor #8, ronda 1)
+          .merge(f_tc.rename(columns={"empleador_id": "empleador_principal"}),
+                 on=["afiliado_id", "empleador_principal"], how="left"))
 
     mes_corte = corte % 100
     m_corte = macro.set_index("periodo").loc[corte]
@@ -298,21 +412,18 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
                        (9, "es_sept"), (12, "es_dic")):
         df[nombre] = int(mes_corte == mes)
     df["desempleo_corte"] = float(m_corte["desempleo"])
-    est = _estacionalidad_rubro(tablas["afc_eventos"], empleadores, corte, mes_corte)
+    est = _estacionalidad_rubro(tablas["afc_eventos"], empleadores, corte)
     df["estacionalidad_rubro"] = df["rubro"].map(est).fillna(1 / 12)
 
-    # edad_inicio es la edad al primer periodo simulado (synth_base.generar_afiliados_pandas,
-    # igual que en rim_nowcasting.features): se proyecta al corte contando meses desde ahi.
-    periodo_inicio = int(macro["periodo"].min())
     df["edad"] = df["edad_inicio"] + (periodo_to_idx(corte) - periodo_to_idx(periodo_inicio)) // 12
     df["meses_hasta_pension"] = (np.where(df["sexo"] == "F", 60, 65) - df["edad"]) * 12
     df["meses_desde_afiliacion"] = periodo_to_idx(corte) - periodo_to_idx(df["periodo_afiliacion"])
 
     # tipo de contrato de la relacion vigente: si no hay empleador de referencia, "SIN_EMPLEADOR";
-    # si lo hay pero la relacion empezo antes del inicio de la historia disponible (sin aviso
-    # AFC de inicio conocido), "SIN_DATO_AFC" (mismo criterio que rim_nowcasting).
+    # si lo hay pero no hay un aviso AFC de INICIO conocido para ese empleador especifico
+    # (la relacion empezo antes del inicio de la historia disponible), "SIN_DATO_AFC".
     df["tipo_contrato"] = np.where(df["empleador_principal"].isna(), "SIN_EMPLEADOR",
-                                   df["tipo_contrato_afc"].fillna("SIN_DATO_AFC"))
+                                   df["tipo_contrato_vigente"].fillna("SIN_DATO_AFC"))
     df["rubro"] = df["rubro"].fillna("SIN_EMPLEADOR")
     df["tamano_empleador"] = df["tamano_empleador"].fillna("SIN_EMPLEADOR")
 
@@ -322,9 +433,10 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
                      "racha_cotiza", "racha_cero", "n_cambios_12", "meses_con_empleador",
                      "n_empleadores_12", "sueldo_fijo", "cv_6", "ratio_l1_l2", "ratio_l1_media12",
                      "tendencia_3_12", "emp_n_trabajadores", "emp_crecimiento_12", "emp_tasa_salida_12",
+                     "emp_sin_planilla_conocida",
                      "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
                      "dias_licencia_l1", "dias_licencia_l2", "licencia_en_curso",
-                     "cesantia_giro_actual", "cesantia_n_giros_recibidos", "cesantia_en_curso"])
+                     "cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual"])
     df[rellenos_0] = df[rellenos_0].fillna(0.0)
     df["meses_desde_ult_cotiza"] = df["meses_desde_ult_cotiza"].fillna(99).clip(upper=99)
     df["meses_desde_cambio"] = df["meses_desde_cambio"].fillna(99).clip(upper=99)
@@ -338,9 +450,17 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
         df[c] = df[c].astype(float)
 
     # -------- poblaciones de los dos modelos (definicion 100% as-of, sin mirar el futuro) --
-    df["pop_cese"] = (df["rim_l1"] > 0).astype(int)
+    # Modelo A (cese): cotizando (RIM conocida > 0) en corte-2, solo dependientes/pensionados
+    # activos (bloqueante #2, ronda 1: independientes y voluntarios excluidos, ver README §8).
+    df["pop_cese"] = ((df["rim_l1"] > 0) & df["tipo_afiliado"].isin(TIPOS_DEPENDENCIA)).astype(int)
+    # Modelo B (reingreso): dependientes sin RIM conocida en corte-2 NI en corte-3 (mayor #4,
+    # ronda 1: exigir solo corte-2 == 0 dejaba adentro ~16,6% de cotizantes reales cuya
+    # planilla de corte-2 aun no habia llegado -planillas pendientes con target casi
+    # determinista- porque una recepcion tardia de un solo mes es comun; que corte-2 Y
+    # corte-3 esten en 0 a la vez es mucho mas raro para alguien que sigue activo, y exige
+    # ademas al menos una cotizacion en los 24 meses previos).
     df["pop_reingreso"] = ((df["tipo_afiliado"] == "DEPENDIENTE") & (df["rim_l1"] == 0)
-                           & (df["n_cotiza_24"] > 0)).astype(int)
+                           & (df["rim_l2"] == 0) & (df["n_cotiza_24"] > 0)).astype(int)
 
     cols = (["afiliado_id", "periodo_corte", "corte_rim", "pop_cese", "pop_reingreso",
              "tipo_afiliado", "sexo", "nivel_educacional", "region", "rubro", "tamano_empleador",

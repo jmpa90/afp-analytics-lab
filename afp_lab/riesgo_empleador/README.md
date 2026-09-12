@@ -224,7 +224,14 @@ operativo del empleador (cuándo alcanzó a pagar), mientras la DNP es un estado
 persistencia. `y_dnp_3m` pierde AUC porque diluye la señal de "este mes" en tres meses, pero su
 average precision es la más alta: para una gestión trimestral es el target correcto.
 
-### 6.3 Métrica de negocio: masa imponible en riesgo capturada
+#
+> **Reserva del gerente (revisión ronda 2)**: el criterio "captura de masa en riesgo ≥ 50 % al 10 %" se
+> cumple con 12 cortes (54,5 %) y no con 24 (44,5 %); el error estándar es ±6,4 pp. Se aprueba como
+> "45–55 %, mejor que la regla en ambos casos", no como cumplimiento sólido. La forma de reducir la varianza
+> es ampliar el universo de empleadores (hoy 500; propuesta a `common/`: `afiliados_por_empleador`
+> configurable), no cambiar el modelo.
+
+## 6.3 Métrica de negocio: masa imponible en riesgo capturada
 
 | Score de gestión | 10 % gestionado | 20 % gestionado |
 |---|---|---|

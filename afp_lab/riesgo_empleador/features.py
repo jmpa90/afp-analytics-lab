@@ -8,7 +8,7 @@ su lista). Lo conocido en ese mes es:
 | `planillas` | solo las **recibidas**: `0 < periodo_recepcion <= corte`. La planilla del periodo `corte-1` llega en `corte` si es puntual; una que todavia no llego es informacion en si misma ("faltante") |
 | `periodo_regularizacion` de una DNP | solo si es `<= corte` (si no, la deuda sigue viva) |
 | `boletin_infractores` / `boletin_concursal` | publicaciones con periodo `<= corte` |
-| `panel_mensual` | hasta `corte-2` (desfase de la cotizacion), igual que el proyecto 03 |
+| `panel_mensual` | hasta `corte-2`; solo se usa en tests de coherencia, no alimenta features |
 | `shocks_empleador` | **nunca**: es latente |
 
 El target es la planilla del periodo `corte`, que se declara en `corte+1`: en el momento de la
@@ -262,7 +262,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         activa &= ok
 
     # boletines (publicados <= corte)
-    en_boletin = d.boletin[:, j - 1] if j > 0 else np.zeros(n_e, dtype=bool)
+    en_boletin = d.boletin[:, j]          # publicado <= corte, igual que concursal_*
     meses_boletin_12 = d.boletin[:, vent].sum(axis=1).astype(float)
     liq = d.concursal_liq[:, j]
     reorg = d.concursal_reorg[:, j]

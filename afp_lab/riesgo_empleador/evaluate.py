@@ -163,7 +163,11 @@ def masa_por_segmento(df: pd.DataFrame, pred: pd.DataFrame, segmento: str) -> pd
     """Masa en riesgo real vs esperada por segmento (regresion de `common.metrics`)."""
     d = df[[segmento, "masa_en_riesgo"]].copy()
     d["pred"] = pred["masa_en_riesgo_esperada"].to_numpy()
-    return tabla_metricas_por_segmento(d, segmento, metricas_regresion, "masa_en_riesgo", "pred")
+    out = tabla_metricas_por_segmento(d, segmento, metricas_regresion, "masa_en_riesgo", "pred")
+    positivos = d.groupby(segmento, observed=True)["masa_en_riesgo"].apply(lambda x: int((x > 0).sum()))
+    out["n_positivos"] = out[segmento].map(positivos).fillna(0).astype(int)
+    out["nota"] = np.where(out["n_positivos"] == 0, "sin casos de DNP: WAPE y sesgo no definidos", "")
+    return out
 
 
 # --------------------------------------------------------------------------- aceptacion

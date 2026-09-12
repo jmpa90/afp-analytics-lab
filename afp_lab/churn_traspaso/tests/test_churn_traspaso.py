@@ -158,14 +158,19 @@ def test_escenarios_licitacion_monotonos(tablas_cuprum):
     """Encargo B2: la campana retiene, priorizar por saldo x prob gana al azar, y hay sensibilidad."""
     lic = tablas_cuprum["licitacion_stock"]
     esc = LIC.escenarios_licitacion(lic)
-    assert len(esc) == 9   # 3 supuestos de salida x (sin campana + 2 prioridades)
+    # 3 supuestos de salida x (sin campana + 5 capacidades x 2 prioridades)
+    assert len(esc) == 3 * (1 + 5 * 2)
     sin = esc[esc["capacidad_contacto"] == 0].set_index("p_salida_pasiva")
     # mas salida pasiva -> mas saldo en riesgo (monotono)
     assert sin["saldo_en_riesgo_sin_campana_mm"].is_monotonic_increasing
     for p in (0.55, 0.65, 0.75):
-        e = esc[(esc["p_salida_pasiva"] == p) & (esc["capacidad_contacto"] > 0)].set_index("prioridad")
+        e = esc[(esc["p_salida_pasiva"] == p) & (esc["capacidad_contacto"] == 0.30)].set_index("prioridad")
         assert e.loc["saldo_x_prob", "saldo_retenido_mm"] > e.loc["aleatorio", "saldo_retenido_mm"]
         assert e.loc["saldo_x_prob", "saldo_en_riesgo_con_campana_mm"] < sin.loc[p, "saldo_en_riesgo_sin_campana_mm"]
+    # rendimiento marginal decreciente: saldo retenido por contacto cae al ampliar la capacidad
+    e = esc[(esc["p_salida_pasiva"] == 0.65) & (esc["prioridad"] == "saldo_x_prob")].sort_values("capacidad_contacto")
+    rend = (e["saldo_retenido_mm"] / e["capacidad_contacto"]).to_numpy()
+    assert rend[0] > rend[-1]
     # y la campana nunca "retiene" negativo
     assert (esc["saldo_retenido_mm"] >= -1e-9).all()
 

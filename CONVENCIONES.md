@@ -67,7 +67,10 @@ ni nombres, ni datos de clientes.
 
 * Python 3.10+, funciones puras con docstrings en español, sin notebooks en el repo.
 * Sin `print` de debugging; el `run.py` imprime tablas de resultados y las guarda en `salidas/`.
-* No ejecutar comandos git desde el código ni desde los agentes: el gerente integra.
+* No ejecutar comandos git desde el código ni desde los agentes: el gerente integra. Y el gerente no
+  ejecuta `checkout`/`reset`/`stash` sobre el árbol compartido mientras haya trabajo sin confirmar de un
+  data scientist (en la ronda 1 un `git checkout -- .` revirtió ediciones en curso); desde la ronda 2 cada
+  DS trabaja en su propio worktree y el gerente fusiona.
 * No tocar carpetas de otros proyectos ni `common/` sin acordarlo en el README ("Propuestas para common").
 
 ## 6. Plantilla de README de proyecto

@@ -36,3 +36,18 @@
 - Menores 8, 10, 11, 12: `add_months` en el test del castigo; docstring de `split_temporal`; nota de
   redundancia de `meses_en_otras_afp`; `reportes/hiperparametros.csv` y el experimento de ventana.
 - Menor 13 (common, corregido por el gerente): lift del decil 1 con empates por valor esperado.
+
+## Cierre (ronda 3 de correcciones)
+- Verificado: 27 tests en 15 s; corrida de 20.000 en 30 s; AUC 0,720 (0,707–0,747 en 5 semillas), lift
+  3,50 (3,00–3,66), captura al 10 % 35,0 % (30,0–36,6 %), razón vs mejor regla 1,80 (1,30–1,85),
+  23/23 segmentos grandes ganados; concordancia proxy/latente del switcher 0,762; latentes excluidos por
+  prefijo; saldo en riesgo declarado no entregado.
+- **Decisión sobre la razón ≥ 1,5**: falla en 1 de 5 semillas (1,30) porque la regla del brief marca
+  entre 14 % y 51 % de la cartera según la semilla (denominador inestable). Se acepta la propuesta del DS:
+  el criterio absoluto (captura ≥ 30 %) se exige por semilla; la razón ≥ 1,5 se mide sobre la mediana de
+  semillas (1,77). Queda registrado en README §8 del proyecto.
+- **Incidente de proceso**: a las 16:56 el gerente ejecutó `git checkout -- .` para limpiar el árbol
+  antes de fusionar `origin/main` y revirtió las ediciones no confirmadas de DS-1, que las re-aplicó y
+  verificó byte a byte. Regla nueva en CONVENCIONES §5: mientras haya data scientists trabajando, el
+  gerente no ejecuta checkout/reset/stash sobre el árbol compartido; en la ronda 2 cada DS trabaja en su
+  propio worktree.

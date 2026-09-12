@@ -37,15 +37,20 @@ PERFILES = {
         "edad_min": 18, "edad_rango": 47, "edad_sesgo": 0.0,
         "p_independiente": 0.08, "p_voluntario": 0.02,
         "p_multi_empleador": 0.05, "p_jornada_parcial": 0.12, "p_masa_imm": 0.15,
+        "p_activo_inicial": 0.78, "factor_contratacion": 1.0,
     },
+    # Calibrado con la Ficha Estadistica Previsional N 165 (SP, ago 2026): ingreso imponible promedio
+    # de cotizantes Cuprum $2.331.030 vs sistema $1.346.859 (1,73x); densidad Cuprum ~67 % (memoria
+    # 2025) vs 53,5 % del sistema; 4,5 % de afiliados y 6,3 % de cotizantes del sistema.
     "cuprum": {
-        "desplaz_productividad": 0.52,
+        "desplaz_productividad": 0.40,
         "p_educacion": [0.03, 0.27, 0.25, 0.45],
         "p_region_rm": 0.62, "p_region_v": 0.08, "p_region_viii": 0.05,
         "pesos_rubro": [0.02, 0.10, 0.10, 0.06, 0.08, 0.05, 0.02, 0.15, 0.12, 0.10, 0.07, 0.12, 0.01],
-        "edad_min": 22, "edad_rango": 43, "edad_sesgo": 0.04,
+        "edad_min": 21, "edad_rango": 43, "edad_sesgo": 0.0,
         "p_independiente": 0.10, "p_voluntario": 0.02,
         "p_multi_empleador": 0.07, "p_jornada_parcial": 0.06, "p_masa_imm": 0.03,
+        "p_activo_inicial": 0.68, "factor_contratacion": 0.60,
     },
 }
 
@@ -101,7 +106,10 @@ def generar_universo(n_afiliados: int = 5000, periodo_inicio: int = 202201, peri
     afiliados = generar_afiliados_pandas(n_afiliados, periodo_inicio, periodo_fin, seed, perfil=perfil)
     macro = macro_pandas(periodo_inicio, periodo_fin)
     periodos = rango_periodos(periodo_inicio, periodo_fin)
-    simular = _simular_particion(empleadores, macro, periodos, seed)
+    pf = PERFILES[perfil]
+    simular = _simular_particion(empleadores, macro, periodos, seed,
+                                 p_activo_inicial=pf["p_activo_inicial"],
+                                 factor_contratacion=pf["factor_contratacion"])
     lotes = [afiliados.iloc[i:i + lote] for i in range(0, len(afiliados), lote)]
     panel = pd.concat(list(simular(iter(lotes))), ignore_index=True)
     # los parametros latentes de pago del empleador no son observables: se separan

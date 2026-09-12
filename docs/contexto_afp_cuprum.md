@@ -6,6 +6,30 @@ abrir directamente desde la sandbox) y lo que conviene descargar de la Superinte
 para calibrar con cifras exactas. Las cifras marcadas *(verificar)* vienen de memoria o de fuentes
 secundarias y deben contrastarse con la SP.
 
+## 0. Cifras oficiales (Ficha Estadística Previsional N° 165, SP, agosto 2026; `data/sp/`)
+
+| AFP | Activos (jul-26) | Afiliados (jun-26) | Cotizantes (jun-26) | Var. neta afiliados 12 m | Traspasos netos jun-26 | Ingreso imponible promedio | Comisión | Rent. 36 m fondo C |
+|---|---|---|---|---|---|---|---|---|
+| Capital | 18,6 % | 11,5 % | 12,7 % | −34.308 | −2.474 | $1.535.583 | 1,44 % | 5,98 % |
+| **Cuprum** | **17,3 %** | **4,5 %** | **6,3 %** | **−10.995** | **+4.128** | **$2.331.030** | **1,44 %** | **5,99 %** |
+| Habitat | 26,3 % | 13,9 % | 15,4 % | −49.343 | +614 | $1.657.234 | 1,27 % | 5,75 % |
+| Modelo | 8,8 % | 22,8 % | 21,6 % | −23.632 | −4.809 | $1.198.557 | 0,58 % | 5,70 % |
+| PlanVital | 6,9 % | 13,0 % | 12,3 % | −11.495 | +4.001 | $1.218.885 | 1,16 % | 5,95 % |
+| Provida | 19,8 % | 20,4 % | 19,2 % | −113.412 | −216 | $1.145.141 | 1,45 % | 5,36 % |
+| Uno | 2,2 % | 13,8 % | 12,5 % | +426.709 | −1.244 | $970.398 | 0,46 % | 5,94 % |
+| Sistema | 100 % | 12.201.632 | 5.775.070 | +183.524 | 56.974 cuentas traspasadas | $1.346.859 | 1,07 % pond. | 5,76 % |
+
+Lo que cambia respecto de las fuentes secundarias: Cuprum tiene ~549 mil afiliados (4,5 %) y ~364 mil
+cotizantes (6,3 %): su densidad de cotizantes sobre afiliados es la más alta del sistema (66 % vs 47 %).
+Su ingreso imponible promedio es **1,73 veces** el del sistema y 1,4 veces el de Habitat. En junio de
+2026 fue la AFP con **más traspasos netos positivos** (+4.128) pese a la comisión de 1,44 %; y a 36 meses
+**lidera la rentabilidad en los cinco fondos** (A 11,26 %, B 9,42 %, C 5,99 %, D 3,06 %, E 1,36 %).
+Sistema: densidad de cotizaciones 53,5 % (mujeres 49,4 %, hombres 57,1 %); 99 % de los cotizantes son
+dependientes; 47,2 % de las cuentas en la estrategia por defecto; 1,84 millones de cuentas APV en AFP
+con saldo $3,97 billones (41,9 % del APV total), depósito promedio $130.716 y 76,7 % de los depósitos
+en régimen A; nuevos afiliados 387 mil al año, 27 años, 46 % mujeres, 12,32 UF de remuneración; 655 mil
+independientes cotizaron por Ley 21.133 en el AT 2025, 51 % de ellos también como dependientes.
+
 ## 1. Quiénes somos
 
 - Fundada el **27 de abril de 1981**, en el inicio del sistema, por iniciativa de trabajadores de Codelco
@@ -65,7 +89,8 @@ Perfil `cuprum` en `afp_lab.common.synth_base.generar_universo(perfil="cuprum")`
 
 | Dimensión | Sistema | Cuprum (objetivo) | Cómo se implementa |
 |---|---|---|---|
-| Ingreso imponible promedio | ~$1,2 M | ~$2,0 M (1,7×), más masa cerca del tope (90 UF ≈ $3,6 M) | Desplazamiento de `lat_productividad` (+0,45 en log) |
+| Ingreso imponible promedio | $1,35 M (SP jun-26) | $2,33 M (1,73×), más masa cerca del tope (90 UF ≈ $3,6 M) | Desplazamiento de `lat_productividad` (+0,40 en log); la simulación da 1,74× |
+| Densidad (afiliados que cotizan en el mes) | 47 % sistema (SP) | 66 % Cuprum | `p_activo_inicial` 0,68 y `factor_contratacion` 0,60 (la simulación da ~71 %; el perfil `sistema` queda en ~79 %, optimista frente al 47 % real, para no alterar la ronda 1) |
 | Afiliados en el mínimo | ~15 % | ~3 % | `lat_masa_imm` |
 | Educación | 20 % universitaria | 45 % universitaria, 25 % técnica | Mezcla de `nivel_educacional` |
 | Rubros | Mezcla nacional | Sobre-representados finanzas, minería, salud, servicios profesionales, administración pública; sub-representados agricultura, casa particular, comercio | Pesos de `lat_rubro_pref` |

@@ -198,8 +198,13 @@ VERDAD_SCHEMA = T.StructType([
 ])
 
 
-def _simular_particion(emp: pd.DataFrame, macro: pd.DataFrame, periodos: list[int], seed: int):
-    """Devuelve la funcion que simula un lote de afiliados (uso en mapInPandas)."""
+def _simular_particion(emp: pd.DataFrame, macro: pd.DataFrame, periodos: list[int], seed: int,
+                       p_activo_inicial: float = 0.78, factor_contratacion: float = 1.0):
+    """Devuelve la funcion que simula un lote de afiliados (uso en mapInPandas).
+
+    `p_activo_inicial`: fraccion de dependientes empleados al inicio; `factor_contratacion` escala la
+    probabilidad mensual de contratacion (permite calibrar la densidad de cotizacion por perfil).
+    """
     # arrays de empleadores
     emp = emp.sort_values("empleador_id").reset_index(drop=True)
     e_id = emp["empleador_id"].to_numpy()
@@ -288,7 +293,7 @@ def _simular_particion(emp: pd.DataFrame, macro: pd.DataFrame, periodos: list[in
             emp2 = np.full(n, -1, dtype=np.int64)
             sueldo2 = np.zeros(n)
             renta_indep_anual = np.zeros(n)
-            activo_inicial = dependiente & (rng.random(n) < 0.78)
+            activo_inicial = dependiente & (rng.random(n) < p_activo_inicial)
             k0 = activo_inicial.sum()
             if k0:
                 emp[activo_inicial] = elegir_empleador(rng, rubro_pref[activo_inicial], k0)
@@ -325,7 +330,7 @@ def _simular_particion(emp: pd.DataFrame, macro: pd.DataFrame, periodos: list[in
 
                 # --- contrataciones (afiliados dependientes cesantes, no retirados)
                 cesante = dependiente & ~empleado & ~retirado & afiliado_ya
-                p_hire_base = 0.16 * (1 - 4 * (des - 0.08))
+                p_hire_base = 0.16 * factor_contratacion * (1 - 4 * (des - 0.08))
                 p_hire = p_hire_base * SEASON_HIRE[rubro_pref, mes] * np.where(edad > 55, 0.5, 1.0)
                 contrata = cesante & ((rng.random(n) < p_hire) | (recien_afiliado & (rng.random(n) < 0.9)))
                 kc = contrata.sum()

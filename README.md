@@ -28,7 +28,7 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | 03 | `propension_apv` | ¿Quién abrirá o aumentará ahorro previsional voluntario y cuánto? | Clasificación + monto | Cerrado ronda 2 (Cuprum) | pandas + LightGBM |
 | 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 2 (Cuprum + códigos de planilla) | pandas + LightGBM |
 | 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Cerrado ronda 2 (aprobado con reserva) | pandas + LightGBM |
-| 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Cerrado ronda 2 (6 segmentos) | pandas + scikit-learn |
+| 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Cerrado ronda 2 (4 segmentos) | pandas + scikit-learn |
 | — | `common/planilla` | Planilla Previred sintética con códigos oficiales (modelo de datos regulatorio) | Datos | Cerrado ronda 2 | pandas |
 | 07 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
 | 08 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
@@ -63,7 +63,7 @@ en `docs/revisiones/ronda_2/`.
 | 03 APV | AUC 0,821, captura al 10 % 55 % vs 33 % por renta | Cartera de alta renta: la renta discrimina menos y la ventaja del modelo crece (+22 pp) |
 | 04 Cese | AUC cese 3 m 0,885, reingreso 0,641 | Más estabilidad y jubilación real; los códigos de la planilla no agregan sobre los eventos AFC |
 | 05 Empleador (nuevo) | AUC DNP 0,82; masa en riesgo capturada al 10 % 45–55 % | Aprobado con reserva: el agregado mensual es intrínsecamente volátil con 500 empleadores |
-| 06 Segmentación (nuevo) | 6 segmentos, silueta 0,21, ARI 0,99, clasificador 0,98 | Tasas de traspaso, APV y cese difieren hasta 17× entre segmentos; tabla segmento → acción |
+| 06 Segmentación (nuevo) | 4 segmentos (k-means 5 + fusión), silueta 0,24, ARI re-muestreo 0,99, ARI temporal 0,47, clasificador 0,98 | Universo Cuprum compartido con 02/03; tasas de cese, traspaso y APV difieren 3,4×, 2,1× y 31× entre segmentos; tabla segmento → acción |
 | Planilla regulatoria | `common/planilla.py` con códigos Tabla N° 7, recepción por declaración, DNP por empleador con persistencia | Base para que los modelos usen los mismos códigos que la planilla real |
 
 ## Persona: somos AFP Cuprum

@@ -6,12 +6,13 @@ asesoría y proyectar el flujo de ahorro voluntario.
 
 ```bash
 python -m afp_lab.propension_apv.run --n-afiliados 20000      # corrida de referencia
-python -m pytest afp_lab/propension_apv/tests -q              # 25 tests, ~16 s
+python -m pytest afp_lab/propension_apv/tests -q              # 26 tests, ~9 s
 ```
 
-> **Ronda 2.** Esta versión corrige los cuatro bloqueantes y los cinco mayores de la revisión de la
-> ronda 1 (`docs/revisiones/ronda_1/propension_apv.md`). Los cambios de protocolo y los números
-> antes/después están en **§11**.
+> **Ronda 2** (aprobada con correcciones menores, ya aplicadas). Corrige los cuatro bloqueantes y
+> los cinco mayores de `docs/revisiones/ronda_1/propension_apv.md` y los diez menores de
+> `docs/revisiones/ronda_2/propension_apv.md`. Los cambios y los números antes/después están en
+> **§11**.
 
 ---
 
@@ -166,7 +167,7 @@ de aporte de 4,9 % (entrenamiento) a 5,0 % (test).
 
 ---
 
-## 4. Features (64 columnas) y su regla as-of
+## 4. Features (62 columnas) y su regla as-of
 
 Regla única: **cada fila usa sólo información con `periodo ≤` el desfase de su fuente** (tabla de
 §3). `features.py` convierte las tablas largas en matrices densas `afiliado × periodo` una sola vez
@@ -178,10 +179,10 @@ que un umbral nominal aprendido en 2021 no significaría lo mismo en 2026.
 
 | Familia | Features | Regla as-of |
 |---|---|---|
-| **Renta y estabilidad** | `rim_corte_imm`, `rim_ref_imm`, `rim_media_3/12_imm`, `rim_cv_12`, `rim_tendencia_3_12`, `cerca_minimo`, `densidad_6/12`, `meses_desde_ult_cotizacion` + `sin_cotizacion_24m`, `meses_con_empleador`, `n_empleadores_12`, `meses_cesante_12` | ventanas que terminan en `corte-2` |
+| **Renta y estabilidad** | `rim_corte_imm`, `rim_ref_imm`, `rim_media_3/12_imm`, `rim_cv_12`, `rim_tendencia_3_12`, `cerca_minimo`, `densidad_6/12`, `meses_desde_ult_cotizacion`, `meses_con_empleador`, `n_empleadores_12`, `meses_cesante_12` | ventanas que terminan en `corte-2` |
 | **Licencias** | `dias_licencia_12`, `licencia_larga_reciente` (2 meses) | ventanas que terminan en `corte-1` |
 | **Tributario** | `tramo_igc_12m`, `renta_imponible_12m_imm` | renta imponible rodante de 12 meses hasta `corte-2` |
-| | `tramo_igc_declarado` + `sin_tramo_declarado` | tabla anual con la regla de la Operación Renta (hay test) |
+| | `tramo_igc_declarado` | tabla anual con la regla de la Operación Renta (hay test) |
 | **Calendario** | `mes_corte`, `es_marzo`, `meses_a_marzo`, `marzo_en_ventana`, `diciembre_en_ventana` | función determinista del corte |
 | **Cuenta (obligatoria)** | `saldo_obligatorio_imm`, `saldo_obl_sobre_rim` | saldo de `corte-2` (se arma con cotizaciones) |
 | **Cuenta (voluntaria)** | `saldo_voluntario_imm`, `saldo_vol_sobre_rim`, `meses_desde_ult_aporte` + `nunca_aporto_36m`, `n_aportes_12m/24m`, `monto_aportes_24m_imm`, `tuvo_aporte_mensual_24m` | hasta `corte` (sistema propio). Por la exclusión de población, `meses_desde_ult_aporte ≥ 7` |
@@ -194,9 +195,12 @@ para des-normalizar y los reportes para segmentar por tramo de renta) pero está
 conjunto de features; hay test.
 
 Detalles de la ronda 2: las variables "meses desde …" llevan un **flag separado** para no confundir
-"hace mucho" con "nunca" (antes se codificaba 99 dentro de una variable continua);
-`n_empleadores_12` cuenta empleadores **distintos**, no transiciones; `tasa_apertura_6m` vale 0 con
-`tuvo_contacto_6m = 0` cuando no hubo contacto.
+"hace mucho" con "nunca" (antes se codificaba 99 dentro de una variable continua), pero **sólo se
+publican los flags que varían**: `sin_cotizacion_24m` y `sin_tramo_declarado` eran constantes por
+construcción (la población exige haber cotizado en 12 meses y la tabla tributaria cubre a todos los
+afiliados) y se eliminaron; quedan `nunca_aporto_36m` (86 % / 85 % en train / test) y
+`sin_contacto_24m` (31 % / 29 %). `n_empleadores_12` cuenta empleadores **distintos**, no
+transiciones; `tasa_apertura_6m` vale 0 con `tuvo_contacto_6m = 0` cuando no hubo contacto.
 
 ### Split temporal: gap entre **todas** las particiones y orígenes móviles
 
@@ -212,7 +216,28 @@ CONVENCIONES §3 exige el gap de `h = 6` meses entre cada par de particiones, no
 | 202601 | 202101–202302 (26) | 202402–202501 (12) | 202601–202603 | 414.241 | 4,92 % / 4,64 % / 5,21 % |
 
 Total de test: **192.557 filas, 12 cortes, 9.612 aportantes**. La ventana de entrenamiento es
-expansiva y ningún mes de target de train o valid toca el bloque de test de su origen.
+expansiva y **ningún mes de target de train o valid toca el bloque de test de su propio origen**,
+que es la condición que importa: cada predicción la produce un modelo que no vio ninguno de los
+meses de target de esa fila.
+
+**Limitación declarada (revisión ronda 2, m-2).** Al *agrupar* los 12 cortes para reportar en
+conjunto, el `valid` del último origen sí toca meses de target de un bloque anterior, que predijo
+otro modelo. Está cuantificado en `reportes/solape_valid_pool_test.csv`:
+
+| Origen | meses de target del `valid` | solape con **su** test | solape con el **pool** de test |
+|---|---|---|---|
+| 202504 | 202306–202410 | 0 | 0 |
+| 202507 | 202309–202501 | 0 | 0 |
+| 202510 | 202312–202504 | 0 | 0 |
+| **202601** | 202403–202507 | **0** | **3** (202505, 202506, 202507) |
+
+Esos 3 meses concentran el **3,2 % del monto del target del pool**
+(`reportes/solape_monto_valid_pool_test.csv`). Exigir el gap del `valid` de cada origen contra
+`min(pool de test)` obligaría a `corte_max(valid) ≤ 202404` en **todos** los orígenes, con lo que
+los cuatro colapsarían al mismo modelo y se perdería el reentrenamiento móvil; se prefirió
+mantener el diseño y declarar el solape. Hay un test (`test_solape_conocido_entre_valid_y_el_pool_de_test`)
+que fija el hecho: cero solape con el propio test, y a lo más 3 meses con el pool y sólo en el
+último origen.
 
 ---
 
@@ -233,12 +258,20 @@ expansiva y ningún mes de target de train o valid toca el bloque de test de su 
 |---|---|---|
 | número de árboles | early stopping (paciencia 100) contra el `valid` del origen, con tope 3.000 / 2.000 | **93 / 120 / 181 / 155** árboles (clasificador) y 65 / 85 / 67 / 77 (regresor): el tope nunca se toca |
 | factor de *smearing* | `Σ monto / Σ (rim_ref · exp(ŷ))` **en validación** | 1,323 / 1,292 / 1,282 / 1,271 |
-| ¿calibrar? | isotónica evaluada fuera de muestra con 3 folds **dentro de validación**; se aplica sólo si baja el Brier ≥ 1 % | mejoras de 0,0002 a 0,0007 (y −0,00002 en un origen) → **no se calibra en ningún origen** |
+| ¿calibrar? | isotónica evaluada fuera de muestra con 3 folds **dentro de validación**. Se aplica sólo si la mejora del Brier cumple **las dos** condiciones: (a) *significativa* — la mejora media entre folds supera 2 errores estándar de su dispersión entre folds; (b) *material* — es al menos 1 % del Brier crudo | mejora media 7,0e-6 / −1,0e-6 / 2,6e-5 / 2,3e-6 con error estándar 9,0e-6 / 2,0e-5 / 2,1e-5 / 2,2e-5 → ninguna llega a 2 σ (y ninguna al 1 %): **no se calibra en ningún origen** |
+
+El umbral del 1 % ya no es el criterio principal: la decisión se funda en la **dispersión entre
+folds**, de modo que una mejora del orden del ruido de fold a fold no deforma la probabilidad
+(revisión ronda 2, m-8). El mecanismo funciona en las dos direcciones: en universos chicos, donde
+el clasificador queda peor calibrado, sí hay orígenes que pasan las dos condiciones y se calibran.
 
 **Baselines obligatorios**:
 
-* `tasa_base` (trivial): probabilidad constante = tasa de aporte del `train` de cada origen; monto
-  esperado constante = tasa × monto medio de los aportantes de ese `train`.
+* `tasa_base` (trivial): **una sola** constante para todo el pool de test — la tasa de aporte del
+  `train` del primer origen, que es la única conocida cuando arranca la campaña; el monto esperado
+  es esa tasa × el monto medio de los aportantes de ese mismo `train`. Usar la tasa de cada origen
+  convertía al "baseline trivial" en un escalón con AUC 0,53, que no es un baseline trivial
+  (revisión ronda 2, m-1). Con una constante única el AUC es exactamente 0,500.
 * `regla_negocio` (reglas simples, la del brief): `(renta > 2 M y empleador con APVC) o aporte en
   24 m`, con las tasas y montos empíricos de entrenamiento de cada grupo.
 * `renta`: ordenar por `rim_ref`; entra sólo en la métrica de negocio.
@@ -267,12 +300,13 @@ temporal: el modelo generaliza a afiliados que no vio.
 | Predictor | AUC | Average precision | Brier | Lift decil 1 | KS |
 |---|---|---|---|---|---|
 | **Modelo** | **0,836** | **0,297** | **0,0405** | **5,13** | **0,517** |
-| Regla de negocio | 0,709 | 0,141 | 0,0442 | 4,05 | 0,399 |
-| Tasa base | 0,530 | 0,054 | 0,0474 | 1,08 | 0,091 |
+| Regla de negocio | 0,709 | 0,141 | 0,0442 | 4,04 | 0,399 |
+| Tasa base | 0,500 | 0,050 | 0,0474 | 1,00 | 0,102 |
 
-El baseline `tasa_base` no da exactamente AUC 0,5 porque cada origen usa la tasa de **su** train:
-esa constante difiere entre bloques de test y ordena débilmente entre cortes. Es el baseline
-correcto (es lo que haría la AFP sin modelo) y su AUC de 0,53 mide justamente ese efecto.
+El baseline `tasa_base` es una constante única sobre todo el pool, así que su AUC es exactamente
+0,500 y su lift exactamente 1,00 (§5); el lift usa el tratamiento de empates por valor esperado que
+el gerente incorporó a `common/metrics.py`, que es lo que hace que una constante dé 1,00 exacto y
+que la regla binaria dé la tasa del grupo marcado.
 
 **Por corte** (`reportes/metricas_por_corte.csv`) la tasa base va de 3,3 % (abril) a 6,9 %
 (octubre) y el modelo es estable en todos:
@@ -293,9 +327,18 @@ AUC mínimo 0,798 y máximo 0,852; sesgo del monto entre −9 % y +16 % mes a me
 |---|---|---|---|---|---|
 | **Modelo** | condicional en aportantes | 373.235 | 544.823 | **0,555** | +2,2 % |
 | Regla de negocio | condicional en aportantes | 452.829 | 662.670 | 0,673 | −19,0 % |
-| Tasa base | condicional en aportantes | 462.548 | 682.124 | 0,688 | −21,5 % |
+| Tasa base | condicional en aportantes | 463.144 | 685.632 | 0,689 | −22,7 % |
 | **Modelo** | esperado en toda la población | 50.650 | 187.266 | 1,509 | **+1,0 %** |
 | Regla de negocio | esperado en toda la población | 53.791 | 203.622 | 1,602 | −19,6 % |
+| Tasa base | esperado en toda la población | 55.934 | 209.377 | 1,666 | −26,0 % |
+
+**Los dos números agregados tienen dispersión mensual y hay que leerlos con su rango** (revisión
+ronda 2, m-3 / m-4): el WAPE del monto condicional va de **0,530 a 0,627** según el corte (0,609 en
+202505 y 0,627 en 202603 quedan por encima del 0,6 del brief) y el sesgo del monto esperado va de
+**−8,8 % a +15,6 %** mes a mes. El criterio de aceptación del brief se evalúa sobre el **agregado**
+de los 12 cortes (0,555 y +1,0 %); la tabla de §9 informa el rango al lado de cada valor y
+`reportes/metricas_por_corte.csv` lo tiene corte a corte. Los dos cortes con WAPE > 0,6 son los de
+menor tasa base (202505) y el último de la ventana (202603), ambos con pocos aportantes.
 
 El WAPE > 1 de la vista *esperado en todos* es inevitable: se predice una variable con 95 % de ceros
 y cola larga. Ahí lo que importa es el sesgo, y **no basta el agregado**: la ronda 1 tenía +16,6 %
@@ -322,8 +365,12 @@ un origen fue negativa. Se usa la probabilidad cruda del clasificador.
 
 | Versión | Brier | ECE | Sesgo agregado |
 |---|---|---|---|
-| **Probabilidad usada (sin calibrar)** | **0,04047** | **0,0018** | **−0,6 %** |
-| Isotónica del último origen (sólo referencia) | 0,04055 | 0,0032 | −5,4 % |
+| **Probabilidad usada (ningún origen calibrado)** | **0,04047** | **0,0018** | **−0,6 %** |
+| Isotónica **por origen** (referencia, no se usa) | 0,04052 | 0,0033 | −6,1 % |
+
+La fila de referencia calibra cada bloque de test con la isotónica **de su propio origen** (antes
+se aplicaba la del último origen a todo el pool, que es un calibrador fuera de su bloque; revisión
+ronda 2, m-7).
 
 La curva por deciles queda dentro de ±0,5 pp en los 10 deciles, incluido el décimo (0,251 predicho
 vs 0,256 real). **Corrección del diagnóstico de la ronda 1**: allí se atribuyó la sobreestimación
@@ -353,8 +400,11 @@ infladas por memorización. Con el gap entre train y valid el problema desaparec
 |---|---|---|---|
 | DEPENDIENTE | 89,1 % | 0,832 | 0,711 |
 | INDEPENDIENTE | 8,5 % | 0,760 | 0,554 |
-| PENSIONADO_ACTIVO | 0,2 % | — (sin aportantes) | — |
-| VOLUNTARIO | 2,2 % | 0,546 | 0,606 |
+| PENSIONADO_ACTIVO | 0,2 % | sin aportantes (0 de 415) | sin aportantes |
+| VOLUNTARIO | 2,2 % | 0,546 (15 aportantes) | 0,606 |
+
+Las tablas de segmento llevan las columnas `aportantes` y `nota`, así que un segmento sin AUC dice
+por qué (`sin aportantes`) en vez de dejar la celda vacía (revisión ronda 2, m-10).
 
 Por rubro el modelo gana en los 9 rubros con ≥ 5 % de las filas (AUC 0,743–0,801). El único segmento
 donde el modelo **pierde** contra la regla es `VOLUNTARIO` (0,546 vs 0,606), con 2,2 % de las filas
@@ -428,7 +478,9 @@ Tres lecturas operativas:
   **número de APV abiertos**, la probabilidad.
 * La probabilidad está calibrada (ECE 0,0018, sesgo agregado −0,6 %): sumada sobre la cartera
   elegible proyecta el número de nuevos aportantes del semestre con menos de 1 % de error, frente a
-  −20 % / −24 % de los baselines.
+  −20 % / −26 % de los baselines. **Para el monto el sesgo agregado del semestre es +1,0 %, pero
+  mes a mes va de −8,8 % a +15,6 %**: la proyección sirve para el semestre, no para cerrar un mes
+  puntual, y conviene usarla con la banda mensual (revisión ronda 2, m-3).
 * El modelo no ordena a los `VOLUNTARIO` (2,2 % de la cartera elegible): conviene sacarlos de la
   lista o tratarlos con otra pieza.
 
@@ -483,6 +535,30 @@ Tres lecturas operativas:
 * El protocolo deja el entrenamiento 3–4 años antes del test. Es conservador: en producción, con
   reentrenamiento trimestral, la distancia real entre el último target de entrenamiento y el mes que
   se predice es de 12 meses, no de 36. Los números de §6 son por lo tanto un piso.
+* **Deriva residual de nivel** (revisión ronda 2, m-9; `reportes/deriva_features.csv`). Normalizar
+  por IMM reduce la deriva nominal pero no la elimina, porque la RIM crece más lento que el IMM en
+  la ventana simulada. Medianas del `train` del primer origen vs. el pool de test:
+
+  | Feature | mediana train | mediana test | variación |
+  |---|---|---|---|
+  | `rim_ref_imm` | 1,939 | 1,661 | **−14,4 %** |
+  | `rim_media_12_imm` | 1,941 | 1,658 | −14,6 % |
+  | `emp_rim_mediana_imm` | 1,826 | 1,549 | −15,2 % |
+  | `renta_imponible_12m_imm` | 19,26 | 16,68 | −13,4 % |
+  | `rim_corte_imm` | 1,651 | 1,445 | −12,4 % |
+  | `saldo_obl_sobre_rim` | 11,64 | 14,43 | +24,0 % |
+  | `meses_desde_afiliacion` | 145 | 187 | +29,0 % |
+
+  Es decir: un umbral de "renta alta" aprendido en 2021 corresponde a un percentil algo más alto en
+  2026. El efecto es el que explica que el AUC por corte sea ~0,80 en los primeros cortes de test
+  (los que predice el modelo más antiguo) y ~0,85 en los últimos. Mitigarlo del todo exigiría
+  normalizar por un percentil de la propia cartera del corte en vez del IMM; queda propuesto.
+* **Solape del `valid` con el pool de test** (m-2): 3 meses de target en el último origen, 3,2 % del
+  monto del pool. Detalle y justificación en §4.
+* **El `.pkl` de un origen no reproduce el agregado** (m-6): se persisten los cuatro modelos en
+  `modelo/origen_<yyyymm>/` y `reportes/modelos_por_origen.csv` dice qué cortes predice cada uno. El
+  AUC agregado de §6 sale de las cuatro predicciones concatenadas; `modelo/origen_202601/` es el que
+  iría a producción.
 * `region` conserva importancia sin estar en el mecanismo: queda ruido residual pese a la
   regularización y a la CV agrupada.
 * El target es "al menos un aporte en 6 meses"; no distingue abrir un plan mensual de hacer un
@@ -506,11 +582,11 @@ Corrida de referencia (20.000 afiliados, 4 núcleos compartidos, `n_jobs=2`):
 
 | Etapa | Máquina libre | Con los otros 2 proyectos corriendo | Peor caso observado |
 |---|---|---|---|
-| Generación de las tablas sintéticas | 5,0 | 6,7 | 10,8 |
-| Dataset as-of (63 cortes, ~1,0 M filas) | 17,2 | 17,3 | 17,6 |
-| Entrenamiento (4 orígenes × clasificador + regresor + calibración) | 52,5 | 82,4 | 195,2 |
-| Evaluación, importancias, ejemplos y CV agrupada | 16,8 | 27,0 | 19,1 |
-| **Total** | **95** | **135** | **245** (límite: 300) |
+| Generación de las tablas sintéticas | 7,0 | 6,7 | 10,8 |
+| Dataset as-of (63 cortes, ~1,0 M filas) | 13,9 | 17,3 | 17,6 |
+| Entrenamiento (4 orígenes × clasificador + regresor + calibración) | 44,5 | 82,4 | 195,2 |
+| Evaluación, importancias, ejemplos y CV agrupada | 19,2 | 27,0 | 19,1 |
+| **Total** | **86** | **135** | **245** (límite: 300) |
 
 El runtime es reproducible en resultados pero **no en tiempo**: la máquina de 4 núcleos es
 compartida con los otros dos proyectos del laboratorio y el entrenamiento de LightGBM
@@ -533,18 +609,24 @@ corte; persistencia; y corrida end-to-end.
 
 Salidas en `salidas/propension_apv/` (en `.gitignore`): `fuentes/*.parquet`,
 `dataset/{train_ultimo_origen,valid_ultimo_origen,test}.parquet`,
-`modelo/{modelo.pkl,calibracion.json}`, `predicciones_test.parquet` y `reportes/*.csv`.
+`modelo/origen_<yyyymm>/{modelo.pkl,calibracion.json}` (**uno por origen**),
+`predicciones_test.parquet` y `reportes/*.csv` — entre ellos `modelos_por_origen.csv`,
+`solape_valid_pool_test.csv`, `solape_monto_valid_pool_test.csv`, `deriva_features.csv`,
+`metricas_por_corte.csv` y `sesgo_monto_por_decil.csv`.
 
 ### Criterios de aceptación del brief
 
+Se evalúan sobre el **agregado** de los 12 cortes de test; el rango mensual va al lado
+(`reportes/aceptacion.csv` trae las dos cosas).
+
 | Criterio | Umbral | Obtenido | ¿Cumple? |
 |---|---|---|---|
-| AUC de test | ≥ 0,75 | **0,836** (0,798–0,852 por corte) | sí |
-| Lift decil 1 | ≥ 3 | **5,13** (4,55–5,34 por corte) | sí |
-| WAPE del monto en aportantes | ≤ 0,6 | **0,555** | sí |
+| AUC de test (agregado) | ≥ 0,75 | **0,836** (rango por corte 0,798–0,852) | sí |
+| Lift decil 1 (agregado) | ≥ 3 | **5,13** (rango por corte 4,55–5,34) | sí |
+| WAPE del monto en aportantes (agregado) | ≤ 0,6 | **0,555** (rango 0,530–0,627: 2 de 12 cortes por encima de 0,6) | sí en el agregado |
 | Captura al 10 % vs orden por renta | > | **67,8 % vs 49,4 %** | sí |
-| Runtime con 20.000 afiliados | < 5 min | **95 s** con la máquina libre; **135 s** con los otros dos proyectos en paralelo; **245 s** en el peor caso medido | sí |
-| Tests | < 2 min | **16 s** | sí |
+| Runtime con 20.000 afiliados | < 5 min | **86 s** con la máquina libre; **135 s** con los otros dos proyectos en paralelo; **245 s** en el peor caso medido | sí |
+| Tests | < 2 min | **26 tests en 9 s** | sí |
 | AUC dentro del rango pedido a la simulación | 0,75–0,88 | 0,836 | sí |
 
 ---
@@ -553,9 +635,11 @@ Salidas en `salidas/propension_apv/` (en `.gitignore`): `fuentes/*.parquet`,
 
 **Propuestas para `common/`** (no se tocó nada fuera de `afp_lab/propension_apv/`):
 
-1. *(Ya aplicado por el gerente en la ronda 1)* `observed=True` en
-   `metrics.tabla_metricas_por_segmento` y desempate aleatorio en `lift_decil_1`. El desempate
-   importa: era el número más sensible a empates, justamente en el baseline de reglas.
+1. *(Ya aplicado por el gerente)* `observed=True` en `metrics.tabla_metricas_por_segmento` y, en
+   `lift_decil_1`, el tratamiento de empates **por valor esperado** (el grupo de score que cruza el
+   borde del decil aporta su tasa media ponderada por la fracción incluida). Importa: era el número
+   más sensible a empates, justamente en el baseline de reglas y en el trivial. Con esa versión el
+   baseline constante da exactamente 1,00 y la regla del brief 4,04.
 2. Falta una métrica de **captura por decil / top-k** (`captura_monto`, `captura_positivos`,
    `tasa_en_contactados`): está en `evaluate.metrica_negocio` y sirve igual para el churn de
    traspaso y para el riesgo de cese.
@@ -585,7 +669,7 @@ Salidas en `salidas/propension_apv/` (en `.gitignore`): `fuentes/*.parquet`,
 
 ---
 
-## 11. Qué cambió respecto de la ronda 1
+## 11. Qué cambió respecto de las rondas anteriores
 
 | # | Hallazgo de la revisión | Corrección | Antes → después |
 |---|---|---|---|
@@ -599,13 +683,27 @@ Salidas en `salidas/propension_apv/` (en `.gitignore`): `fuentes/*.parquet`,
 | 8 | **Valid y test de 3 cortes contiguos** con tasa base estacional (0,030–0,077) | 12 cortes de valid y 12 de test, orígenes móviles cada 3 meses, y reporte **por corte** | test 3 cortes (49 k filas) → **12 cortes (192 k filas)**; AUC por corte 0,798–0,852 reportado |
 | 9 | **Lectura de negocio sobredimensionada** ("68,6 % del ahorro del semestre") | Se aclara que es el ahorro de **adquisición/reactivación** y se cuantifica su peso; el monto ya observado desapareció con la corrección 5 | "68,6 % del semestre" → **"67,8 % del ahorro de adquisición, que es el 38 % del flujo total"** |
 | m1 | `truncar_tablas` débil para `tributario` | Trunca por `anio_tributario_disponible(corte)` y neutraliza RIM/estado/empleador de `corte-1` | test de leakage más estricto |
-| m2, m3 | `lift_decil_1` con empates y `observed=True` | Los aplicó el gerente en `common`; §10 actualizada | — |
+| m2, m3 | `lift_decil_1` con empates y `observed=True` | Los aplicó el gerente en `common` (empates por valor esperado); §10 actualizada. Nuestros números se recalcularon con esa versión | lift de la regla 4,05 → 4,04; del baseline trivial 1,02 → **1,00 exacto** |
 | m4 | `n_empleadores_12` contaba transiciones | Cuenta empleadores distintos | — |
 | m5 | Ventana de licencia 3 vs 2 meses | `licencia_larga_reciente` usa 2 meses, coherente con el desfase de la fuente | — |
 | m6 | `tasa_apertura_6m` ambigua sin contactos | Vale 0 y se acompaña de `tuvo_contacto_6m` | — |
-| m7 | "nunca" = 99 dentro de una variable continua | Valor topado + flag (`sin_cotizacion_24m`, `nunca_aporto_36m`, `sin_contacto_24m`, `sin_tramo_declarado`) | — |
+| m7 | "nunca" = 99 dentro de una variable continua | Valor topado + flag (`nunca_aporto_36m`, `sin_contacto_24m`) | — |
 | m8 | Renta anual desde RIM topada | Renombrada `renta_imponible_12m_imm` y documentada como renta imponible, no bruta | — |
 | m9 | Rama muerta en `meses_con_apvc` | Eliminada | — |
+
+### Correcciones menores exigidas en la revisión de la ronda 2 (m-1 a m-10)
+
+| # | Corrección | Qué se hizo | Efecto |
+|---|---|---|---|
+| m-2 | El `valid` del origen 202601 comparte 3 meses de target con el **pool** de test | Se cuantifica (`solape_valid_pool_test.csv`, `solape_monto_valid_pool_test.csv`), se declara como limitación en §4 y §8 y se fija con un test. No se endurece el gap porque colapsaría los 4 orígenes en 1 | solape: 0 con el test propio de cada origen; 3 meses y **3,2 % del monto** del pool, sólo en el último origen |
+| m-6 | El `.pkl` guardado era sólo el último origen | Se persisten los 4 (`modelo/origen_<yyyymm>/`) + `modelos_por_origen.csv` con el mapeo origen → cortes que predice | 1 modelo guardado → **4**; el agregado de §6 es reproducible |
+| m-1 | `tasa_base` por origen era un escalón con AUC 0,53 | Una sola constante para todo el pool (tasa del train del primer origen) | AUC del baseline trivial 0,530 → **0,500 exacto**; lift 1,08 → 1,02 |
+| m-3 / m-4 | Sesgo +1,0 % y WAPE 0,555 sin rango | Rango por corte en §6.2, §7 y en `aceptacion.csv`; se dice que la aceptación es agregada | se publica WAPE **0,530–0,627** (2 cortes > 0,6) y sesgo **−8,8 % a +15,6 %** |
+| m-5 | `sin_cotizacion_24m` y `sin_tramo_declarado` constantes | Eliminadas | 64 → **62 features**; métricas idénticas (eran constantes) |
+| m-7 | La fila de referencia aplicaba el calibrador del último origen a todo el pool | `predecir` expone `prob_isotonica` del propio origen; la fila usa la isotónica **de cada origen** | fila de referencia: Brier 0,04055 → 0,04052, ECE 0,0032 → 0,0033 (ahora comparable) |
+| m-8 | `MEJORA_MINIMA_CALIBRACION` sin fundamento | Criterio doble: mejora media entre folds > 2 errores estándar de su dispersión **y** ≥ 1 % del Brier crudo; se publican mejora media y error estándar por origen | ninguna mejora llega a 2 σ (7,0e-6 vs 9,0e-6; 2,6e-5 vs 2,1e-5; …) → no se calibra, ahora con razón medible |
+| m-9 | Deriva residual no cuantificada | `deriva_features.csv` + tabla en §8 | `rim_ref_imm` mediana **1,939 → 1,661 (−14,4 %)**, `saldo_obl_sobre_rim` +24,0 % |
+| m-10 | AUC vacío en PENSIONADO_ACTIVO | Columnas `aportantes` y `nota` en las tablas de segmento | ahora dice **"sin aportantes" (0 de 415)** |
 
 Métricas principales, ronda 1 → ronda 2. **No son comparables como "mejora del modelo"**: la ronda 1
 medía sobre un protocolo contaminado y un target parcialmente observado; la ronda 2 mide sobre 12
@@ -616,6 +714,7 @@ cortes con todos los gaps y sin nada del target observado.
 | Cortes de test | 3 (49.003 filas) | **12 (192.557 filas)** |
 | AUC | 0,834 | 0,836 |
 | Lift decil 1 | 5,03 | **5,13** |
+| AUC / lift del baseline trivial | 0,500 / 1,09 | **0,500 / 1,00 exactos** (0,530 / 1,08 antes de m-1) |
 | Brier / ECE | 0,0462 / 0,0155 | **0,0405 / 0,0018** |
 | Sesgo agregado de la probabilidad | +13,8 % | **−0,6 %** |
 | WAPE del monto condicional | 0,552 | 0,555 |
@@ -623,4 +722,6 @@ cortes con todos los gaps y sin nada del target observado.
 | Captura al 10 % (modelo / renta) | 68,6 % / 49,8 % | 67,8 % / 49,4 % |
 | Árboles del clasificador | 700 (= tope, sin early stopping) | **93–181** (tope 3.000) |
 | AUC train (memorización) | 0,986 | **0,853** |
-| Runtime con 20.000 afiliados | 39 s | 95–245 s según la carga de la máquina (4 modelos en vez de 1, y 63 cortes en vez de 41) |
+| Runtime con 20.000 afiliados | 39 s | 86–245 s según la carga de la máquina (4 modelos en vez de 1, y 63 cortes en vez de 41) |
+| Modelos persistidos | 1 | **4** (uno por origen) |
+| Tests | 20 | **26** |

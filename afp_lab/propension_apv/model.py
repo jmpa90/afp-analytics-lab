@@ -42,9 +42,15 @@ from sklearn.model_selection import GroupKFold, StratifiedKFold
 from .features import columnas_modelo
 
 UMBRAL_RENTA_REGLA = 2_000_000.0     # "renta > 2 M" del brief
-# La isotonica solo se aplica si mejora el Brier fuera de muestra en validacion al menos esto
-# (en terminos relativos). Una mejora de 1e-4 no justifica deformar la probabilidad.
+# Criterio para aplicar la isotonica (revision ronda 2, m-8). Dos condiciones, ambas medidas
+# dentro de validacion con 3 folds fuera de muestra:
+#   (a) significancia: la mejora media del Brier entre folds debe superar `N_SIGMAS_CALIBRACION`
+#       errores estandar de la dispersion ENTRE folds (si la mejora es del orden del ruido de
+#       fold a fold, no hay nada que corregir);
+#   (b) materialidad: ademas debe ser al menos `MEJORA_MINIMA_CALIBRACION` del Brier crudo, para
+#       no deformar la probabilidad por una ganancia irrelevante para el negocio.
 MEJORA_MINIMA_CALIBRACION = 0.01
+N_SIGMAS_CALIBRACION = 2.0
 LIMITES_LOG_RATIO = (-4.0, 4.0)      # winsorizacion del target del regresor
 
 
@@ -89,6 +95,8 @@ class ModeloAPV:
     usa_calibracion: bool
     brier_valid_crudo: float
     brier_valid_calibrado: float
+    mejora_brier_media: float
+    mejora_brier_sem: float
     columnas: list[str]
     smearing: float
     tasa_base_train: float
@@ -139,15 +147,20 @@ def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
     calibrador = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
     calibrador.fit(p_valid, y_valid)
     p_cv = np.empty_like(p_valid)
+    mejoras = []
     for i_tr, i_te in StratifiedKFold(3, shuffle=True, random_state=params.seed).split(p_valid, y_valid):
         iso = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
         iso.fit(p_valid[i_tr], y_valid[i_tr])
         p_cv[i_te] = iso.predict(p_valid[i_te])
+        mejoras.append(float(np.mean((p_valid[i_te] - y_valid[i_te]) ** 2)
+                             - np.mean((p_cv[i_te] - y_valid[i_te]) ** 2)))
     brier_crudo = float(np.mean((p_valid - y_valid) ** 2))
     brier_cal = float(np.mean((p_cv - y_valid) ** 2))
-    # solo se calibra si la mejora es material (>= 1 % del Brier): una mejora de 1e-4 no
-    # justifica deformar la probabilidad y suele ser ruido del set de validacion
-    usa_calibracion = brier_cal <= brier_crudo * (1.0 - MEJORA_MINIMA_CALIBRACION)
+    mejora_media = float(np.mean(mejoras))
+    mejora_sem = float(np.std(mejoras, ddof=1) / np.sqrt(len(mejoras))) if len(mejoras) > 1 else 0.0
+    # (a) significativa frente a la dispersion entre folds y (b) material frente al Brier crudo
+    usa_calibracion = bool(mejora_media > N_SIGMAS_CALIBRACION * mejora_sem
+                           and mejora_media >= MEJORA_MINIMA_CALIBRACION * brier_crudo)
 
     # --- regresor de log(monto / rim_ref) en aportantes -----------------------------------
     tr_pos, va_pos = train[train["y"] == 1], valid[valid["y"] == 1]
@@ -168,6 +181,7 @@ def entrenar(train: pd.DataFrame, valid: pd.DataFrame,
     return ModeloAPV(
         clf=clf, reg=reg, calibrador=calibrador, usa_calibracion=usa_calibracion,
         brier_valid_crudo=brier_crudo, brier_valid_calibrado=brier_cal,
+        mejora_brier_media=mejora_media, mejora_brier_sem=mejora_sem,
         columnas=cols, smearing=smearing,
         tasa_base_train=float(train["y"].mean()),
         monto_medio_aportantes_train=float(train.loc[train["y"] == 1, "monto"].mean()),
@@ -188,10 +202,19 @@ def predecir(modelo: ModeloAPV, df: pd.DataFrame) -> pd.DataFrame:
         "afiliado_id": df["afiliado_id"].to_numpy(),
         "periodo_corte": df["periodo_corte"].to_numpy(),
         "prob_cruda": p_cruda,
+        # prob_isotonica: lo que daria ESTE origen si se calibrara (referencia, no se usa salvo
+        # que `usa_calibracion` sea True). Se calcula por origen para no aplicar el calibrador
+        # de un origen a un bloque de test que no le corresponde (revision ronda 2, m-7).
+        "prob_isotonica": np.clip(modelo.calibrador.predict(p_cruda), 1e-6, 1 - 1e-6),
         "prob_aporte": p,
         "monto_condicional": monto_cond,
         "monto_esperado": p * monto_cond,
     }, index=df.index)
+
+
+def columnas_modelo_de(modelo: ModeloAPV) -> list[str]:
+    """Columnas que usa el modelo (atajo para los reportes)."""
+    return list(modelo.columnas)
 
 
 # --------------------------------------------------------------------------- diagnostico
@@ -335,6 +358,10 @@ def guardar(modelo: ModeloAPV, ruta: str | Path) -> Path:
         "usa_calibracion_isotonica": bool(modelo.usa_calibracion),
         "brier_valid_crudo": modelo.brier_valid_crudo,
         "brier_valid_calibrado_cv": modelo.brier_valid_calibrado,
+        "mejora_brier_media_entre_folds": modelo.mejora_brier_media,
+        "mejora_brier_error_estandar": modelo.mejora_brier_sem,
+        "n_sigmas_exigidas": N_SIGMAS_CALIBRACION,
+        "mejora_relativa_minima": MEJORA_MINIMA_CALIBRACION,
         "cortes_train": modelo.cortes_train, "cortes_valid": modelo.cortes_valid,
         "n_arboles_clf": n_clf, "tope_arboles_clf": modelo.params.clf_n_estimators,
         "n_arboles_reg": n_reg, "tope_arboles_reg": modelo.params.reg_n_estimators,

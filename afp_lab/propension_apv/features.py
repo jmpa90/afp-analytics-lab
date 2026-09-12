@@ -48,8 +48,11 @@ ETIQUETAS_TRAMO_RENTA = ("1_hasta_600k", "2_600k_1M", "3_1M_1.8M", "4_1.8M_3M", 
 CORTES_TRAMO_EDAD = (0, 30, 40, 50, 60, 200)
 ETIQUETAS_TRAMO_EDAD = ("1_menos_30", "2_30_39", "3_40_49", "4_50_59", "5_60_mas")
 
-# topes de las features "meses desde ..." (con un flag aparte para no mezclar
-# "hace mucho" con "nunca" dentro de una variable continua)
+# topes de las features "meses desde ..." (con un flag aparte para no mezclar "hace mucho" con
+# "nunca" dentro de una variable continua). Solo se publican los flags que VARIAN en el dataset:
+# "sin cotizacion en 24 m" y "sin tramo declarado" son constantes por construccion (la poblacion
+# exige haber cotizado en 12 m y la tabla tributaria cubre a todos los afiliados), asi que no
+# entran como features (revision ronda 2, m-5).
 TOPE_MESES_COTIZACION = 24
 TOPE_MESES_APORTE = 36
 TOPE_MESES_CONTACTO = 24
@@ -245,7 +248,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
     sumsq_12 = (_ventana(d.rim, jp, 12).astype(np.float64) ** 2).sum(axis=1)
     var_12 = np.maximum(sumsq_12 / np.maximum(n_cot_12, 1.0) - media_12 ** 2, 0.0)
     rim_ref = np.where(rim_corte > 0, rim_corte, media_12)
-    meses_desde_cot, sin_cotizacion = _meses_desde(d.cotiza, jp, TOPE_MESES_COTIZACION)
+    meses_desde_cot, _ = _meses_desde(d.cotiza, jp, TOPE_MESES_COTIZACION)
 
     emp = d.emp_idx[:, jp]
     tiene_emp = emp >= 0
@@ -259,7 +262,6 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
     mapa_tramo = pd.Series(trib["tramo_igc"].to_numpy(), index=trib["afiliado_id"].to_numpy())
     tramo_serie = pd.Series(d.afiliado_ids).map(mapa_tramo)
     tramo_declarado = tramo_serie.fillna(0).to_numpy(float)
-    sin_tramo_declarado = tramo_serie.isna().to_numpy().astype(float)
 
     # --- empleador (nomina del mes de panel conocido) --------------------------------
     ofrece_apvc = np.where(tiene_emp, d.apvc_ofrece[emp_seguro, jp], 0.0)
@@ -326,7 +328,6 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         "densidad_12": n_cot_12 / 12.0,
         "densidad_6": n_cot_6 / 6.0,
         "meses_desde_ult_cotizacion": meses_desde_cot,
-        "sin_cotizacion_24m": sin_cotizacion,
         "meses_con_empleador": d.antig[:, jp].astype(float),
         "n_empleadores_12": n_empleadores_12,
         "meses_cesante_12": (_ventana(d.estado, jp, 12) == ESTADOS["CESANTE"]).sum(axis=1).astype(float),
@@ -336,7 +337,6 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int,
         # tributario (la RIM ya viene topada al tope imponible: es renta IMPONIBLE, no renta bruta)
         "tramo_igc_12m": tramo_12m.astype(float),
         "tramo_igc_declarado": tramo_declarado,
-        "sin_tramo_declarado": sin_tramo_declarado,
         "renta_imponible_12m_imm": suma_12 / imm_p,
         # calendario
         "mes_corte": float(mes),
@@ -493,6 +493,37 @@ def split_temporal(cortes: list[int], n_test: int = 12, n_valid: int = 12,
     usados = set(train) | set(valid) | set(test)
     return {"train": train, "valid": valid, "test": test,
             "descartados": [c for c in cortes if c not in usados]}
+
+
+def meses_target(corte: int, horizonte: int = HORIZONTE) -> list[int]:
+    """Meses en que puede ocurrir el target de un corte."""
+    return [add_months(corte, k) for k in range(1, horizonte + 1)]
+
+
+def solape_valid_pool_test(origenes: list[dict], horizonte: int = HORIZONTE) -> pd.DataFrame:
+    """Meses de target que el `valid` de cada origen comparte con el **pool** de test.
+
+    Dentro de cada origen el gap es exacto (`valid` no toca el target de SU bloque de test), que
+    es la condicion que importa en produccion: la prediccion de un bloque la hace un modelo cuyo
+    `valid` no vio ninguno de los meses de target de ese bloque. Pero al **agrupar** los 12 cortes
+    de test para reportar en conjunto, el `valid` de un origen tardio puede tocar meses de target
+    de un bloque anterior (que predijo otro modelo). Esta funcion lo cuantifica; el README lo
+    declara como limitacion conocida (revision ronda 2, m-2).
+    """
+    pool = sorted({m for o in origenes for c in o["test"] for m in meses_target(c, horizonte)})
+    filas = []
+    for o in origenes:
+        mv = {m for c in o["valid"] for m in meses_target(c, horizonte)}
+        propio = {m for c in o["test"] for m in meses_target(c, horizonte)}
+        comun = sorted(mv & set(pool))
+        filas.append({
+            "origen": o["origen"],
+            "meses_valid": f"{min(mv)}-{max(mv)}",
+            "solape_con_su_propio_test": len(mv & propio),
+            "solape_con_el_pool_de_test": len(comun),
+            "meses_solapados": ",".join(str(m) for m in comun) if comun else "",
+        })
+    return pd.DataFrame(filas)
 
 
 def origenes_moviles(cortes: list[int], n_test: int = 12, n_valid: int = 12,

@@ -139,6 +139,27 @@ def test_origenes_moviles_respetan_los_gaps(tablas):
     assert tam == sorted(tam)
 
 
+def test_solape_conocido_entre_valid_y_el_pool_de_test(tablas):
+    """Limitacion declarada (revision ronda 2, m-2).
+
+    Dentro de cada origen el gap es exacto: el `valid` de un origen no toca NINGUN mes de target
+    de su propio bloque de test, que es la condicion que importa (cada prediccion la hace un
+    modelo que no vio los meses de target de esa fila). Al agrupar los 12 cortes para reportar en
+    conjunto, el `valid` del ultimo origen si toca 3 meses de target de un bloque anterior, que
+    predijo OTRO modelo. El test fija ese hecho para que no crezca sin que nadie lo note.
+    """
+    cortes = F.cortes_disponibles(tablas, R.PRIMER_CORTE, HORIZONTE)
+    origenes = F.origenes_moviles(cortes, n_test=12, n_valid=12, gap=HORIZONTE,
+                                  horizonte=HORIZONTE, cada=3)
+    solape = F.solape_valid_pool_test(origenes, HORIZONTE)
+    # condicion dura: cero solape de cada valid con su propio bloque de test
+    assert (solape["solape_con_su_propio_test"] == 0).all()
+    # limitacion conocida y acotada: solo el ultimo origen, y a lo mas 3 meses
+    con_solape = solape[solape["solape_con_el_pool_de_test"] > 0]
+    assert list(con_solape["origen"]) == [origenes[-1]["origen"]]
+    assert con_solape["solape_con_el_pool_de_test"].max() <= 3
+
+
 # ============================================================== 2. as-of verificado a mano
 def test_as_of_calculado_a_mano_en_dos_casos(tablas, denso):
     """Recalcula a mano, desde las tablas largas, dos casos de dos cortes distintos (§7).
@@ -296,9 +317,13 @@ def test_hiperparametros_se_eligen_con_validacion(entrenado):
     n_clf, n_reg = modelo.n_arboles
     assert 1 <= n_clf <= modelo.params.clf_n_estimators
     assert 1 <= n_reg <= modelo.params.reg_n_estimators
-    # la decision de calibrar tambien sale de validacion, no de test
-    assert modelo.usa_calibracion == (modelo.brier_valid_calibrado
-                                      <= modelo.brier_valid_crudo * (1 - M.MEJORA_MINIMA_CALIBRACION))
+    # la decision de calibrar tambien sale de validacion, no de test, y exige que la mejora sea
+    # significativa frente a la dispersion ENTRE folds y material frente al Brier crudo
+    esperado = (modelo.mejora_brier_media > M.N_SIGMAS_CALIBRACION * modelo.mejora_brier_sem
+                and modelo.mejora_brier_media
+                >= M.MEJORA_MINIMA_CALIBRACION * modelo.brier_valid_crudo)
+    assert modelo.usa_calibracion == esperado
+    assert modelo.mejora_brier_sem >= 0.0
 
 
 def test_prediccion_tiene_forma_y_rangos_validos(entrenado):
@@ -363,14 +388,24 @@ def test_persistencia(entrenado, tmp_path):
 def test_corrida_end_to_end_pequena(tmp_path):
     res = R.ejecutar(n_afiliados=800, salida=tmp_path, seed=11, n_test=6, n_valid=6,
                      cada_origen=3, diagnostico=False)
-    assert (tmp_path / "modelo" / "modelo.pkl").exists()
+    # se persiste un modelo por origen (el .pkl de uno solo no reproduce el agregado)
+    dirs_modelo = sorted((tmp_path / "modelo").glob("origen_*"))
+    assert len(dirs_modelo) == len(res["origenes"])
+    for d in dirs_modelo:
+        assert (d / "modelo.pkl").exists() and (d / "calibracion.json").exists()
     assert (tmp_path / "predicciones_test.parquet").exists()
     for nombre in ("metricas_clasificacion", "metricas_monto", "metrica_negocio", "aceptacion",
                    "importancias", "ejemplos_explicados", "curva_calibracion",
-                   "metricas_por_corte", "sesgo_monto_por_decil", "contexto_negocio"):
+                   "metricas_por_corte", "sesgo_monto_por_decil", "contexto_negocio",
+                   "modelos_por_origen", "solape_valid_pool_test",
+                   "solape_monto_valid_pool_test", "deriva_features"):
         assert (tmp_path / "reportes" / f"{nombre}.csv").exists()
     clas = res["clasificacion"].set_index("predictor")
     assert clas.loc["modelo", "auc"] > 0.65
     assert clas.loc["modelo", "auc"] > clas.loc["regla_negocio", "auc"]
+    # el baseline trivial es UNA constante en todo el pool -> AUC exactamente 0,5 (m-1)
+    assert clas.loc["tasa_base", "auc"] == pytest.approx(0.5)
+    # la aceptacion se reporta con el rango por corte al lado del agregado (m-3 / m-4)
+    assert "rango_por_corte" in res["aceptacion"].columns
     assert len(res["por_corte"]) == 6
     assert res["tiempos"]["total"] < 120

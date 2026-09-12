@@ -49,8 +49,13 @@ def comparar_segmentos(df: pd.DataFrame, predicciones: dict[str, pd.DataFrame], 
     largo = pd.concat(partes, ignore_index=True)
     ancho = largo.pivot(index=segmento, columns="predictor", values=metrica)
     ancho["n"] = largo.groupby(segmento)["n"].first()
+    ancho["aportantes"] = df.groupby(segmento, observed=True)["y"].sum()
     ancho["frac_filas"] = ancho["n"] / len(df)
     ancho["segmento_grande"] = ancho["frac_filas"] >= min_frac
+    # un segmento sin aportantes (o sin no-aportantes) no tiene AUC definido: se dice por que,
+    # en vez de dejar la celda vacia (revision ronda 2, m-10)
+    ancho["nota"] = np.where(ancho["aportantes"] == 0, "sin aportantes",
+                             np.where(ancho["aportantes"] == ancho["n"], "todos aportantes", ""))
     return ancho.reset_index()
 
 
@@ -209,18 +214,71 @@ def resumen_negocio(negocio: pd.DataFrame, score_modelo: str = "modelo_monto_esp
 
 # --------------------------------------------------------------------------- aceptacion
 def chequear_aceptacion(clasificacion: pd.DataFrame, monto: pd.DataFrame, negocio: pd.DataFrame,
+                        por_corte: pd.DataFrame | None = None,
                         nombre_modelo: str = "modelo") -> pd.DataFrame:
-    """Criterios de aceptacion del brief, con el valor real obtenido."""
+    """Criterios de aceptacion del brief con el valor **agregado** y su rango por corte.
+
+    Los criterios del brief se evaluan sobre el agregado de los 12 cortes de test; el rango
+    mensual se informa al lado para que se vea la dispersion (revision ronda 2, m-3 / m-4).
+    """
     fila = clasificacion.set_index("predictor").loc[nombre_modelo]
     wape = monto[(monto["predictor"] == nombre_modelo)
                  & (monto["vista"] == "condicional_en_aportantes")]["wape"].iloc[0]
     cap = negocio.set_index(["score", "fraccion_contactada"])["captura_monto"]
     cap_modelo = float(cap.loc[("modelo_monto_esperado", 0.10)])
     cap_renta = float(cap.loc[("renta", 0.10)])
+
+    def rango(col: str, fmt: str = "{:.3f}") -> str:
+        if por_corte is None or col not in por_corte:
+            return ""
+        return f"{fmt.format(por_corte[col].min())} a {fmt.format(por_corte[col].max())}"
+
     criterios = [
-        ("AUC test >= 0,75", float(fila["auc"]), 0.75, float(fila["auc"]) >= 0.75),
-        ("Lift decil 1 >= 3", float(fila["lift_decil_1"]), 3.0, float(fila["lift_decil_1"]) >= 3.0),
-        ("WAPE monto en aportantes <= 0,6", float(wape), 0.6, float(wape) <= 0.6),
-        ("Captura al 10 % > orden por renta", cap_modelo, cap_renta, cap_modelo > cap_renta),
+        ("AUC test >= 0,75", float(fila["auc"]), 0.75, float(fila["auc"]) >= 0.75, rango("auc")),
+        ("Lift decil 1 >= 3", float(fila["lift_decil_1"]), 3.0, float(fila["lift_decil_1"]) >= 3.0,
+         rango("lift_decil_1", "{:.2f}")),
+        ("WAPE monto en aportantes <= 0,6", float(wape), 0.6, float(wape) <= 0.6,
+         rango("wape_monto_aportantes")),
+        ("Captura al 10 % > orden por renta", cap_modelo, cap_renta, cap_modelo > cap_renta, ""),
     ]
-    return pd.DataFrame(criterios, columns=["criterio", "valor", "umbral", "cumple"])
+    return pd.DataFrame(criterios, columns=["criterio", "valor_agregado", "umbral", "cumple",
+                                            "rango_por_corte"])
+
+
+def deriva_features(train: pd.DataFrame, test: pd.DataFrame, columnas: list[str],
+                    top: int = 12) -> pd.DataFrame:
+    """Deriva de nivel entre entrenamiento y test en las features numericas mas importantes.
+
+    El protocolo con gap entre todas las particiones deja el entrenamiento 3-4 anos antes del
+    test; normalizar por IMM reduce la deriva nominal pero no la elimina. Esta tabla la cuantifica
+    (revision ronda 2, m-9).
+    """
+    filas = []
+    for c in columnas:
+        if c not in train.columns or str(train[c].dtype) == "category":
+            continue
+        m_tr, m_te = float(train[c].median()), float(test[c].median())
+        filas.append({"feature": c, "mediana_train": m_tr, "mediana_test": m_te,
+                      "variacion_pct": 100.0 * (m_te / m_tr - 1.0) if m_tr else np.nan})
+    d = pd.DataFrame(filas)
+    return d.reindex(d["variacion_pct"].abs().sort_values(ascending=False).index).head(top)
+
+
+def solape_monto_valid_pool(df: pd.DataFrame, tablas: dict[str, pd.DataFrame],
+                            meses_solapados: list[int], horizonte: int = 6) -> pd.DataFrame:
+    """Fraccion del monto del pool de test que cae en los meses que algun `valid` tocó (m-2)."""
+    from afp_lab.rim_nowcasting.calendario import add_months
+
+    ap = tablas["aportes_voluntarios"]
+    elegibles = {(int(a), int(c)) for a, c in zip(df["afiliado_id"], df["periodo_corte"])}
+    total = solapado = 0.0
+    for corte in sorted(df["periodo_corte"].unique()):
+        meses = [add_months(int(corte), k) for k in range(1, horizonte + 1)]
+        ids = {a for a, c in elegibles if c == int(corte)}
+        sub = ap[ap["periodo"].isin(meses) & ap["afiliado_id"].isin(ids)]
+        total += float(sub["monto"].sum())
+        solapado += float(sub[sub["periodo"].isin(meses_solapados)]["monto"].sum())
+    return pd.DataFrame([{
+        "meses_solapados": ",".join(str(m) for m in meses_solapados) if meses_solapados else "",
+        "monto_pool_test": total, "monto_en_meses_solapados": solapado,
+        "share_monto_solapado": solapado / max(total, 1e-9)}])

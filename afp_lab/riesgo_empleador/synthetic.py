@@ -46,6 +46,15 @@ PERIODO_FIN = 202609             # "hoy" del laboratorio
 PERFIL = "cuprum"                # somos AFP Cuprum (docs/contexto_afp_cuprum.md)
 HORIZONTE = 1                    # target principal: la planilla del periodo `corte`
 HORIZONTE_LARGO = 3              # variante: alguna DNP en corte .. corte+2
+# Ronda 3 (objetivo 2): con el default anterior (40) 20.000 afiliados dan solo ~500 empleadores y la
+# ronda 2 se aprobo "con reserva" por la volatilidad del agregado mensual de masa en riesgo (README
+# §6.4/§8). Se comparo 40 (~500 empleadores) vs 10 (~2.000) como pide el brief, y ademas 20 (~1.000)
+# como punto intermedio: la volatilidad intrinseca baja monotonamente con mas empleadores (~95 % a
+# ~63 % a ~49 % entre 500/1.000/2.000, dos semillas), pero la captura de masa al 10 % se vuelve muy
+# inestable entre semillas con 2.000 empleadores (43-62 %) porque cada empleador pesa menos y unos
+# pocos DNP grandes dominan igual. 20 reduce la volatilidad en un tercio sin esa inestabilidad
+# (captura 48-50 % en ambas semillas) y sin tocar el modelo; comparacion completa en README §2.4.
+AFILIADOS_POR_EMPLEADOR = 20
 
 # Version del modulo de planilla de DS-3 usado (copiado a este worktree el 2026-09-12):
 # afp_lab/common/planilla.py md5 1fc28ef5cf5dea3d5ca189f54e872f59
@@ -364,12 +373,18 @@ def _construir_boletin_infractores(planillas: pd.DataFrame, periodos: list[int])
 # =========================================================================== generador principal
 def generar_tablas(n_afiliados: int = 5_000, periodo_inicio: int = PERIODO_INICIO,
                    periodo_fin: int = PERIODO_FIN, seed: int = 42, perfil: str = PERFIL,
-                   params: ParametrosEmpleador | None = None) -> dict[str, pd.DataFrame]:
-    """Universo comun + planilla Previred + capa de recepcion/pago del empleador. Determinista."""
+                   params: ParametrosEmpleador | None = None,
+                   afiliados_por_empleador: int = AFILIADOS_POR_EMPLEADOR) -> dict[str, pd.DataFrame]:
+    """Universo comun + planilla Previred + capa de recepcion/pago del empleador. Determinista.
+
+    `afiliados_por_empleador` fija el numero de empleadores (`n_afiliados / afiliados_por_empleador`,
+    ver `common.synth_base.generar_universo`); bajado de 40 a 20 en la ronda 3 para reducir la
+    volatilidad del agregado mensual de masa en riesgo (README §2.4/§6.4)."""
     params = params or ParametrosEmpleador()
     rng = np.random.default_rng(seed + 505)
     universo = generar_universo(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio,
-                               periodo_fin=periodo_fin, seed=seed, perfil=perfil)
+                               periodo_fin=periodo_fin, seed=seed, perfil=perfil,
+                               afiliados_por_empleador=afiliados_por_empleador)
     periodos = rango_periodos(periodo_inicio, periodo_fin)
     empleadores = universo["empleadores"]
     contenido = _contenido_planilla(universo, seed, empleadores, periodos)

@@ -29,6 +29,14 @@ COLUMNAS_LATENTES = ["lat_productividad", "lat_rubro_pref", "lat_p_sep_factor", 
 # en rim_nowcasting.synthetic (A_AGRICULTURA, B_MINERIA, C_MANUFACTURA, F_CONSTRUCCION, G_COMERCIO,
 # H_TRANSPORTE, I_TURISMO, K_FINANZAS, N_SERVICIOS, O_ADMIN_PUBLICA, P_EDUCACION, Q_SALUD, T_CASA_PARTICULAR).
 PERFILES = {
+    # `p_activo_inicial` / `factor_contratacion` calibrados en la ronda 3 con la Ficha Estadistica
+    # Previsional N 165 (SP, ago 2026, `docs/contexto_afp_cuprum.md` S0): 5.775.070 cotizantes sobre
+    # 12.201.632 afiliados = 47,3 % de densidad para el sistema (antes ~78-79 %, sin calibrar). El
+    # `factor_contratacion` (que escala la probabilidad mensual de contratacion) domina el estado
+    # estacionario; `p_activo_inicial` (fraccion empleada al inicio de la ventana simulada) todavia
+    # deja algo de sesgo transitorio en una ventana de ~57 meses y se ajusta junto al anterior para
+    # que la fraccion con RIM > 0 en un mes tipico (afp_lab.common.tests.test_synth_base) caiga
+    # dentro de 47 +/- 3 % (medido: ~47,7-47,8 % con 20.000 afiliados, semillas 42 y 7).
     "sistema": {
         "desplaz_productividad": 0.0,
         "p_educacion": [0.15, 0.45, 0.20, 0.20],          # BASICA, MEDIA, TECNICA, UNIVERSITARIA
@@ -37,11 +45,15 @@ PERFILES = {
         "edad_min": 18, "edad_rango": 47, "edad_sesgo": 0.0,
         "p_independiente": 0.08, "p_voluntario": 0.02,
         "p_multi_empleador": 0.05, "p_jornada_parcial": 0.12, "p_masa_imm": 0.15,
-        "p_activo_inicial": 0.78, "factor_contratacion": 1.0,
+        "p_activo_inicial": 0.45, "factor_contratacion": 0.20,
     },
     # Calibrado con la Ficha Estadistica Previsional N 165 (SP, ago 2026): ingreso imponible promedio
-    # de cotizantes Cuprum $2.331.030 vs sistema $1.346.859 (1,73x); densidad Cuprum ~67 % (memoria
-    # 2025) vs 53,5 % del sistema; 4,5 % de afiliados y 6,3 % de cotizantes del sistema.
+    # de cotizantes Cuprum $2.331.030 vs sistema $1.346.859 (1,73x); densidad Cuprum ~66 % (Ficha 165)
+    # / 66,94 % (memoria 2025) vs 47,3 % del sistema; 4,5 % de afiliados y 6,3 % de cotizantes del
+    # sistema. `factor_contratacion` bajado de 0,60 a 0,40 en la ronda 3 (junto con la calibracion del
+    # perfil `sistema`, mismo mecanismo) para que la densidad quede en 66 +/- 3 % (antes ~71-73 %,
+    # fuera de banda; medido ahora: ~66,4-66,5 % con 20.000 afiliados, semillas 42 y 7); `p_activo_inicial`
+    # no se toco.
     "cuprum": {
         "desplaz_productividad": 0.40,
         "p_educacion": [0.03, 0.27, 0.25, 0.45],
@@ -50,7 +62,7 @@ PERFILES = {
         "edad_min": 21, "edad_rango": 43, "edad_sesgo": 0.0,
         "p_independiente": 0.10, "p_voluntario": 0.02,
         "p_multi_empleador": 0.07, "p_jornada_parcial": 0.06, "p_masa_imm": 0.03,
-        "p_activo_inicial": 0.68, "factor_contratacion": 0.60,
+        "p_activo_inicial": 0.68, "factor_contratacion": 0.40,
     },
 }
 

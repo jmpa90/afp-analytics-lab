@@ -27,7 +27,7 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | 02 | `churn_traspaso` | ¿Qué afiliados se traspasarán a otra AFP en los próximos 6 meses? | Clasificación | Cerrado ronda 2 (Cuprum + licitación de stock) | pandas + LightGBM |
 | 03 | `propension_apv` | ¿Quién abrirá o aumentará ahorro previsional voluntario y cuánto? | Clasificación + monto | Cerrado ronda 2 (Cuprum) | pandas + LightGBM |
 | 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 2 (Cuprum + códigos de planilla) | pandas + LightGBM |
-| 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Cerrado ronda 2 (aprobado con reserva) | pandas + LightGBM |
+| 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Cerrado ronda 3 (más empleadores, ver abajo) | pandas + LightGBM |
 | 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Cerrado ronda 2 (4 segmentos) | pandas + scikit-learn |
 | — | `common/planilla` | Planilla Previred sintética con códigos oficiales (modelo de datos regulatorio) | Datos | Cerrado ronda 2 | pandas |
 | 07 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
@@ -50,6 +50,14 @@ fuente con su desfase), gap de h meses entre **todas** las particiones, hiperpar
 validación, chequeos de determinismo del simulador, y umbrales para el banco sintético distintos de los de
 datos reales cuando la simulación corregida lo justifica.
 
+> **Nota ronda 3**: la tabla de arriba usa perfil `sistema` con la densidad de cotización sin calibrar
+> (~79 % de afiliados con RIM > 0 en un mes típico). La ronda 3 la bajó a ~47,3 % (Ficha 165 de la SP,
+> ver `afp_lab/common/README.md`), y eso mueve las tres métricas de esta tabla (medido con una sola
+> semilla, no las 5/12 cortes del protocolo original, así que estos son puntos de referencia, no un
+> reemplazo de la tabla): **02** AUC 0,698 → 0,754; **03** AUC 0,826 → 0,843; **04** AUC cese 3 m/6 m
+> 0,868/0,859 → 0,888/0,877, **reingreso 0,720 → 0,605** (cruza bajo el umbral de 0,70 del brief —
+> pendiente de revisión por el responsable de 04). Detalle completo en el informe de la ronda 3.
+
 ## Resultados de la ronda 2
 
 Todo con `perfil="cuprum"` (20.000 afiliados) salvo indicación; detalle en cada README (§"Ronda 2") y
@@ -62,9 +70,20 @@ en `docs/revisiones/ronda_2/`.
 | 02 Licitación de stock (2027) | 9,6 % sorteados, 6,2 % del saldo administrado en riesgo (24 mil MM) | Priorizar la retención por saldo × probabilidad duplica el saldo retenido con los mismos contactos; rendimiento marginal decreciente al ampliar capacidad |
 | 03 APV | AUC 0,821, captura al 10 % 55 % vs 33 % por renta | Cartera de alta renta: la renta discrimina menos y la ventaja del modelo crece (+22 pp) |
 | 04 Cese | AUC cese 3 m 0,885, reingreso 0,641 | Más estabilidad y jubilación real; los códigos de la planilla no agregan sobre los eventos AFC |
-| 05 Empleador (nuevo) | AUC DNP 0,82; masa en riesgo capturada al 10 % 45–55 % | Aprobado con reserva: el agregado mensual es intrínsecamente volátil con 500 empleadores |
+| 05 Empleador (nuevo) | AUC DNP 0,82; masa en riesgo capturada al 10 % 45–55 % | Aprobado con reserva: el agregado mensual es intrínsecamente volátil con 500 empleadores — **actualizado en la ronda 3, ver abajo** |
 | 06 Segmentación (nuevo) | 4 segmentos (k-means 5 + fusión), silueta 0,24, ARI re-muestreo 0,99, ARI temporal 0,47, clasificador 0,98 | Universo Cuprum compartido con 02/03; tasas de cese, traspaso y APV difieren 3,4×, 2,1× y 31× entre segmentos; tabla segmento → acción |
 | Planilla regulatoria | `common/planilla.py` con códigos Tabla N° 7, recepción por declaración, DNP por empleador con persistencia | Base para que los modelos usen los mismos códigos que la planilla real |
+
+## Resultados de la ronda 3
+
+Un solo workstream (`empleador`), dos objetivos transversales. Con 20.000 afiliados salvo indicación;
+detalle completo en `afp_lab/common/README.md` y `afp_lab/riesgo_empleador/README.md` (§"Ronda 3").
+
+| Cambio | Resultado | Lectura de negocio |
+|---|---|---|
+| Densidad de cotización recalibrada (`common/synth_base.py`, perfiles `sistema` y `cuprum`) | Densidad de un mes típico: sistema ~79 %→**47,7 %** (Ficha 165: 47,3 %), cuprum ~72 %→**66,4 %** (Ficha 165: 66 %). Sube el AUC en 02/03/04/05 (cartera cesante más grande y distinta de la empleada) y resuelve la pérdida en segmentos grandes que tenía 02; baja el AUC de reingreso de 04 (0,72→0,61, bajo su umbral) | Los indicadores "sobre cotizantes" ahora son comparables con la Ficha de la SP; el proyecto 04 necesita revisar su target de reingreso a esta densidad más realista |
+| 05 Empleador: más empleadores (`afiliados_por_empleador` 40→**20**, ~500→~1.000 empleadores) | AUC 0,818→**0,865**; volatilidad intrínseca del agregado mensual 98,9 %→**63,6 %**; captura de masa al 10 % 54,5 %→48,6 % en la semilla de referencia (51,9 % promedio de 5 semillas); el modelo deja de perder en el segmento GRANDE | La proyección de recaudación sigue siendo trimestral, no mensual, pero el ruido del agregado bajó a un tercio; la relación 1/√n_empleadores predice cuánto más haría falta escalar para cerrar el criterio de ±10 % |
+| Suite completa del laboratorio | **155 tests, 0 fallos, ~9 min 46 s** (`python -m pytest afp_lab -q`, incluido el proyecto 01 con Spark) | Dos umbrales de plausibilidad del generador se ajustaron en `churn_traspaso` (documentados inline); ningún umbral de modelo se tocó |
 
 ## Persona: somos AFP Cuprum
 
@@ -85,6 +104,11 @@ afiliado × mes (estado laboral, empleador, sueldo, RIM, licencias, eventos AFC)
 (UF, IMM, tope imponible, IPC, desempleo). Todos los proyectos parten de ahí y agregan sus propias
 tablas, para que un afiliado sea "la misma persona" en todos los modelos. Las columnas `lat_*` y los
 parámetros de pago del empleador son latentes del generador y **no pueden usarse como features**.
+`afiliados_por_empleador` (configurable desde la ronda 2) fija el número de empleadores del universo.
+
+**Ronda 3**: la densidad de cotización de los perfiles `sistema` y `cuprum` (fracción de afiliados con
+RIM > 0 en un mes típico) se recalibró contra la Ficha Estadística Previsional N° 165 de la SP;
+detalle, mecanismo y números antes/después en `afp_lab/common/README.md`.
 
 ## Cómo correr
 

@@ -20,7 +20,7 @@ import pandas as pd
 from . import evaluate as ev
 from . import features as F
 from . import model as M
-from .synthetic import HORIZONTE_LARGO, PERFIL, VERSION_PLANILLA, generar_tablas
+from .synthetic import AFILIADOS_POR_EMPLEADOR, HORIZONTE_LARGO, PERFIL, VERSION_PLANILLA, generar_tablas
 
 RAIZ = Path(__file__).resolve().parents[2]
 SALIDA_DEFECTO = RAIZ / "salidas" / "riesgo_empleador"
@@ -46,13 +46,15 @@ def _guardar(df: pd.DataFrame, ruta: Path, nombre: str) -> None:
 def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int = 42,
              primer_corte: int = PRIMER_CORTE, n_test: int = N_TEST, n_valid: int = N_VALID,
              cada_origen: int = CADA_ORIGEN, perfil: str = PERFIL,
+             afiliados_por_empleador: int = AFILIADOS_POR_EMPLEADOR,
              diagnostico: bool = True) -> dict:
     t0 = time.perf_counter()
     salida = Path(salida)
     tiempos: dict[str, float] = {}
 
     # ------------------------------------------------------------------ 1. datos sinteticos
-    tablas = generar_tablas(n_afiliados=n_afiliados, seed=seed, perfil=perfil)
+    tablas = generar_tablas(n_afiliados=n_afiliados, seed=seed, perfil=perfil,
+                            afiliados_por_empleador=afiliados_por_empleador)
     tiempos["generacion"] = time.perf_counter() - t0
     fuentes = salida / "fuentes"
     fuentes.mkdir(parents=True, exist_ok=True)
@@ -64,7 +66,7 @@ def ejecutar(n_afiliados: int = 5_000, salida: Path = SALIDA_DEFECTO, seed: int 
     pl = tablas["planillas"]
     tasas = pl["estado"].value_counts(normalize=True)
     resumen_sim = pd.DataFrame([{
-        "perfil": perfil, "version_planilla": VERSION_PLANILLA,
+        "perfil": perfil, "version_planilla": VERSION_PLANILLA, "afiliados_por_empleador": afiliados_por_empleador,
         "empleadores": int(pl["empleador_id"].nunique()), "planillas": len(pl),
         "share_pagada": float(tasas.get("PAGADA", 0.0)),
         "share_dnp": float(tasas.get("DNP", 0.0)),
@@ -260,11 +262,14 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--primer-corte", type=int, default=PRIMER_CORTE)
     ap.add_argument("--perfil", choices=("sistema", "cuprum"), default=PERFIL)
     ap.add_argument("--cada-origen", type=int, default=CADA_ORIGEN)
+    ap.add_argument("--afiliados-por-empleador", type=int, default=AFILIADOS_POR_EMPLEADOR,
+                    help="afiliados por empleador (define el numero de empleadores; ronda 3 §2.4)")
     ap.add_argument("--sin-diagnostico", action="store_true",
                     help="omite la CV agrupada por empleador")
     args = ap.parse_args(argv)
     ejecutar(n_afiliados=args.n_afiliados, salida=args.salida, seed=args.seed,
              primer_corte=args.primer_corte, cada_origen=args.cada_origen, perfil=args.perfil,
+             afiliados_por_empleador=args.afiliados_por_empleador,
              diagnostico=not args.sin_diagnostico)
 
 

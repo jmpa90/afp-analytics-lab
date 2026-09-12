@@ -24,12 +24,12 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | # | Proyecto | Pregunta de negocio | Tipo | Estado | Stack |
 |---|---|---|---|---|---|
 | 01 | `rim_nowcasting` | ¿Cuál es la renta imponible de cada afiliado en los 2 meses que aún no conocemos? | Nowcasting (hurdle GBT) | Cerrado ronda 1 | PySpark |
-| 02 | `churn_traspaso` | ¿Qué afiliados se traspasarán a otra AFP en los próximos 6 meses? | Clasificación | Ronda 2 en curso (Cuprum + licitación de stock) | pandas + LightGBM |
-| 03 | `propension_apv` | ¿Quién abrirá o aumentará ahorro previsional voluntario y cuánto? | Clasificación + monto | Cerrado ronda 1 (aprobado) | pandas + LightGBM |
-| 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 1 (aprobado) | pandas + LightGBM |
-| 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Ronda 2 en curso | pandas + LightGBM |
-| 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Ronda 2 en curso | pandas + scikit-learn |
-| — | `common/planilla` | Planilla Previred sintética con códigos oficiales (modelo de datos regulatorio) | Datos | Ronda 2 en curso | pandas |
+| 02 | `churn_traspaso` | ¿Qué afiliados se traspasarán a otra AFP en los próximos 6 meses? | Clasificación | Cerrado ronda 2 (Cuprum + licitación de stock) | pandas + LightGBM |
+| 03 | `propension_apv` | ¿Quién abrirá o aumentará ahorro previsional voluntario y cuánto? | Clasificación + monto | Cerrado ronda 2 (Cuprum) | pandas + LightGBM |
+| 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 2 (Cuprum + códigos de planilla) | pandas + LightGBM |
+| 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Cerrado ronda 2 (aprobado con reserva) | pandas + LightGBM |
+| 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Cerrado ronda 2 (6 segmentos) | pandas + scikit-learn |
+| — | `common/planilla` | Planilla Previred sintética con códigos oficiales (modelo de datos regulatorio) | Datos | Cerrado ronda 2 | pandas |
 | 07 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
 | 08 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
 
@@ -49,6 +49,22 @@ Lecciones incorporadas a `CONVENCIONES.md`: convención de fechas (`periodo_cort
 fuente con su desfase), gap de h meses entre **todas** las particiones, hiperparámetros sólo con
 validación, chequeos de determinismo del simulador, y umbrales para el banco sintético distintos de los de
 datos reales cuando la simulación corregida lo justifica.
+
+## Resultados de la ronda 2
+
+Todo con `perfil="cuprum"` (20.000 afiliados) salvo indicación; detalle en cada README (§"Ronda 2") y
+en `docs/revisiones/ronda_2/`.
+
+| Proyecto | Resultado | Lectura de negocio |
+|---|---|---|
+| 01 RIM (Spark) | WAPE dependientes h=1 0,115 / h=2 0,221 (sistema 0,115 / 0,182) | A un mes igual; a dos meses pesa más la remuneración variable de finanzas y minería |
+| 02 Traspaso | AUC 0,71–0,75 (3 semillas), captura al 10 % 30–39 % | En Cuprum el motor de fuga es el precio y la antigüedad; riesgo y saldo van en direcciones opuestas: ordenar por prob × saldo |
+| 02 Licitación de stock (2027) | 9,6 % sorteados, 6,2 % del saldo administrado en riesgo (24 mil MM) | Priorizar la retención por saldo × probabilidad duplica el saldo retenido con los mismos contactos; rendimiento marginal decreciente al ampliar capacidad |
+| 03 APV | AUC 0,821, captura al 10 % 55 % vs 33 % por renta | Cartera de alta renta: la renta discrimina menos y la ventaja del modelo crece (+22 pp) |
+| 04 Cese | AUC cese 3 m 0,885, reingreso 0,641 | Más estabilidad y jubilación real; los códigos de la planilla no agregan sobre los eventos AFC |
+| 05 Empleador (nuevo) | AUC DNP 0,82; masa en riesgo capturada al 10 % 45–55 % | Aprobado con reserva: el agregado mensual es intrínsecamente volátil con 500 empleadores |
+| 06 Segmentación (nuevo) | 6 segmentos, silueta 0,21, ARI 0,99, clasificador 0,98 | Tasas de traspaso, APV y cese difieren hasta 17× entre segmentos; tabla segmento → acción |
+| Planilla regulatoria | `common/planilla.py` con códigos Tabla N° 7, recepción por declaración, DNP por empleador con persistencia | Base para que los modelos usen los mismos códigos que la planilla real |
 
 ## Persona: somos AFP Cuprum
 

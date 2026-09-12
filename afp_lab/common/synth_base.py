@@ -99,9 +99,12 @@ def generar_afiliados_pandas(n: int, periodo_inicio: int, periodo_fin: int, seed
 
 
 def generar_universo(n_afiliados: int = 5000, periodo_inicio: int = 202201, periodo_fin: int = 202609,
-                     seed: int = 42, lote: int = 2000, perfil: str = "sistema") -> dict[str, pd.DataFrame]:
-    """Universo sintetico comun. `perfil`: "sistema" (promedio de las AFP) o "cuprum" (nuestra cartera)."""
-    cfg = Config(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio, periodo_snapshot=periodo_fin, seed=seed)
+                     seed: int = 42, lote: int = 2000, perfil: str = "sistema",
+                     afiliados_por_empleador: int = 40) -> dict[str, pd.DataFrame]:
+    """Universo sintetico comun. `perfil`: "sistema" (promedio de las AFP) o "cuprum" (nuestra cartera).
+    `afiliados_por_empleador` fija el numero de empleadores (n_afiliados / afiliados_por_empleador)."""
+    cfg = Config(n_afiliados=n_afiliados, periodo_inicio=periodo_inicio, periodo_snapshot=periodo_fin, seed=seed,
+                 afiliados_por_empleador=afiliados_por_empleador)
     empleadores = generar_empleadores_pandas(cfg)
     afiliados = generar_afiliados_pandas(n_afiliados, periodo_inicio, periodo_fin, seed, perfil=perfil)
     macro = macro_pandas(periodo_inicio, periodo_fin)

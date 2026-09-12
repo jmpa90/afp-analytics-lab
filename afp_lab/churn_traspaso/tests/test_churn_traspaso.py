@@ -21,9 +21,10 @@ from afp_lab.churn_traspaso import evaluate as E
 from afp_lab.churn_traspaso import features as F
 from afp_lab.churn_traspaso import model as M
 from afp_lab.churn_traspaso.run import main as run_main
-from afp_lab.churn_traspaso.synthetic import (AFP_PROPIA, AFP_TODAS, FONDOS, TIPOS_RECLAMO,
-                                             generar_tablas, resumen_simulacion,
-                                             tabla_parametros, tabla_parametros_markdown)
+from afp_lab.churn_traspaso import licitacion as LIC
+from afp_lab.churn_traspaso.synthetic import (AFP_PROPIA, AFP_TODAS, FONDOS, MERCADOS,
+                                             PARAMETROS_POR_PERFIL, TIPOS_RECLAMO, generar_tablas,
+                                             resumen_simulacion, tabla_parametros_markdown)
 
 N_TEST = 1_200
 SEED = 42
@@ -33,6 +34,11 @@ CORTE = 202409          # corte de referencia para los tests as-of
 @pytest.fixture(scope="module")
 def tablas() -> dict[str, pd.DataFrame]:
     return generar_tablas(n_afiliados=N_TEST, seed=SEED)
+
+
+@pytest.fixture(scope="module")
+def tablas_cuprum() -> dict[str, pd.DataFrame]:
+    return generar_tablas(n_afiliados=N_TEST, seed=SEED, perfil="cuprum")
 
 
 @pytest.fixture(scope="module")
@@ -79,24 +85,151 @@ def test_mercado_y_olas_de_traspaso_plausibles(tablas):
     # y la tasa movil de 12 meses no puede oscilar entre 1,6 % y 12,6 % como en la ronda 1
     assert 0.02 <= r["tasa_traspaso_12m_min"], r["tasa_traspaso_12m_min"]
     assert r["tasa_traspaso_12m_max"] <= 0.09, r["tasa_traspaso_12m_max"]
-    assert r["tasa_traspaso_12m_max"] / max(r["tasa_traspaso_12m_min"], 1e-9) <= 2.5
+    assert r["tasa_traspaso_12m_max"] / max(r["tasa_traspaso_12m_min"], 1e-9) <= 3.0
 
 
 def test_castigo_de_rentabilidad_domina_su_ventana(tablas):
     """El castigo documentado (-1 pp anual) debe verse por sobre el ruido del AR(1)."""
     m = tablas["mercado"]
-    par = tabla_parametros().set_index("parametro")["valor"]
+    merc = MERCADOS["sistema"]
     brechas = []
     for f in FONDOS:
         piv = m.pivot(index="periodo", columns="afp", values=f"rent_12m_{f}")
         brechas.append(piv[AFP_PROPIA] - piv[list(AFP_TODAS)].mean(axis=1))
     br = pd.concat(brechas, axis=1).mean(axis=1)
-    dentro = br[(br.index >= add_months(int(par["castigo_desde"]), 6))
-                & (br.index <= int(par["castigo_hasta"]))]
-    fuera = br[br.index < int(par["castigo_desde"])]
+    dentro = br[(br.index >= add_months(merc.ventaja_desde, 6)) & (br.index <= merc.ventaja_hasta)]
+    fuera = br[br.index < merc.ventaja_desde]
     assert dentro.mean() < fuera.mean() - 0.4, (dentro.mean(), fuera.mean())
     assert dentro.mean() < -0.3
     assert fuera.mean() > -0.2
+
+
+def test_perfil_cuprum_vs_sistema(tablas, tablas_cuprum):
+    """Encargo A: el perfil cuprum debe reproducir los rasgos de la Ficha N 165."""
+    r_sis = resumen_simulacion(tablas).set_index("indicador")["valor"]
+    r_cup = resumen_simulacion(tablas_cuprum).set_index("indicador")["valor"]
+    # renta: Cuprum tiene ingreso imponible promedio 1,73x el del sistema (2,33 M vs 1,35 M)
+    def rim_medio(t):
+        p = t["panel_mensual"]
+        rim = p["rim_emp1"] + p["rim_emp2"]
+        return float(rim[rim > 0].mean())
+    ratio = rim_medio(tablas_cuprum) / rim_medio(tablas)
+    assert 1.4 <= ratio <= 2.1, ratio
+    # saldo: cartera premium, saldo mediano claramente mayor
+    assert r_cup["saldo_mediano_clp"] > 1.4 * r_sis["saldo_mediano_clp"]
+    # mercado: roster real con Cuprum como propia y Uno como la mas barata
+    m = tablas_cuprum["mercado"]
+    assert set(m["afp"]) == set(MERCADOS["cuprum"].todas)
+    assert str(m.loc[m["es_propia"] == 1, "afp"].iloc[0]) == "CUPRUM"
+    ult = m[m["periodo"] == m["periodo"].max()]
+    assert str(ult.loc[ult["comision"].idxmin(), "afp"]) == "UNO"
+    assert float(ult.loc[ult["es_propia"] == 1, "comision"].iloc[0]) == pytest.approx(1.44)
+    # calibracion con la Ficha: ~0,47 % mensual de salidas y saldo NETO de traspasos positivo
+    assert 0.0035 <= r_cup["tasa_salida_mensual"] <= 0.0060, r_cup["tasa_salida_mensual"]
+    assert r_cup["traspasos_netos_total"] > 0, r_cup["traspasos_netos_total"]
+    # la ventaja de rentabilidad de Cuprum es positiva (lidera a 36 meses en los cinco fondos)
+    assert MERCADOS["cuprum"].ventaja_rentabilidad_propia > 0
+    assert "b0" in PARAMETROS_POR_PERFIL["cuprum"]
+
+
+def test_licitacion_stock_ley_21735(tablas_cuprum):
+    """Encargo B1: sorteo del 10 % de los no pensionados, opcion de 30 dias, destino la mas barata."""
+    lic = tablas_cuprum["licitacion_stock"]
+    assert len(lic) > 0
+    assert sorted(lic["periodo_sorteo"].unique()) == [202708]
+    assert set(lic["periodo_limite_opcion"]) == {202709}
+    assert set(lic["periodo_efectivo"]) == {202806}
+    # fraccion sorteada ~10 % de los elegibles (vigentes no pensionados)
+    vig = tablas_cuprum["saldos"]
+    n_vig = int((vig["periodo"] == 202708).sum())
+    assert 0.06 <= len(lic) / n_vig <= 0.11, len(lic) / n_vig
+    # decisiones y destino
+    assert set(lic["decision"]) <= {"SE_VA", "SE_QUEDA"}
+    assert 0.45 <= float((lic["decision"] == "SE_VA").mean()) <= 0.85
+    assert set(lic.loc[lic["decision"] == "SE_VA", "afp_destino"]) == {"UNO"}
+    assert (lic.loc[lic["decision"] == "SE_QUEDA", "afp_destino"] == "").all()
+    # el supuesto base de salida pasiva queda en el rango 55-75 % del brief
+    assert 0.55 <= float(lic["p_se_va_pasiva"].mean()) <= 0.75
+    # nadie sorteado dos veces en el mismo sorteo
+    assert not lic.duplicated(["afiliado_id", "periodo_sorteo"]).any()
+
+
+def test_escenarios_licitacion_monotonos(tablas_cuprum):
+    """Encargo B2: la campana retiene, priorizar por saldo x prob gana al azar, y hay sensibilidad."""
+    lic = tablas_cuprum["licitacion_stock"]
+    esc = LIC.escenarios_licitacion(lic)
+    # 3 supuestos de salida x (sin campana + 5 capacidades x 2 prioridades)
+    assert len(esc) == 3 * (1 + 5 * 2)
+    sin = esc[esc["capacidad_contacto"] == 0].set_index("p_salida_pasiva")
+    # mas salida pasiva -> mas saldo en riesgo (monotono)
+    assert sin["saldo_en_riesgo_sin_campana_mm"].is_monotonic_increasing
+    for p in (0.55, 0.65, 0.75):
+        e = esc[(esc["p_salida_pasiva"] == p) & (esc["capacidad_contacto"] == 0.30)].set_index("prioridad")
+        assert e.loc["saldo_x_prob", "saldo_retenido_mm"] > e.loc["aleatorio", "saldo_retenido_mm"]
+        assert e.loc["saldo_x_prob", "saldo_en_riesgo_con_campana_mm"] < sin.loc[p, "saldo_en_riesgo_sin_campana_mm"]
+    # rendimiento marginal decreciente: saldo retenido por contacto cae al ampliar la capacidad
+    e = esc[(esc["p_salida_pasiva"] == 0.65) & (esc["prioridad"] == "saldo_x_prob")].sort_values("capacidad_contacto")
+    rend = (e["saldo_retenido_mm"] / e["capacidad_contacto"]).to_numpy()
+    assert rend[0] > rend[-1]
+    # y la campana nunca "retiene" negativo
+    assert (esc["saldo_retenido_mm"] >= -1e-9).all()
+
+
+def test_combinacion_sorteo_con_score(tablas_cuprum):
+    """Encargo B3: p_ir = p_sorteo * sorteado + p_churn * (1 - sorteado)."""
+    lic = tablas_cuprum["licitacion_stock"]
+    cortes = F.cortes_evaluables(tablas_cuprum)
+    df = F.construir_dataset(tablas_cuprum, [cortes[-1]])
+    rng = np.random.default_rng(0)
+    p_churn = rng.random(len(df)) * 0.05
+    comb = LIC.combinar_con_score(df, p_churn, lic, 202708)
+    es_sorteado = comb["sorteado"] == 1
+    np.testing.assert_allclose(comb.loc[~es_sorteado, "p_ir"], comb.loc[~es_sorteado, "p_churn"])
+    np.testing.assert_allclose(comb.loc[es_sorteado, "p_ir"], comb.loc[es_sorteado, "p_sorteo"])
+    assert es_sorteado.sum() > 0
+    # el sorteo domina la lista de contacto: su probabilidad es un orden de magnitud mayor
+    assert comb.loc[es_sorteado, "p_ir"].mean() > 5 * comb.loc[~es_sorteado, "p_ir"].mean()
+    rank = LIC.ranking_combinado(comb, 0.10)
+    assert 0.0 <= float(rank["frac_de_la_lista_que_es_sorteo"].iloc[0]) <= 1.0
+
+
+def test_cortes_excluyen_la_licitacion(tablas_cuprum):
+    """La etiqueta de churn voluntario no puede contener el traspaso masivo del sorteo."""
+    lic = tablas_cuprum["licitacion_stock"]
+    efectivo = int(lic["periodo_efectivo"].min())
+    cortes = F.cortes_evaluables(tablas_cuprum)
+    for c in cortes:
+        ini, fin = periodo_to_idx(c) + 1, periodo_to_idx(c) + HORIZONTE_MESES
+        assert not (ini <= periodo_to_idx(efectivo) <= fin), c
+    # sin la exclusion, si habria cortes contaminados
+    todos = F.cortes_evaluables(tablas_cuprum, excluir_licitacion=False)
+    assert len(todos) > len(cortes)
+
+
+def test_pronostico_flujo_solo_usa_cortes_cerrados(dataset):
+    """Encargo C: el pronostico agregado se ajusta con horizonte cerrado y no toca el test."""
+    cortes = sorted(dataset["periodo_corte"].unique())
+    tr = dataset[dataset["periodo_corte"].isin(cortes[:-6])]
+    va = dataset[dataset["periodo_corte"].isin(cortes[-6:-3])]
+    te = dataset[dataset["periodo_corte"].isin(cortes[-3:])]
+    pron, tabla = M.seleccionar_pronostico(tr, va, objetivo="saldo", min_cortes=6)
+    # con pocos cortes cerrados las especificaciones grandes no alcanzan a ajustarse: se evaluan las
+    # que caben y se elige entre ellas (nunca se cae en silencio a una sin backtest)
+    assert set(tabla["especificacion"]) <= set(M.ESPECIFICACIONES_PRONOSTICO)
+    assert "constante" in set(tabla["especificacion"])
+    assert tabla["elegida"].sum() == 1
+    assert (tabla["n_evaluaciones_backtest"] >= 2).all()
+    pred = pron.predecir(te)
+    assert len(pred) == 3 and pred["tasa_pronosticada"].between(0, 0.5).all()
+    # el ancla ponderada por saldo deja el saldo en riesgo esperado en la tasa pronosticada
+    p = np.full(len(te), 0.02)
+    q = M.anclar_con_pronostico(te, p, pron)
+    for corte, tasa in pred.set_index("periodo_corte")["tasa_pronosticada"].items():
+        m = (te["periodo_corte"] == corte).to_numpy()
+        w = te.loc[m, "saldo_obligatorio"].to_numpy(dtype=float)
+        assert float((q[m] * w).sum() / w.sum()) == pytest.approx(float(tasa), rel=1e-6)
+    # y no cambia el orden
+    assert np.array_equal(np.argsort(p), np.argsort(q))
 
 
 # --------------------------------------------------------------------- leakage

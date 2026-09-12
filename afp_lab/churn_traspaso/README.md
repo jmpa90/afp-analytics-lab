@@ -1,7 +1,8 @@
 # 02 · Propensión a traspaso a otra AFP (churn de afiliados)
 
-**Ronda 3** — incorpora las correcciones de `docs/revisiones/ronda_2/churn_traspaso.md` (ronda 2
-aprobada con correcciones menores). Ver §11 "Qué cambió respecto de la ronda 1" y §12 "Ronda 3".
+**Ronda 2 del brief** (`BRIEF_RONDA2.md`): perfil **Cuprum** frente al perfil sistema, **licitación de
+afiliados antiguos de la Ley 21.735** y **pronóstico agregado del flujo** — todo en §13. El historial
+de correcciones de la ronda 1 está en §11 y §12. Se trabaja en el worktree `/home/user/wt/churn`.
 
 Modelo que estima, para cada afiliado vigente y cada mes de corte, la **probabilidad de que solicite
 un traspaso a otra AFP en los próximos 6 meses**, y ordena la cartera para que el equipo comercial
@@ -9,12 +10,20 @@ use su capacidad de contacto (10 % de la cartera al mes) donde más traspasos y 
 se salvan.
 
 ```bash
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000                       # 38 s - 2,5 min
+cd /home/user/wt/churn && export PYTHONPATH=/home/user/wt/churn
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil sistema       # 42 s
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum        # 45 s
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum \
+    --comparar-perfiles 42,123,7                                               # 2 min 42 s
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos         # 2,2 min
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 \
-    --semillas-estabilidad 42,123,7,2024,99                                    # 2,4 - 4,5 min
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos        # 2,2 min
-python -m pytest afp_lab/churn_traspaso/tests -q                               # 15 - 60 s
+    --semillas-estabilidad 42,123,7,2024,99                                    # 2,4 min
+python -m pytest afp_lab/churn_traspaso/tests -q                               # 18 s
 ```
+
+El paquete instalado en modo editable apunta al clon principal, así que **hay que exportar
+`PYTHONPATH=/home/user/wt/churn`** para que importe el worktree. Las salidas del perfil cuprum van a
+`salidas/churn_traspaso_cuprum/`.
 
 ---
 
@@ -48,7 +57,22 @@ fija, numpy vectorizado sobre afiliados con un loop de 69 meses: 2021-01 a 2026-
 | `uso_digital` | afiliado × mes vigente | `logins_app`, `logins_web`, `consultas_saldo`, `descargas_certificado` |
 | `afiliados_latente_churn` | afiliado | `lat_u_traspaso`, `lat_intencion_visible`, `lat_switcher`, `lat_con_brecha_antiguedad`. **Latente**: sólo alimenta diagnósticos en memoria, `columnas_features` la excluye por prefijo y el `run` **no la escribe en `fuentes/`** |
 
-### Mercado (`AFP_ANDES` es la propia; 5 competidoras ficticias)
+### Mercado: un roster por perfil (`MercadoPerfil`)
+
+`generar_tablas(perfil=...)` cambia a la vez el **universo común** (renta, educación, región, rubros,
+edad, densidad; ver `docs/contexto_afp_cuprum.md` §4) y el **mercado** (roster de AFP, comisiones,
+licitación de nuevos afiliados y ventaja de rentabilidad de la propia). `features.py` no sabe nada del
+perfil: lee la AFP propia y el roster de la tabla `mercado` (`es_propia`).
+
+| | `perfil="sistema"` (ronda 1) | `perfil="cuprum"` (Ficha N° 165, ago-2026) |
+|---|---|---|
+| AFP propia | AFP_ANDES (ficticia), comisión 1,27 → 1,19 → 1,14 % | **CUPRUM, 1,44 % fija** |
+| Competidoras | 5 ficticias, 0,58 – 1,45 % | **UNO 0,46 %** (0,49 % hasta abr-2026), MODELO 0,58 %, PLANVITAL 1,16 %, HABITAT 1,27 %, CAPITAL 1,44 %, PROVIDA 1,45 % |
+| Brecha de precio con la más barata | 0,56 – 0,69 pp | **0,98 pp** (el motor del churn) |
+| Licitación de nuevos afiliados | la propia gana 2022-08 → 2024-07 | MODELO y **UNO desde 2025-10**: la propia **nunca** recibe nuevos afiliados |
+| Rentabilidad de la propia | castigo de −1,0 pp anual en 2024-01 … 2025-12 | **ventaja de +0,25 pp anual en toda la ventana** (Cuprum lidera a 36 meses en los cinco fondos: A 11,26 %, B 9,42 %, C 5,99 %, D 3,06 %, E 1,36 %) |
+
+### Mercado del perfil sistema (`AFP_ANDES` es la propia; 5 competidoras ficticias)
 
 * **Comisiones** (% de la renta imponible): propia 1,27 → 1,19 (2024-01) → 1,14 (2025-07);
   competidoras entre 0,58 y 1,45. Es el rango real del sistema chileno, y la AFP cara recorta dos veces.
@@ -129,9 +153,6 @@ proxy del switcher, que es lo que se hizo.
 | `sigma_saldo_inicial` | 0.35 | Dispersion lognormal del saldo inicial |
 | `rho_ar_rentabilidad` | 0.92 | Persistencia AR(1) de la desviacion de rentabilidad de cada AFP |
 | `sigma_ar_rentabilidad` | 0.00025 | Innovacion mensual del AR(1) (~0,5 pp de sd en la ventana de 12 meses) |
-| `castigo_rentabilidad_propia` | -0.01 | Castigo anual de rentabilidad de la AFP propia en su ventana |
-| `castigo_desde` | 202401 | Primer mes del castigo de rentabilidad |
-| `castigo_hasta` | 202512 | Ultimo mes del castigo de rentabilidad |
 | `p_vendedor_competencia` | 0.016 | Prob. mensual de visita de un vendedor de la competencia |
 | `p_ejecutivo_propio` | 0.012 | Prob. mensual de contacto del ejecutivo propio |
 | `p_call_center` | 0.03 | Prob. mensual de contacto del call center propio |
@@ -442,6 +463,10 @@ Con la cartera simulada (≈14.280 afiliados vigentes por mes de test, ≈234.70
 8. Hiperparámetros elegidos por AUC de validación entre 5 configuraciones; el test se miró al final.
 9. Ventana de calibración de 3 cortes tras comparar 3 / 9 / 12 (§6).
 
+> **Ronda 2 del brief**: los criterios de esta tabla se volvieron a medir en los dos perfiles con la
+> ventana y el split nuevos; el resultado está en **§13 "Criterios de aceptación de la ronda 2"**, que
+> es el que hay que revisar. Lo que sigue es la medición de la ronda anterior (test 2026-01…03).
+
 **Criterios de aceptación vigentes** (fijados por el gerente en la ronda 2): para el banco sintético,
 **AUC ≥ 0,70 en todas las semillas** y, como **criterio principal**, la métrica de negocio —
 **captura al 10 % ≥ 30 % de los traspasos y ≥ 1,5 × la mejor regla, en todas las semillas**. Para
@@ -482,15 +507,19 @@ peor AUC del modelo con la mejor regla. Propuesta concreta en §10.
 ## 9. Cómo correr y tiempos
 
 ```bash
-cd /home/user/afp-analytics-lab
-python -m afp_lab.churn_traspaso.run --n-afiliados 20000
+cd /home/user/wt/churn && export PYTHONPATH=/home/user/wt/churn
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil sistema
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum
+python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --perfil cuprum --comparar-perfiles 42,123,7
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --semillas-estabilidad 42,123,7,2024,99
 python -m afp_lab.churn_traspaso.run --n-afiliados 20000 --experimentos
 python -m pytest afp_lab/churn_traspaso/tests -q
 ```
 
-Opciones: `--salida DIR`, `--seed`, `--periodo-inicio`, `--periodo-fin`, `--n-test`, `--n-valid`,
-`--sin-fuentes`, `--sin-techo`, `--semillas-estabilidad`, `--experimentos`.
+Opciones: `--perfil {sistema,cuprum}`, `--salida DIR`, `--seed`, `--periodo-inicio`, `--periodo-fin`,
+`--n-test`, `--n-valid`, `--sin-fuentes`, `--sin-techo`, `--semillas-estabilidad`,
+`--comparar-perfiles`, `--experimentos`. Con `--perfil cuprum` la salida va a
+`<salida>_cuprum/` para no pisar la del perfil sistema.
 
 `reportes/estabilidad_semillas.csv` y `estabilidad_rangos.csv` **requieren
 `--semillas-estabilidad`**; `hiperparametros.csv` y `ventana_calibracion.csv` **requieren
@@ -502,21 +531,26 @@ mediciones observadas. Todo con `num_threads=2` y 20.000 afiliados.
 
 | Paso | Máquina libre | Máquina cargada |
 |---|---|---|
-| `generar_tablas` + `construir_dataset` (37 cortes, 558.932 filas × 72 features) | 14,4 s | 17,5 s |
+| `generar_tablas` + `construir_dataset` (37 cortes; 517.070 filas sistema / 436.728 cuprum × 72 features) | 14,4 s | 17,5 s |
 | Guardar fuentes y dataset en parquet | 1,8 s | 2,0 s |
 | `entrenar` (LightGBM + 2 calibradores) | 9,6 s | 30,9 s |
 | Evaluar (métricas, segmentos, calibración, SHAP) | 2,9 s | 3,7 s |
 | `techo_predictibilidad` (modelo extra de diagnóstico) | 13,4 s | 90,9 s |
-| **Total corrida estándar** | **38 s** | **2 min 29 s** (límite: 5 min) |
+| **Total corrida estándar** (`--perfil sistema`) | **42 s** | **2 min 29 s** (límite: 5 min) |
+| **Total corrida estándar** (`--perfil cuprum`) | **45 s** | — |
+| `--comparar-perfiles 42,123,7` (5 corridas extra) | +117 s → 2 min 42 s | — |
 | `--semillas-estabilidad` (4 corridas extra) | +102 s → 2 min 21 s | 4 min 24 s |
 | `--experimentos` (5 configuraciones + 3 ventanas) | +94 s → 2 min 12 s | — |
 
-`python -m pytest afp_lab/churn_traspaso/tests -q` → **27 tests**, 15 s con la máquina libre y ~60 s
+`python -m pytest afp_lab/churn_traspaso/tests -q` → **33 tests en 18 s** con la máquina libre y ~60 s
 con la máquina cargada (límite: 2 min). `--sin-techo` y `--semillas-estabilidad ""` (el valor por
 defecto) dan margen adicional si hace falta.
 
-Salidas en `salidas/churn_traspaso/` (en `.gitignore`): `fuentes/*.parquet` (11 tablas; **la latente
-no se escribe**), `dataset.parquet`, `modelo/` y 19 `reportes/*.csv`.
+Salidas en `salidas/churn_traspaso/` y `salidas/churn_traspaso_cuprum/` (en `.gitignore`):
+`fuentes/*.parquet` (12 tablas, incluida `licitacion_stock`; **la latente `afiliados_latente_churn` no
+se escribe**), `dataset.parquet`, `modelo/` y hasta 28 `reportes/*.csv` (los de licitación y pronóstico
+salen siempre; `comparacion_perfiles*`, `estabilidad_*`, `hiperparametros` y `ventana_calibracion`
+requieren su flag).
 
 ## 10. Propuestas para `common/`, umbrales y próximos pasos
 
@@ -596,3 +630,267 @@ marca la regla binaria, 13,7 % – 51,0 %). Propongo una de estas dos variantes,
 | **Latentes** (corrección 4) | `columnas_features` sólo excluía por nombre; el techo pegaba `lat_u_traspaso`; la tabla latente se escribía en `fuentes/` | Exclusión **dura** por prefijo `lat_`/`p_`; el techo pasa lista de columnas explícita; la tabla latente no se persiste (3 tests) |
 | **Menores** (corrección 5) | — | Test del castigo con `add_months`; docstring de `split_temporal` ("a lo más `h+2`"); **nota de redundancia** de `meses_en_otras_afp` junto a las importancias; `reportes/hiperparametros.csv` (5 configuraciones) y `ventana_calibracion.csv` vía `--experimentos` |
 | **Lift de `common`** (corrección 6) | lift del baseline trivial 0,79–1,14 según el orden de las filas | `baseline_tasa_base` da exactamente **1,00**; todas las tablas de baselines se re-corrieron con la métrica nueva |
+
+## 13. Ronda 2 del brief: perfil Cuprum, licitación de stock y pronóstico agregado
+
+Cambios estructurales de esta ronda, antes de los resultados:
+
+* **Ventana simulada 2021-01 → 2028-12** (96 meses, `PERIODO_INICIO`/`PERIODO_FIN`) para cubrir la
+  primera licitación de afiliados antiguos (sorteo 2027-08, traspasos 2028-06). La macro de 2027-2028
+  es una **extrapolación plana** del último ancla disponible (UF 40.800, IMM 560.000, tope 92 UF): no
+  hay proyección real de esas series.
+* **Cortes evaluables 2022-03 → 2027-11** (69). `cortes_evaluables(excluir_licitacion=True)` **trunca**
+  la serie antes del primer corte cuya ventana de target contiene el mes efectivo del sorteo: los
+  traspasos por licitación no son churn voluntario y ensuciarían la etiqueta. Se pierden 7 cortes.
+* **Ventana de entrenamiento acotada** (`split_temporal(max_cortes_train=31)`): se usan los 31 cortes
+  más recientes que respetan la purga, de modo que alargar la ventana simulada no encarece el run y
+  el entrenamiento se parece a un reentrenamiento mensual. Split: train 2023-11 → 2026-05 (31),
+  valid 2026-12 → 2027-02, test **2027-09 → 2027-11**, 32 cortes descartados.
+* El test se movió de 2026-01…03 (rondas anteriores) a 2027-09…11, así que **los números de §6 no son
+  comparables uno a uno con los de esta sección**.
+
+### A. Perfil Cuprum vs perfil sistema (3 semillas cada uno, 20.000 afiliados)
+
+`reportes/comparacion_perfiles.csv` y `comparacion_perfiles_rangos.csv` (comando
+`--comparar-perfiles 42,123,7`). Semillas 42 / 123 / 7; entre paréntesis el rango.
+
+| | Sistema | Cuprum | Referencia real (Ficha N° 165) |
+|---|---|---|---|
+| **Simulación** | | | |
+| RIM de referencia, mediana del test | $897.598 (892 k – 905 k) | **$1.799.070** (1.787 k – 1.815 k) | ingreso imponible promedio $1.346.859 sistema vs $2.331.030 Cuprum (**1,73×**; la simulación da **2,0×** en la mediana) |
+| Saldo mediano del test | 13,8 MM (13,8 – 15,5) | **25,4 MM** (23,5 – 26,0) | Cuprum: 17,3 % de los activos con 4,5 % de los afiliados |
+| Tasa de salida mensual | 0,351 % (0,347 – 0,351) | **0,446 %** (0,434 – 0,458) | **0,47 %** mensual en el sistema (56.974 cuentas / 12,2 M afiliados) |
+| Traspasos netos en la ventana | **−2.647** (−2.659 … −2.630) | **+1.307** (+1.205 … +1.376) | Cuprum fue la AFP con **más traspasos netos positivos** en jun-26 (+4.128) |
+| Tasa anual sobre cotizantes | 5,44 % | 7,72 % | ver "tensión de calibración" abajo |
+| Rango de rentabilidad 12 m entre AFP | 1,56 – 1,88 pp | 1,68 – 1,82 pp | 1–2 pp |
+| **Modelo** | | | |
+| AUC | 0,698 – 0,706 (mediana 0,701) | **0,714 – 0,754** (mediana 0,747) | |
+| Average precision | 0,044 – 0,059 | 0,066 – 0,089 | |
+| Lift decil 1 | 3,22 – 3,58 | 3,00 – 3,86 | |
+| Brier | 0,0133 – 0,0161 | 0,0211 – 0,0273 | |
+| Tasa base del test | 1,36 – 1,66 % | 2,19 – 2,84 % | |
+| Techo de predictibilidad (diagnóstico) | 0,738 | 0,739 | |
+| **Negocio (10 % de la cartera)** | | | |
+| Captura de traspasos | 32,2 – 35,8 % | **30,0 – 38,6 %** | |
+| Captura de saldo en riesgo | 30,7 – 35,3 % | **23,1 – 35,1 %** | |
+| Razón contra la mejor regla | 1,52 – 1,93 (mediana 1,82) | 1,37 – 2,16 (mediana **2,04**) | |
+| **Calibración** | | | |
+| Sesgo del saldo en riesgo (isotónica) | −1,6 % … +6,2 % | +1,2 % … +11,4 % | |
+
+**Lo que cambia de verdad al pasar a Cuprum**, más allá de que los niveles se muevan:
+
+1. **El motor del churn es el precio, no la rentabilidad.** Con comisión fija en 1,44 % y ventaja de
+   rentabilidad positiva, la brecha de precio de 0,98 pp con Uno es constante en el tiempo: no hay
+   "ola" que explique variación entre meses, y por eso el pronóstico agregado estructural se degrada
+   (ver C). En las importancias, `brecha_rentabilidad_pp` cae del 4,9 % del gain (sistema) a **0,8 %**
+   (cuprum), `rim_ref` de 8,5 % a 0,9 % y `antiguedad_afp_meses` sube de 14,0 % a **31,9 %**: el modelo
+   del perfil cuprum es esencialmente un modelo de antigüedad y presión comercial.
+2. **Riesgo y valor están negativamente correlacionados.** En Cuprum el afiliado de saldo alto es el
+   antiguo, que es el de menor riesgo: la captura de **saldo** al 10 % (23,1 % en la semilla 42) queda
+   **por debajo** de la captura de traspasos (30,0 %), al revés que en el perfil sistema (35,3 % vs
+   35,8 %). Consecuencia operativa directa: en Cuprum **no basta ordenar por probabilidad**, hay que
+   ordenar por `probabilidad × saldo` si el objetivo es saldo retenido.
+3. **La cartera no recibe afiliados nuevos** (Uno tiene la licitación desde 2025-10), así que todo el
+   crecimiento viene de traspasos de entrada: por eso el perfil cuprum necesita que **36 % de los
+   afiliados antiguos entren por traspaso durante la ventana** para reproducir el saldo neto positivo
+   de la Ficha. Es el supuesto más fuerte del perfil.
+
+**Tensión de calibración, resuelta por el gerente en la revisión de la ronda 2: manda la Ficha.** El
+rango 4–7 % de la ronda 1 era un prior; la cifra oficial es 0,47 % mensual sobre afiliados del sistema.
+Para Cuprum no hay dato público de fuga *bruta* (la Ficha sólo publica el neto, +4.128 en junio de 2026),
+así que 0,446 % mensual es un **supuesto de trabajo** anclado al promedio del sistema, a reemplazar por la
+serie "traspasos por AFP de origen y destino" de la SP cuando se descargue. Antecedentes: el brief de la ronda 1 pedía 4–7 %
+anual **sobre cotizantes**; el de la ronda 2 pide calibrar con la Ficha, que da **0,47 % mensual sobre
+afiliados** (≈5,6 % anual sobre afiliados y, con la densidad de cotizantes del sistema de 53,5 %,
+≈10,5 % anual sobre cotizantes). Los dos objetivos no son compatibles. Se optó por el de la ronda 2
+para el perfil cuprum (0,446 % mensual, que deja 7,7 % anual sobre cotizantes, sobre el techo del 7 %
+de la ronda 1) y por dejar el perfil sistema como estaba (0,351 % mensual, 5,4 % sobre cotizantes,
+25 % por debajo de la Ficha) para no romper la comparabilidad con las rondas anteriores. El test
+`test_perfil_cuprum_vs_sistema` fija el rango mensual de cuprum en 0,35–0,60 %.
+
+### B. Licitación de afiliados antiguos (Ley 21.735) — `licitacion.py`
+
+Regla implementada: cada 2 años se sortea el **10 % de los afiliados no pensionados**; los sorteados
+pasan a la **AFP de menor comisión** salvo que opten por quedarse en **30 días**. `SORTEOS` fija el
+calendario (sorteo 2027-08, límite de opción 2027-09, traspaso efectivo 2028-06); el segundo sorteo
+(2029-08) queda fuera de la ventana.
+
+**Tabla `licitacion_stock`** (`simular_licitacion_stock`): afiliado, `periodo_sorteo`,
+`periodo_limite_opcion`, `periodo_efectivo`, saldo, antigüedad, RIM de referencia, `p_se_va_pasiva` y
+`decision` (SE_VA / SE_QUEDA) con `afp_destino`. Elegibles: vigentes al mes del sorteo con estado
+laboral distinto de RETIRADO y `tipo_afiliado` distinto de PENSIONADO_ACTIVO; sorteo aleatorio simple.
+
+La propensión a irse es un logit anclado en `p_salida_pasiva_base` (**65 %**, punto medio del rango
+55–75 % del brief) y modulado por drivers conocidos al sorteo: antigüedad (−0,55 por log1p(años)),
+saldo (−0,18 por log10(saldo/10 MM)), renta (−0,22), uso digital (−0,10 por login mensual), reclamo en
+12 m (+0,45) y la **propensión latente al churn** del afiliado (+0,80 por desviación estándar), más
+ruido (σ 0,35). `p_se_va_pasiva` es la probabilidad **sin** campaña: la retención es un escenario, no
+algo ya incorporado en la tabla.
+
+**Tamaño del evento** (`reportes/licitacion_resumen.csv`, 20.000 afiliados, semilla 42):
+
+| Perfil | Afiliados en cartera | Sorteados | % | Saldo sorteado | % del saldo | Saldo medio sorteado vs cartera | P(se va) media | Saldo en riesgo esperado |
+|---|---|---|---|---|---|---|---|---|
+| Sistema | 13.714 | 1.300 | 9,5 % | 24.738 MM | 9,6 % | 19,0 vs 18,8 MM | 0,667 | **15.221 MM** |
+| **Cuprum** | 12.497 | **1.194** | 9,6 % | **37.898 MM** | 9,9 % | 31,7 vs 30,7 MM | 0,681 | **23.943 MM** |
+
+Para Cuprum, un solo sorteo pone en riesgo **23.943 MM CLP (6,2 % del saldo administrado)** en un mes,
+frente a los ~2.000 MM que se van por churn voluntario en un semestre: **el sorteo es un orden de
+magnitud mayor que todo el problema de retención ordinaria**.
+
+**Escenarios de retención** (`reportes/licitacion_escenarios.csv`, perfil cuprum; campaña con
+capacidad de 30 % de los sorteados = 358 contactos y efecto −1,20 en el logit):
+
+| Salida pasiva | Capacidad | Prioridad | Saldo en riesgo | Saldo retenido | Afiliados retenidos | Saldo retenido por contacto |
+|---|---|---|---|---|---|---|
+| 55 % | 0 % | — | 20.826 MM | — | — | — |
+| 55 % | 30 % | **saldo × prob** | 15.670 MM | **5.156 MM** | 89 | 14,4 MM |
+| 55 % | 30 % | aleatorio | 18.300 MM | 2.526 MM | 85 | 7,1 MM |
+| **65 %** | 0 % | — | **23.943 MM** | — | — | — |
+| **65 %** | 30 % | **saldo × prob** | **18.683 MM** | **5.260 MM** | 86 | **14,7 MM** |
+| 65 % | 30 % | aleatorio | 21.395 MM | 2.548 MM | 83 | 7,1 MM |
+| 75 % | 0 % | — | 27.230 MM | — | — | — |
+| 75 % | 30 % | saldo × prob | 22.089 MM | 5.140 MM | 81 | 14,4 MM |
+| 75 % | 30 % | aleatorio | 24.802 MM | 2.428 MM | 76 | 6,8 MM |
+
+Lecturas:
+
+* **Priorizar por `saldo × probabilidad` duplica el saldo retenido** frente a contactar al azar
+  (5.260 vs 2.548 MM con el supuesto base), con el mismo número de contactos. Los afiliados retenidos
+  son casi los mismos (86 vs 83): toda la ganancia está en *a quién* se retiene, no en cuántos.
+* La **sensibilidad al supuesto de salida pasiva es alta en el nivel y baja en la decisión**: el saldo
+  en riesgo se mueve entre 20.826 y 27.230 MM (±13 %) según se asuma 55 % o 75 %, pero el saldo
+  retenido por la campaña es prácticamente el mismo (5.140 – 5.260 MM) y la conclusión de priorizar
+  por valor esperado no cambia en ningún escenario. Es decir: **la decisión es robusta al supuesto,
+  el presupuesto no**.
+* Con 30 % de capacidad se retiene el 22 % del saldo en riesgo. Ampliar la capacidad sigue siendo la
+  palanca de mayor impacto absoluto, pero con **rendimiento marginal decreciente**: el saldo retenido por
+  contacto cae de ~14 MM al 30 % a ~7 MM al 100 % (la malla de `escenarios_licitacion` incluye ahora
+  10/30/50/70/100 %; `reportes/licitacion_escenarios.csv`). La inversión se justifica tramo a tramo con
+  ese rendimiento marginal, no con la cota del 30 %.
+* Limitación: `licitacion_stock` se genera después de la cartera y no retroalimenta `saldos`,
+  `panel_mensual` ni `traspasos`; los afiliados que se van en 2028-06 siguen en la cartera simulada.
+  No afecta a esta ronda (los cortes se truncan antes) pero hay que resolverlo antes de simular el
+  segundo sorteo (2029-08) o de mover `licitacion.py` a `common/`.
+
+**Combinación con el score** (`combinar_con_score`, `reportes/licitacion_ranking_combinado.csv`):
+`p_ir = p_sorteo_se_va · sorteado + p_churn · (1 − sorteado)`. El resultado operativo es contundente:
+
+| Fracción contactada | De la lista, % que es sorteo | % de los sorteados cubierto | Saldo cubierto |
+|---|---|---|---|
+| 5 % (595) | **100 %** | 51 % | 15.639 MM (4,1 % de la cartera) |
+| 10 % (1.190) | **95,6 %** | 98 % | 38.489 MM (10,0 %) |
+| 20 % (2.380) | 49 % | 100 % | 71.560 MM (18,7 %) |
+
+Con `p_sorteo ≈ 0,68` contra `p_churn ≈ 0,03`, **el sorteo se come toda la capacidad de contacto**: la
+lista del 10 % es 96 % sorteados y el churn voluntario desaparece del ranking. La recomendación es
+gestionar las dos campañas con **presupuestos separados** (una para el sorteo, acotada a los 30 días
+de la opción, y otra para el churn ordinario), no con una lista única.
+
+**Por qué el modelo de churn no se reentrena con el sorteo** (docstring de `licitacion.py`): no hay
+etiquetas (la primera licitación no ha ocurrido), la mecánica es distinta (la salida es *por defecto* y
+lo que el afiliado decide es quedarse) y la población es aleatoria, no auto-seleccionada; meterlo como
+feature contaminaría el modelo voluntario. Para aprenderlo se necesita (a) el resultado del primer
+sorteo por segmento, (b) el registro de a quién se contactó y cómo, y (c) idealmente **asignación
+aleatoria de la capacidad de contacto en el primer sorteo**, que permitiría medir el uplift sin
+supuestos. Mientras no existan, `p_salida_pasiva` es un supuesto y todo se reporta como escenario.
+
+### C. Pronóstico agregado del flujo (backlog de la ronda 1) — resultado negativo
+
+`model.PronosticoFlujo` ajusta el **logit de la tasa de traspaso a 6 meses** por corte sobre variables
+conocidas al corte (brecha de comisión, brecha de rentabilidad 12 m, antigüedad media de la cartera,
+marzo, agosto y tendencia lineal), con dos objetivos: la tasa de **conteo** y la tasa **ponderada por
+saldo** (la que corresponde al estimando cuando se suma `prob × saldo`). `ajustar_prior` acepta pesos,
+así que el ancla puede fijar `Σ p·saldo / Σ saldo` en vez del conteo.
+
+`seleccionar_pronostico` elige la especificación con un **backtest de ventana expansiva** sobre los
+cortes de horizonte cerrado (24 evaluaciones fuera de muestra; el test nunca participa), compitiendo
+contra el baseline honesto "constante" (la tasa media de la historia cerrada):
+
+| Perfil | Especificación elegida | MAE relativo (backtest) | MAE de "constante" | MAE de "estructural+tendencia" |
+|---|---|---|---|---|
+| Sistema | `estructural` (5 variables) | **8,4 %** | 20,0 % | 10,6 % |
+| Cuprum | **`constante`** | **17,2 %** | 17,2 % | 158 % |
+
+En el perfil cuprum las especificaciones estructurales **explotan** (MAE 158 %): la brecha de comisión
+es casi constante en el tiempo (1,44 % fija contra 0,46 % de Uno, con un único escalón en 2026-05), de
+modo que el diseño queda casi colineal y los coeficientes son inestables. El backtest lo detecta y se
+queda con la media histórica; es exactamente para eso que la tendencia compite en igualdad de
+condiciones en vez de venir por defecto.
+
+**Y el ancla no mejora el nivel** (`reportes/saldo_en_riesgo.csv`, sesgo del saldo en riesgo):
+
+| Versión del score | Sistema (3 semillas) | Cuprum (3 semillas) |
+|---|---|---|
+| Sin calibrar | +17,1 % (+17,1 … +43,5) | −13,3 % (−13,3 … +10,2) |
+| **Isotónica (ventana reciente cerrada)** | **−1,6 %** (−1,6 … +6,2) | **+1,2 %** (+1,2 … +11,4) |
+| Isotónica + pronóstico (ponderado por saldo) | +8,5 % (−16,3 … +8,5) | −9,9 % (−9,9 … +38,5) |
+| Isotónica + ancla perfecta (diagnóstico) | −4,1 % | −7,3 % |
+
+La conclusión honesta es que **el pronóstico agregado no resuelve el problema que motivó el backlog**:
+con la validación contigua al test (7 meses), la isotónica ya deja el sesgo en ±11 % y el pronóstico
+sólo agrega varianza (±38 %). El problema de nivel de la ronda 1 (−4 % a +40 %) venía de que la
+validación caía en otra fase de la onda del mercado, no de que faltara un modelo agregado; al mover el
+test a un tramo calmo el problema desapareció por sí solo. Se deja la maquinaria (`PronosticoFlujo`,
+`seleccionar_pronostico`, `ajustar_prior` con pesos, `anclar_con_pronostico`) porque es la pieza que
+haría falta si la AFP quisiera publicar el nivel en un tramo de onda —y porque el backtest de
+selección es reutilizable— pero **la recomendación sigue siendo usar la isotónica sobre la ventana
+cerrada más reciente** y no anclar con el pronóstico. El saldo en riesgo esperado sigue **no
+entregado** como salida operativa (§7).
+
+### Criterios de aceptación de la ronda 2
+
+| Criterio | Sistema | Cuprum | ¿Cumple? |
+|---|---|---|---|
+| AUC ≥ 0,70 en cada semilla | 0,6978 / 0,7006 / 0,7058 | 0,7142 / 0,7469 / 0,7539 | **no en sistema** (semilla 42 a 0,0022 del umbral); sí en cuprum 3/3 |
+| Captura al 10 % ≥ 30 % en cada semilla | 35,8 / 32,7 / 32,2 % | 30,0 / 35,6 / 38,6 % | **sí, 3/3 en ambos** (cuprum semilla 42 en 30,04 %) |
+| Razón ≥ 1,5 en la mediana | 1,82 | 2,04 | **sí en ambos** |
+| Lift decil 1 ≥ 3 (brief ronda 1) | 3,58 / 3,27 / 3,22 | 3,00 / 3,56 / 3,86 | sí, 3/3 en ambos |
+| Sin perder segmentos grandes (CONVENCIONES §4) | **21 de 23** | **21 de 22** | **no** (ver abajo) |
+| Escenarios de licitación con rangos | — | 9 escenarios × 3 supuestos | sí |
+| Runtime < 5 min y tests < 2 min | 42 s | 45 s (2 min 42 s con la comparación) | sí; 33 tests en 18 s |
+
+**Criterios no cumplidos y su causa:**
+
+1. **AUC del perfil sistema en la semilla 42: 0,6978** (umbral 0,70), con 0,7006 y 0,7058 en las otras
+   dos. La causa es el cambio de ventana de test: al truncar los cortes por la licitación, el test se
+   movió a 2027-09…11, donde la tasa base del perfil sistema cae a 1,36–1,66 % (contra 1,78–2,57 % en
+   las rondas anteriores) porque la comisión de la propia ya está recortada y el castigo de
+   rentabilidad terminó. Con menos eventos y menos dispersión de precio hay menos que ordenar. No se
+   tocó ningún parámetro para cruzar el umbral. El perfil cuprum, que es el relevante para el
+   laboratorio, queda en 0,714–0,754.
+2. **El modelo pierde en el segmento 60+** frente a la regla graduada: sistema AUC 0,625 vs 0,735
+   (−0,110, 7,0 % de las filas, **37 eventos**) y cuprum 0,696 vs 0,719 (−0,023, 7,6 %, **73
+   eventos**). Con esa cantidad de eventos el error estándar del AUC es del orden de ±0,05–0,08, así
+   que la diferencia del perfil cuprum está dentro del ruido y la del perfil sistema es del orden de
+   1,5 errores estándar. En el perfil sistema se pierde además en renta 0–600k por −0,009 (21 % de las
+   filas), que es empate práctico. Propuesta: reportar el AUC por segmento con intervalo (bootstrap) y
+   no dar por perdido un segmento con menos de ~100 eventos; y si la pérdida en 60+ persiste con más
+   semillas, un modelo específico para cercanos a la pensión, donde el driver es la decisión de
+   jubilación y no el precio.
+
+### Archivos nuevos y ampliados
+
+| Archivo | Qué se agregó |
+|---|---|
+| `licitacion.py` | **nuevo**: `ParametrosLicitacion`, `SORTEOS`, `simular_licitacion_stock`, `escenario_licitacion`, `escenarios_licitacion`, `resumen_riesgo_licitacion`, `combinar_con_score`, `ranking_combinado`, `tabla_parametros_licitacion` |
+| `synthetic.py` | `MercadoPerfil` / `MERCADOS` (roster, comisiones, licitación y ventaja de rentabilidad por perfil), `PARAMETROS_POR_PERFIL`, `PERIODO_INICIO`/`PERIODO_FIN`, `perfil` en `generar_mercado` y `generar_tablas`, tabla `licitacion_stock`, indicadores `tasa_traspaso_anualizada_cotizantes`, `tasa_salida_mensual` y `traspasos_netos_total` |
+| `features.py` | AFP propia y roster leídos de la tabla `mercado` (agnóstico del perfil), `cortes_evaluables(excluir_licitacion=True)`, `split_temporal(max_cortes_train=31)` |
+| `model.py` | `serie_mensual_flujo`, `PronosticoFlujo`, `ESPECIFICACIONES_PRONOSTICO`, `seleccionar_pronostico` (backtest expansivo), `anclar_con_pronostico`, `ajustar_prior(peso=...)`, `entrenar(columnas=...)` |
+| `run.py` | `--perfil`, `--comparar-perfiles`, reportes de licitación y de pronóstico, salida separada por perfil |
+| `tests/` | 6 tests nuevos (33 en total): perfil cuprum vs sistema, licitación de stock, monotonía de los escenarios, combinación con el score, exclusión de cortes contaminados y pronóstico con horizonte cerrado |
+
+### Propuestas adicionales para `common/`
+
+7. `common/synth_base.py`: el perfil `sistema` deja la densidad de cotizantes en ~79 % contra el 47 %
+   real del sistema (la propia docstring lo reconoce). Mientras siga así, cualquier tasa expresada
+   "sobre cotizantes" no es comparable con la Ficha. Propongo calibrar el perfil `sistema` a la
+   densidad real en una ronda coordinada entre los cuatro proyectos, porque cambia los resultados de
+   todos a la vez.
+8. `common/`: la licitación de stock de la Ley 21.735 afecta a los cuatro proyectos (cambia la cartera
+   de 2028 en adelante). `licitacion.py` está escrito sin dependencias del proyecto 02
+   (`simular_licitacion_stock` recibe las tablas y el latente como argumentos) justamente para poder
+   moverse a `common/` si el gerente lo decide.
+9. `common/calendario.py`: la macro se extrapola plana desde 2027. Si los otros proyectos van a
+   simular la reforma (cotización adicional 3,5 % → 8,5 %, fondos generacionales desde 2027-04), hace
+   falta extender las anclas y agregar la tasa de cotización como serie, no como constante.

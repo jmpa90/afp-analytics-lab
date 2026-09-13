@@ -26,12 +26,15 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | 01 | `rim_nowcasting` | ¿Cuál es la renta imponible de cada afiliado en los 2 meses que aún no conocemos? | Nowcasting (hurdle GBT) | Cerrado ronda 1 | PySpark |
 | 02 | `churn_traspaso` | ¿Qué afiliados se traspasarán a otra AFP en los próximos 6 meses? | Clasificación | Cerrado ronda 2 (Cuprum + licitación de stock) | pandas + LightGBM |
 | 03 | `propension_apv` | ¿Quién abrirá o aumentará ahorro previsional voluntario y cuánto? | Clasificación + monto | Cerrado ronda 2 (Cuprum) | pandas + LightGBM |
-| 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 2 (Cuprum + códigos de planilla) | pandas + LightGBM |
+| 04 | `riesgo_cese_cotizacion` | ¿Quién dejará de cotizar en 3 y 6 meses, y quién volverá a cotizar? | Clasificación calibrada | Cerrado ronda 2; corrección ronda 3 (reingreso, ver abajo) | pandas + LightGBM |
 | 05 | `riesgo_empleador` | ¿Qué empleadores declararán y no pagarán, o pagarán tarde? | Clasificación (empleador) | Cerrado ronda 3 (más empleadores, ver abajo) | pandas + LightGBM |
 | 06 | `segmentacion_afiliados` | ¿Qué segmentos de comportamiento existen y cómo se describen? | Clustering | Cerrado ronda 2 (4 segmentos) | pandas + scikit-learn |
 | — | `common/planilla` | Planilla Previred sintética con códigos oficiales (modelo de datos regulatorio) | Datos | Cerrado ronda 2 | pandas |
-| 07 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
-| 08 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
+| 07 | `uplift_retencion` | ¿A quién conviene contactar para que el contacto de verdad evite el traspaso? | Inferencia causal / uplift (T-, X-, DR-learner) | Cerrado ronda 4 | pandas + LightGBM |
+| 08 | `secuencial_afiliado` | ¿Una red secuencial multi-tarea supera a los LightGBM de 02 y 04? | Red neuronal (GRU, PyTorch CPU) | Cerrado ronda 4 (no aporta, ver abajo) | PyTorch + LightGBM |
+| 09 | `bandit_contacto` | ¿Qué política de contacto maximiza la retención neta de costo? | Bandits contextuales + evaluación off-policy | Cerrado ronda 4 | pandas + LightGBM |
+| 10 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
+| 11 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
 
 ## Resultados de la ronda 1
 
@@ -76,14 +79,27 @@ en `docs/revisiones/ronda_2/`.
 
 ## Resultados de la ronda 3
 
-Un solo workstream (`empleador`), dos objetivos transversales. Con 20.000 afiliados salvo indicación;
-detalle completo en `afp_lab/common/README.md` y `afp_lab/riesgo_empleador/README.md` (§"Ronda 3").
+Tres workstreams (`churn`, `empleador`, `datos`) más una corrección de 04. Con 20.000 afiliados salvo
+indicación; briefs en `docs/briefs/ronda_3/`, revisiones en `docs/revisiones/ronda_3/`.
 
 | Cambio | Resultado | Lectura de negocio |
 |---|---|---|
 | Densidad de cotización recalibrada (`common/synth_base.py`, perfiles `sistema` y `cuprum`) | Densidad de un mes típico: sistema ~79 %→**47,7 %** (Ficha 165: 47,3 %), cuprum ~72 %→**66,4 %** (Ficha 165: 66 %). Sube el AUC en 02/03/04/05 (cartera cesante más grande y distinta de la empleada) y resuelve la pérdida en segmentos grandes que tenía 02; baja el AUC de reingreso de 04 (0,72→0,61, bajo su umbral) | Los indicadores "sobre cotizantes" ahora son comparables con la Ficha de la SP; el proyecto 04 necesita revisar su target de reingreso a esta densidad más realista |
 | 05 Empleador: más empleadores (`afiliados_por_empleador` 40→**20**, ~500→~1.000 empleadores) | AUC 0,818→**0,865**; volatilidad intrínseca del agregado mensual 98,9 %→**63,6 %**; captura de masa al 10 % 54,5 %→48,6 % en la semilla de referencia (51,9 % promedio de 5 semillas); el modelo deja de perder en el segmento GRANDE | La proyección de recaudación sigue siendo trimestral, no mensual, pero el ruido del agregado bajó a un tercio; la relación 1/√n_empleadores predice cuánto más haría falta escalar para cerrar el criterio de ±10 % |
+| 02 Churn: la licitación de stock retroalimenta la cartera; bootstrap del AUC por segmento | Sorteos parametrizables (2027-08 y 2029-08); quienes se van salen de saldos, contactos y reclamos desde el mes efectivo, sin contaminar el target. AUC 60+ 0,696 IC [0,64–0,76]; tramo de saldo 40M+ 0,667 IC [0,64–0,70], único segmento grande confiablemente bajo 0,70 | El supuesto de fuga de 0,446 % mensual sigue explícito: la SP publica el neto por AFP y el bruto del sistema, no la fuga bruta por AFP |
+| 04 Cese: corrección del reingreso | Diagnóstico: en la población de reingreso rubro, tamaño y estacionalidad eran constantes y la contratación del generador no tiene memoria; features del último empleo suben el AUC solo +0,003 a +0,008 (0,61 sistema, 0,62–0,63 cuprum), sin recuperar el 0,70 | El reingreso quedó casi impredecible por diseño del generador; ajuste propuesto (probabilidad de contratación dependiente de la duración del cese) para la próxima ronda |
 | Suite completa del laboratorio | **155 tests, 0 fallos, ~9 min 46 s** (`python -m pytest afp_lab -q`, incluido el proyecto 01 con Spark) | Dos umbrales de plausibilidad del generador se ajustaron en `churn_traspaso` (documentados inline); ningún umbral de modelo se tocó |
+
+## Resultados de la ronda 4 (técnicas avanzadas)
+
+Tres proyectos nuevos, 10.000 afiliados, perfil Cuprum; briefs en `docs/briefs/ronda_4/`, revisiones en
+`docs/revisiones/ronda_4/`. El objetivo era saber si la técnica paga, no que ganara.
+
+| Proyecto | Resultado | Lectura de negocio |
+|---|---|---|
+| 07 Uplift causal (nuevo) | Campaña histórica confundida + holdout aleatorio 10 %; efecto verdadero heterogéneo (persuadibles, neutros, sleeping dogs). Spearman CATE estimado vs verdadero: DR 0,195, X 0,186, T 0,152, riesgo 0,054. Con 20 % de presupuesto el X-learner evita 2,75× los traspasos del ranking por riesgo (4,5× al 10 %). Qini en holdout aleatorio positivo solo para el X-learner y con IC que cruza cero | Aprobado con reserva: contactar por uplift y no por riesgo cambia a quién se llama; la validación experimental necesita un holdout mayor que el del sandbox |
+| 08 Red secuencial (nuevo) | GRU multi-tarea sobre 24 meses vs LightGBM de 02/04 en los mismos cortes: traspaso 0,585 vs 0,726; cese 0,777 vs 0,861. Con la misma información, LightGBM con lags empata con la red (0,594 / 0,778) | No aporta hoy: la brecha es de información (variables operacionales y de mercado que la secuencia no incluye), no de arquitectura |
+| 09 Bandit de contacto (nuevo) | Cinco políticas, 24 meses, 400 contactos/mes, 5 semillas, recompensa rezagada 6 meses, OPE con IPS/SNIPS/DR (error < 10 %). Con la señal contextual calibrada, Thompson lineal gana a ε-greedy en 3/5 semillas; solo con señal 4× más fuerte llega a 4/5; LinUCB nunca | Aprobado: con la heterogeneidad documentable hoy, un promedio simple por brazo rinde casi igual que un bandit contextual; primero hay que medir cuánta señal traen los datos reales |
 
 ## Persona: somos AFP Cuprum
 

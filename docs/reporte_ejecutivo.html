@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portafolio Analítico Cuprum</title>
+<meta name="description" content="Informe ejecutivo del portafolio de Data Analytics de AFP Cuprum: qué ofrece el equipo, evidencia en el sandbox sintético y camino a producción.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F3F5F7; --ink:#14202B; --surface:#FFFFFF; --surface-2:#E7EAEF;
+  --border:#D3DAE1; --muted:#55636E;
+  --accent:#B5651D; --accent-ink:#FFFFFF;
+  --accent-2:#3F8A7B; --accent-2-ink:#FFFFFF;
+  --good:#2E7D46; --good-bg:#E4F3E8;
+  --warn:#9A6400; --warn-bg:#FBEDD3;
+  --critical:#B3261E; --critical-bg:#FBE4E1;
+  --font-display:"Bricolage Grotesque","Segoe UI",system-ui,-apple-system,sans-serif;
+  --font-body:"Source Sans 3","Segoe UI",-apple-system,Roboto,sans-serif;
+  --font-mono:"IBM Plex Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --measure:68ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#101720; --ink:#E7EEF3; --surface:#161F29; --surface-2:#1E2A35;
+    --border:#2B3A47; --muted:#9FB1BE;
+    --accent:#E0964F; --accent-ink:#1A1206;
+    --accent-2:#5FBBA9; --accent-2-ink:#08201C;
+    --good:#63C77F; --good-bg:#123420;
+    --warn:#E3AE45; --warn-bg:#3A2B0C;
+    --critical:#E88680; --critical-bg:#3B1613;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#101720; --ink:#E7EEF3; --surface:#161F29; --surface-2:#1E2A35;
+  --border:#2B3A47; --muted:#9FB1BE;
+  --accent:#E0964F; --accent-ink:#1A1206;
+  --accent-2:#5FBBA9; --accent-2-ink:#08201C;
+  --good:#63C77F; --good-bg:#123420;
+  --warn:#E3AE45; --warn-bg:#3A2B0C;
+  --critical:#E88680; --critical-bg:#3B1613;
+}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body);
+  font-size:16px; line-height:1.55; padding-inline:16px;
+}
+a{color:var(--accent);}
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible{
+  outline:3px solid var(--accent-2); outline-offset:2px; border-radius:3px;
+}
+h1,h2,h3,h4{font-family:var(--font-display); line-height:1.15; letter-spacing:-0.01em;}
+h1{font-size:clamp(1.7rem,4vw,2.6rem); margin:0 0 .3em;}
+h2{font-size:clamp(1.3rem,3vw,1.7rem); margin:2.2em 0 .6em; padding-top:.2em; border-top:1px solid var(--border);}
+h3{font-size:1.15rem; margin:1.6em 0 .5em;}
+h4{font-size:1rem; margin:1.2em 0 .4em;}
+p{margin:.6em 0;}
+.mono, .kpi-num, .md-kpi-num, .num, table td.num{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+.medida{max-width:var(--measure);}
+.wrap{max-width:1180px; margin:0 auto;}
+.layout{display:flex; gap:2.2rem; align-items:flex-start; padding-block:1.4rem 4rem;}
+nav.indice{
+  position:sticky; top:1rem; flex:0 0 220px; align-self:flex-start;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:.9rem .9rem; max-height:calc(100vh - 2rem); overflow-y:auto;
+}
+nav.indice h2{margin:0 0 .5em; font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--muted); border:none; padding:0;}
+nav.indice ul{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.15rem;}
+nav.indice a{display:block; padding:.32rem .5rem; border-radius:6px; color:var(--ink); text-decoration:none; font-size:.9rem;}
+nav.indice a:hover{background:var(--surface-2);}
+main{flex:1 1 auto; min-width:0;}
+section{margin-bottom:2.4rem;}
+.badge{display:inline-block; font-family:var(--font-mono); font-size:.72rem; font-weight:600;
+  background:var(--surface-2); color:var(--muted); border:1px solid var(--border); border-radius:999px;
+  padding:.15em .65em; margin-right:.5em;}
+.badge-accent{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+.kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.9rem; margin:1.2rem 0;}
+.kpi-card{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.05rem;
+  border-top:4px solid var(--accent);}
+.kpi-num{font-size:1.7rem; font-weight:600; color:var(--accent); line-height:1.1;}
+.kpi-label{margin-top:.35rem; font-size:.92rem;}
+.kpi-sub{margin-top:.25rem; font-size:.78rem; color:var(--muted);}
+.mensajes{list-style:none; margin:1rem 0; padding:0; display:grid; gap:.7rem;}
+.mensajes li{background:var(--surface); border:1px solid var(--border); border-left:5px solid var(--accent-2);
+  border-radius:8px; padding:.75rem .95rem;}
+.chip{display:inline-flex; align-items:center; gap:.4em; font-size:.78rem; font-weight:600; padding:.2em .65em .22em;
+  border-radius:999px; white-space:nowrap;}
+.chip-dot{width:.5em; height:.5em; border-radius:50%; display:inline-block;}
+.chip-ok{background:var(--good-bg); color:var(--good);}
+.chip-ok .chip-dot{background:var(--good);}
+.chip-warn, .chip-atención{background:var(--warn-bg); color:var(--warn);}
+.chip-warn .chip-dot, .chip-atención .chip-dot{background:var(--warn);}
+.chip-critical, .chip-critico{background:var(--critical-bg); color:var(--critical);}
+.chip-critical .chip-dot, .chip-critico .chip-dot{background:var(--critical);}
+.chip-info{background:var(--surface-2); color:var(--muted);}
+.chip-info .chip-dot{background:var(--muted);}
+.grid-cap{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.9rem; margin:1rem 0;}
+.cap-card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:.9rem 1rem;}
+.cap-card h4{margin:.1em 0 .3em; color:var(--accent-2);}
+.proyecto{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1.3rem 1.4rem 1.5rem;
+  margin:1.3rem 0 2.1rem; scroll-margin-top:1rem;}
+.proyecto.encurso{border-style:dashed; border-color:var(--accent-2);}
+.proyecto-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:.6rem; margin-bottom:.2rem;}
+.proyecto-head h3{margin:0;}
+dl.campos{display:grid; grid-template-columns:max-content 1fr; gap:.35rem 1rem; margin:.7rem 0;}
+dl.campos dt{font-weight:600; color:var(--muted); font-size:.85rem; padding-top:.15rem;}
+dl.campos dd{margin:0;}
+.reserva{background:var(--warn-bg); border:1px solid var(--warn); border-radius:10px; padding:.75rem .95rem; margin:1rem 0;}
+.reserva-tag{display:inline-block; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+  color:var(--warn); margin-bottom:.3rem;}
+.reserva p{margin:.2rem 0 0;}
+.fuente-cita{font-size:.78rem; color:var(--muted); border-top:1px dashed var(--border); padding-top:.5rem; margin-top:1rem;}
+.chart-wrap{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:.8rem .9rem 1rem; margin:1rem 0;}
+.chart-wrap figure{margin:0;}
+.chart-wrap figcaption{font-size:.82rem; color:var(--muted); margin-top:.4rem;}
+.mockup{border:1px solid var(--border); border-radius:12px; overflow:hidden; margin:1rem 0; background:var(--surface-2);}
+.mockup-bar{display:flex; align-items:center; gap:.4rem; background:var(--surface); padding:.5rem .8rem; border-bottom:1px solid var(--border);}
+.mockup-dot{width:9px; height:9px; border-radius:50%; background:var(--border);}
+.mockup-title{margin-left:.5rem; font-size:.82rem; font-weight:600; color:var(--muted);}
+.mockup-body{padding:.9rem;}
+.md-kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.6rem; margin-bottom:.8rem;}
+.md-kpi{background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:.55rem .6rem;}
+.md-kpi-num{font-size:1.15rem; font-weight:600; color:var(--accent-2);}
+.md-kpi-label{font-size:.74rem; color:var(--muted); margin-top:.15rem;}
+.md-table-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:8px; background:var(--surface);}
+table.md-table, table.tabla{width:100%; border-collapse:collapse; font-size:.86rem;}
+table.md-table th, table.md-table td, table.tabla th, table.tabla td{
+  padding:.42rem .6rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top;}
+table.md-table th, table.tabla th{font-size:.74rem; text-transform:uppercase; letter-spacing:.03em; color:var(--muted);}
+.stripe{display:inline-block; width:5px; height:.9em; margin-right:.5em; border-radius:2px; vertical-align:-1px;}
+.stripe-ok{background:var(--good);} .stripe-warn{background:var(--warn);} .stripe-critical{background:var(--critical);}
+tr.sev-critical td:first-child{font-weight:600;}
+.md-chart{margin-top:.8rem;}
+.tabla-wrap{overflow-x:auto; margin:1rem 0;}
+.tabla th, .tabla td{white-space:normal;}
+.roadmap{list-style:none; counter-reset:paso; margin:1rem 0; padding:0; display:grid; gap:.8rem;}
+.roadmap li{position:relative; padding-left:2.6rem; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding-top:.7rem; padding-bottom:.75rem; padding-right:.9rem;}
+.roadmap li::before{counter-increment:paso; content:counter(paso); position:absolute; left:.75rem; top:.65rem;
+  width:1.5rem; height:1.5rem; border-radius:50%; background:var(--accent); color:var(--accent-ink);
+  font-family:var(--font-mono); font-weight:700; font-size:.85rem; display:flex; align-items:center; justify-content:center;}
+.roadmap h4{margin:0 0 .25rem;}
+.glosario dt{font-weight:700; font-family:var(--font-display); margin-top:.8rem;}
+.glosario dd{margin:.15rem 0 0;}
+footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-top:1rem; border-top:1px solid var(--border);}
+@media (max-width: 880px){
+  .layout{flex-direction:column; gap:1.1rem;}
+  nav.indice{position:static; width:100%; max-height:none;}
+  nav.indice ul{flex-direction:row; flex-wrap:wrap;}
+  nav.indice a{font-size:.82rem; padding:.28rem .5rem;}
+}
+@media print{
+  nav.indice{display:none;}
+  .layout{display:block; padding:0;}
+  body{padding-inline:0;}
+  a{color:inherit; text-decoration:none;}
+  .proyecto, .kpi-card, .mockup{break-inside:avoid;}
+  .chart-wrap{break-inside:avoid;}
+}
+</style>
+</head>
+<body>
+<div class="wrap layout">
+<nav class="indice" aria-label="Índice"><h2>Índice</h2><ul><li><a href="#portada">Resumen ejecutivo</a></li><li><a href="#capacidades">Qué ofrece el equipo</a></li><li><a href="#casos">Casos de uso</a></li><li><a href="#torre-control">Torre de control</a></li><li><a href="#roadmap">Roadmap</a></li><li><a href="#supuestos">Supuestos y límites</a></li><li><a href="#anexo">Anexo técnico</a></li><li><a href="#glosario">Glosario</a></li></ul></nav>
+<main>
+<section id="portada">
+  <p class="badge badge-accent">Informe ejecutivo</p>
+  <h1>Qué ofrece Data Analytics a AFP Cuprum</h1>
+  <p class="medida">Un resumen, en una pantalla, de qué construyó el equipo, qué tan bien funciona en un
+  sandbox 100&nbsp;% sintético y qué falta para llevarlo a producción. Pensado para leerse en quince
+  minutos, en el celular o impreso.</p>
+
+  <h2 style="border-top:none; margin-top:1rem;">Cinco mensajes</h2>
+  <ul class="mensajes medida"><li>El equipo de Data Analytics completó nueve capacidades analíticas, con una actualización en curso sobre la primera, todas sobre un mismo laboratorio sintético de AFP Cuprum y con revisión adversarial antes de aprobarse.</li><li>Cada modelo mejora la práctica comercial actual con la misma capacidad de contacto: no se pide más gente, se pide priorizar mejor a quién llamar, visitar o escribir.</li><li>La licitación de afiliados de 2027 (Ley 21.735) es el mayor riesgo de fuga de la historia de Cuprum, y ya existe una simulación de escenarios de retención lista para usar.</li><li>Ninguna cifra de este informe describe a un afiliado real: todo el laboratorio usa datos sintéticos, calibrados contra la Ficha Estadística Previsional N° 165 de la Superintendencia de Pensiones (2026).</li><li>Tres técnicas nuevas ya se probaron en el sandbox: separar causalmente a quién conviene contactar ayuda de verdad; una red secuencial para el afiliado y usar bandits para decidir el canal todavía no le ganan a lo simple.</li></ul>
+
+  <h2>Cinco números</h2>
+  <div class="kpi-grid"><div class="kpi-card"><div class="kpi-num">35,0 %</div><div class="kpi-label">de los traspasos capturados contactando al 10 % de la cartera</div><div class="kpi-sub">razón 1,80× sobre la mejor regla · churn_traspaso</div></div><div class="kpi-card"><div class="kpi-num">67,8 %</div><div class="kpi-label">del ahorro voluntario de adquisición capturado contactando al 10 %</div><div class="kpi-sub">vs. 49,4 % ordenando por renta (práctica actual) · propension_apv</div></div><div class="kpi-card"><div class="kpi-num">63,1 %</div><div class="kpi-label">de los ceses a 3 meses capturados contactando al 10 % de mayor riesgo</div><div class="kpi-sub">riesgo_cese_cotizacion</div></div><div class="kpi-card"><div class="kpi-num">48,6 %</div><div class="kpi-label">de la masa imponible en riesgo capturada gestionando al 10 % de los empleadores</div><div class="kpi-sub">promedio de 5 semillas: 51,9 % · riesgo_empleador</div></div><div class="kpi-card"><div class="kpi-num">23.943 MM CLP</div><div class="kpi-label">en riesgo en un solo sorteo de la licitación de 2027</div><div class="kpi-sub">6,2 % del saldo administrado de Cuprum · churn_traspaso</div></div></div>
+  <p class="fuente-cita">Todas las cifras de esta portada son sintéticas (sandbox del laboratorio), salvo el
+  saldo en riesgo de la licitación, que también es una simulación sobre el universo sintético calibrado
+  contra la Ficha 165. Detalle y fuente exacta de cada número en su ficha de proyecto y en
+  <code>docs/reporte_datos.json</code>.</p>
+</section>
+
+<section id="capacidades">
+  <h2>Qué ofrece el equipo</h2>
+  <p class="medida">Seis capacidades, construidas sobre un mismo laboratorio de datos sintéticos. Cada una
+  responde una pregunta de negocio concreta y deja código, tests y un README con resultados y supuestos.</p>
+  <div class="grid-cap"><div class="cap-card"><h4>Enriquecer</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Reconstruir hoy el dato que todavía no llegó</p><p style="font-size:.9rem;margin:0;">rim_nowcasting proyecta la renta imponible de los dos meses que la AFP aún no conoce, y la reemplaza por el dato real en cuanto el empleador declara.</p></div><div class="cap-card"><h4>Proyectar</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Estimar un agregado del mes o del trimestre que viene</p><p style="font-size:.9rem;margin:0;">riesgo_cese_cotizacion y riesgo_empleador proyectan cuántos afiliados dejarán de cotizar y cuánta masa imponible no se pagará, para el presupuesto de recaudación.</p></div><div class="cap-card"><h4>Segmentar</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Describir la cartera en grupos que se comportan distinto</p><p style="font-size:.9rem;margin:0;">segmentacion_afiliados divide la cartera en cuatro perfiles de comportamiento, cada uno con una acción comercial distinta.</p></div><div class="cap-card"><h4>Priorizar</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Ordenar la cartera para una capacidad de contacto limitada</p><p style="font-size:.9rem;margin:0;">churn_traspaso, propension_apv, riesgo_cese_cotizacion y riesgo_empleador ordenan a quién llamar, visitar o gestionar primero, con el mismo equipo de siempre.</p></div><div class="cap-card"><h4>Decidir</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Elegir la acción que de verdad cambia el resultado</p><p style="font-size:.9rem;margin:0;">uplift_retencion separa a quién conviene contactar de quién simplemente tiene riesgo; bandit_contacto aprende, contacto a contacto, qué canal y oferta usar.</p></div><div class="cap-card"><h4>Cumplir normativa</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">Hablar el mismo idioma que la planilla real</p><p style="font-size:.9rem;margin:0;">La planilla Previred sintética de common/ usa los códigos oficiales de la Tabla N° 7, para que los modelos entrenen con la misma estructura de datos que verían en producción.</p></div></div>
+
+  <h3>Cómo se construyó</h3>
+  <p class="medida">Todos los proyectos parten del mismo universo sintético (afiliados, empleadores, panel
+  laboral mensual y macroeconomía) calibrado contra la Ficha 165 de la Superintendencia de Pensiones, para
+  que un afiliado sea "la misma persona" en todos los modelos. Cada entrega pasa por una revisión
+  adversarial de otro data scientist antes de aprobarse: se buscan fugas de información desde el futuro
+  (leakage), reglas de negocio degeneradas y afirmaciones que no reproducen. El resultado se reporta aunque
+  la técnica pierda contra lo simple &mdash; es el criterio que se siguió con las tres técnicas más nuevas del
+  portafolio (causalidad, red secuencial y bandits).</p>
+  <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+    <div class="kpi-card"><div class="kpi-num">155</div><div class="kpi-label">tests automatizados en la suite del laboratorio</div><div class="kpi-sub">0 fallos · 9 min 46 s</div></div>
+    <div class="kpi-card"><div class="kpi-num">47,3 %</div><div class="kpi-label">densidad de cotización del sistema (Ficha 165)</div><div class="kpi-sub">el universo sintético se recalibró contra esta cifra en la ronda 3</div></div>
+    <div class="kpi-card"><div class="kpi-num">66,94 %</div><div class="kpi-label">densidad de cotización propia de Cuprum</div><div class="kpi-sub">la más alta del sistema; memoria 2025</div></div>
+  </div>
+  <div class="chart-wrap"><figure><svg viewBox="0 0 620 260" width="100%" height="auto" role="img" aria-label="Densidad de cotización del universo sintético antes y después de la recalibración, vs. la Ficha 165" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="216.0" x2="606" y2="216.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="220.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0 %</text><line x1="58" y1="172.0" x2="606" y2="172.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="176.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">25,0 %</text><line x1="58" y1="128.0" x2="606" y2="128.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="132.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">50,0 %</text><line x1="58" y1="84.0" x2="606" y2="84.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="88.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">75,0 %</text><line x1="58" y1="40.0" x2="606" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">100,0 %</text><rect x="93.6" y="77.8" width="55.4" height="138.2" fill="var(--muted)" rx="2"/><text x="121.3" y="71.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">78,5 %</text><rect x="161.2" y="132.0" width="55.4" height="84.0" fill="var(--accent-2)" rx="2"/><text x="188.9" y="126.0" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">47,8 %</text><rect x="228.8" y="132.8" width="55.4" height="83.2" fill="var(--accent)" rx="2"/><text x="256.5" y="126.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">47,3 %</text><text x="195.0" y="236.0" text-anchor="middle" font-size="12" fill="var(--ink)">Sistema</text><rect x="367.6" y="89.3" width="55.4" height="126.7" fill="var(--muted)" rx="2"/><text x="395.3" y="83.3" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">72,0 %</text><rect x="435.2" y="99.0" width="55.4" height="117.0" fill="var(--accent-2)" rx="2"/><text x="462.9" y="93.0" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">66,5 %</text><rect x="502.8" y="98.2" width="55.4" height="117.8" fill="var(--accent)" rx="2"/><text x="530.5" y="92.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">66,9 %</text><text x="469.0" y="236.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cuprum</text><line x1="58" y1="216.0" x2="606" y2="216.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--muted)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Antes (ronda 2)</text><rect x="199.0" y="9.0" width="11" height="11" fill="var(--accent-2)" rx="2"/><text x="215.0" y="18.0" font-size="11.5" fill="var(--ink)">Después (ronda 3)</text><rect x="353.2" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="369.2" y="18.0" font-size="11.5" fill="var(--ink)">Ficha 165 (real)</text></svg><figcaption>Densidad de cotización del universo
+  sintético antes y después de la recalibración de la ronda 3, contra el objetivo real de la Ficha 165
+  (sistema 47,3 %, Cuprum 66,94 %).</figcaption></figure></div>
+  <p class="fuente-cita">Sin jerga de modelos en esta página: el detalle técnico de cada proyecto (datos,
+  modelo, métricas, tests, tiempos de ejecución y revisión) está en el anexo técnico, al final del informe.</p>
+</section>
+
+<section id="casos">
+  <h2>Un caso de uso por proyecto</h2>
+  <p class="medida">Nueve capacidades completas, la planilla regulatoria que las sostiene a todas, y una
+  actualización en curso. Cada tarjeta dice el problema, qué hace el modelo, el resultado en el sandbox
+  traducido a negocio, cómo lo usaría el área, un mockup de dashboard, el camino a producción y la reserva
+  principal &mdash; visible aquí, no escondida en el anexo.</p>
+  
+<article class="proyecto" id="p02">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">02</span>
+    <h3>Traspaso a otra AFP</h3>
+    <span class="badge">churn_traspaso</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿Qué afiliados se traspasarán a otra AFP en los próximos seis meses, y a quién debería llamar o visitar el ejecutivo de retención con la capacidad de contacto que existe hoy?</dd>
+    <dt>Qué hace</dt><dd>Ordena a la cartera vigente por probabilidad de traspaso a seis meses, usando historia laboral, antigüedad en la AFP, comisión y rentabilidad relativa, y señales comerciales (reclamos, visitas de la competencia, uso digital).</dd>
+    <dt>Resultado en el sandbox</dt><dd>Con el modelo, contactando a 10 % de la cartera se captura el 35,0 % de los traspasos y el 38,2 % del saldo en riesgo &mdash; 1,80× la captura de la mejor regla de negocio (AUC 0,720 del modelo vs. 0,598 de esa regla, semilla de referencia, perfil sistema). En la cartera Cuprum el AUC va de 0,714-0,754 según la semilla. Subir la cobertura a 20 % agrega captura (51,0 % de los traspasos) con rendimiento decreciente.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>El ejecutivo de retención recibe cada mes la lista del 10 % de mayor riesgo, ordenada además por saldo cuando el objetivo es defender pesos administrados, no solo cuentas. En años de licitación de stock, esa lista se separa de la lista de sorteados: son presupuestos y urgencias distintas.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Torre de retención · churn_traspaso">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Torre de retención · churn_traspaso</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">35,0 %</div><div class="md-kpi-label">traspasos capturados (10 % cartera)</div></div><div class="md-kpi"><div class="md-kpi-num">1,80×</div><div class="md-kpi-label">veces la mejor regla</div></div><div class="md-kpi"><div class="md-kpi-num">23.943 MM CLP</div><div class="md-kpi-label">en riesgo, licitación 2027</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Sorteo licitación 2027</td><td>afiliado premium, alto saldo, sin campaña asignada</td><td class="num">6,2 % del saldo Cuprum</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Antigüedad baja + llegó por traspaso</td><td>primer decil de riesgo de churn voluntario</td><td class="num">35,0 % del riesgo capturado aquí</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Empresa en campaña de la competencia</td><td>colegas del mismo empleador, aún sin visitar</td><td class="num">priorizar por pares</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 220" width="100%" height="auto" role="img" aria-label="Captura de traspasos al 10 % y al 20 % de cobertura" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="180.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0 %</text><line x1="58" y1="142.0" x2="546" y2="142.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="146.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">16,3 %</text><line x1="58" y1="108.0" x2="546" y2="108.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="112.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">32,6 %</text><line x1="58" y1="74.0" x2="546" y2="74.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="78.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">49,0 %</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">65,3 %</text><rect x="89.7" y="103.1" width="148.1" height="72.9" fill="var(--accent)" rx="2"/><text x="163.7" y="97.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">35,0 %</text><text x="180.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">10 % (referencia)</text><rect x="333.7" y="69.8" width="148.1" height="106.2" fill="var(--accent)" rx="2"/><text x="407.7" y="63.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">51,0 %</text><text x="424.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">20 % (doble equipo)</text><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Captura de traspasos</text></svg><figcaption>Captura de traspasos al 10 % y al 20 % de cobertura (perfil sistema, semilla 42).</figcaption></figure></div>
+  </div>
+</div><div class="chart-wrap"><figure><svg viewBox="0 0 620 250" width="100%" height="auto" role="img" aria-label="Saldo retenido en la licitacion de 2027 segun el supuesto de salida pasiva y la forma de priorizar" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="206.0" x2="606" y2="206.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="210.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0</text><line x1="58" y1="164.5" x2="606" y2="164.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="168.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1.683</text><line x1="58" y1="123.0" x2="606" y2="123.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="127.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">3.366</text><line x1="58" y1="81.5" x2="606" y2="81.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="85.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">5.050</text><line x1="58" y1="40.0" x2="606" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">6.733</text><rect x="81.7" y="78.9" width="55.4" height="127.1" fill="var(--accent)" rx="2"/><text x="109.5" y="72.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">5.156</text><rect x="149.3" y="143.7" width="55.4" height="62.3" fill="var(--muted)" rx="2"/><text x="177.0" y="137.7" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">2.526</text><text x="149.3" y="226.0" text-anchor="middle" font-size="12" fill="var(--ink)">55 % se va</text><rect x="264.4" y="76.3" width="55.4" height="129.7" fill="var(--accent)" rx="2"/><text x="292.1" y="70.3" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">5.260</text><rect x="332.0" y="143.2" width="55.4" height="62.8" fill="var(--muted)" rx="2"/><text x="359.7" y="137.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">2.548</text><text x="332.0" y="226.0" text-anchor="middle" font-size="12" fill="var(--ink)">65 % (referencia)</text><rect x="447.1" y="79.3" width="55.4" height="126.7" fill="var(--accent)" rx="2"/><text x="474.8" y="73.3" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">5.140</text><rect x="514.7" y="146.1" width="55.4" height="59.9" fill="var(--muted)" rx="2"/><text x="542.4" y="140.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">2.428</text><text x="514.7" y="226.0" text-anchor="middle" font-size="12" fill="var(--ink)">75 % se va</text><line x1="58" y1="206.0" x2="606" y2="206.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Prioridad saldo×probabilidad</text><rect x="284.8" y="9.0" width="11" height="11" fill="var(--muted)" rx="2"/><text x="300.8" y="18.0" font-size="11.5" fill="var(--ink)">Contacto aleatorio</text></svg><figcaption>Saldo retenido (MM CLP) con 30 % de capacidad de contacto sobre los sorteados de la licitación de 2027, según el supuesto de cuántos se van sin campaña (55 %/65 %/75 %) y cómo se prioriza. El sorteo elige al azar quién queda expuesto; a quién CONTACTAR dentro de ese grupo sí se puede elegir.</figcaption></figure></div>
+  <h4>Camino a producción</h4>
+  <div class="medida">Se necesita la tabla real de solicitudes de traspaso (SIAP/Previred), el historial de contactos del equipo comercial y las comisiones y rentabilidades publicadas de las seis AFP. Antes de producción: repetir la validación temporal con gap de 6 meses y exigir AUC ≥ 0,75 con datos reales (hoy el umbral del sandbox es 0,720). Riesgo regulatorio principal: la licitación de stock de la Ley 21.735 cambia las reglas de competencia cada dos años y debe gestionarse con presupuesto de contacto separado del churn voluntario.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El saldo en riesgo esperado (probabilidad × saldo, agregado a nivel de cartera) no se entrega en esta ronda: el sesgo del pronóstico agregado va de -3,6 % a +40,2 % entre semillas, y es un problema de nivel del pronóstico, no de la calibración del modelo. El ranking para priorizar contactos sí es confiable; el número que se publicaría ('se van X mil millones el próximo semestre') todavía no lo es.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/churn_traspaso/README.md §§1, 6, 7, 13.A, 13.B</p>
+</article>
+
+<article class="proyecto" id="p03">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">03</span>
+    <h3>Ahorro previsional voluntario</h3>
+    <span class="badge">propension_apv</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿A quién llama el ejecutivo este mes para abrir o reactivar un APV, y cuánto ahorro voluntario se puede proyectar para el semestre?</dd>
+    <dt>Qué hace</dt><dd>Estima, para cada afiliado sin aporte reciente, la probabilidad de aportar en los próximos seis meses y el monto esperado, combinando renta, historial de aportes, tramo tributario y si el empleador ofrece ahorro colectivo (APVC).</dd>
+    <dt>Resultado en el sandbox</dt><dd>Contactando al 10 % de la cartera elegible ordenada por monto esperado se captura el 67,8 % del ahorro voluntario de adquisición, frente al 49,4 % que se captura hoy ordenando por renta (AUC 0,836 del modelo vs. 0,709 de la regla de negocio). El sesgo del monto esperado para toda la población es de 1,0 % en el agregado del semestre (WAPE 0,555 en los aportantes).</dd>
+    <dt>Cómo lo usaría el área</dt><dd>La asesoría previsional prioriza la lista por monto esperado cuando la meta es CLP captados, y por probabilidad cuando la meta es número de cuentas nuevas. Cuprum es líder de mercado en APV, así que este modelo también sirve para defender aportantes frente al fondo mutuo o el seguro que compiten por el mismo ahorro.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Campaña de ahorro voluntario · propension_apv">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Campaña de ahorro voluntario · propension_apv</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">67,8 %</div><div class="md-kpi-label">del ahorro de adquisición capturado</div></div><div class="md-kpi"><div class="md-kpi-num">47,4 %</div><div class="md-kpi-label">de los nuevos aportantes</div></div><div class="md-kpi"><div class="md-kpi-num">0,836</div><div class="md-kpi-label">AUC de test</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Reactivación con empresa APVC</td><td>aportó hace meses, empleador con match, renta alta</td><td class="num">prob. alta, monto alto</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Segmento VOLUNTARIO</td><td>cotización errática, casi no aporta</td><td class="num">excluir de la campaña</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Marzo/abril en finanzas y minería</td><td>bono anual coincide con el aporte esporádico</td><td class="num">estacionalidad</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 220" width="100%" height="auto" role="img" aria-label="Captura de ahorro voluntario al 10 % de la cartera, modelo vs. orden por renta" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="180.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0 %</text><line x1="58" y1="142.0" x2="546" y2="142.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="146.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">21,7 %</text><line x1="58" y1="108.0" x2="546" y2="108.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="112.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">43,4 %</text><line x1="58" y1="74.0" x2="546" y2="74.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="78.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">65,1 %</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">86,8 %</text><rect x="89.7" y="69.8" width="148.1" height="106.2" fill="var(--accent)" rx="2"/><text x="163.7" y="63.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">67,8 %</text><text x="180.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">Modelo (monto esperado)</text><rect x="333.7" y="98.6" width="148.1" height="77.4" fill="var(--accent)" rx="2"/><text x="407.7" y="92.6" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">49,4 %</text><text x="424.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">Orden por renta (hoy)</text><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Captura al 10 %</text></svg><figcaption>Captura del 10 % de la cartera: modelo (monto esperado) vs. orden por renta.</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">Se necesita el historial real de aportes voluntarios, campañas y saldo voluntario, y la renta bruta declarada al SII (la renta imponible que hoy usa el modelo está topada, y subestima el tramo de impuesto de las rentas altas). Antes de producción: confirmar con la AFP si el aporte por planilla llega sin desfase, como se asumió, o con el mismo desfase que la cotización obligatoria.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El modelo no ordena bien al segmento VOLUNTARIO (2,2 % de la cartera elegible): ahí la regla de negocio le gana. El protocolo de validación deja el entrenamiento tres a cuatro años antes del test, lo que es conservador (en producción, con reentrenamiento trimestral, la distancia real sería de doce meses), pero significa que estos números son un piso, no un techo.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/propension_apv/README.md §§1, 6, 7, 8</p>
+</article>
+
+<article class="proyecto" id="p04">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">04</span>
+    <h3>Cese y reingreso de cotización</h3>
+    <span class="badge">riesgo_cese_cotizacion</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿Quién dejará de cotizar en tres y seis meses, y quién de los que no cotizan hoy va a volver a hacerlo?</dd>
+    <dt>Qué hace</dt><dd>Dos familias de modelos sobre la misma historia laboral: uno de riesgo de cese (para asesoría proactiva y proyección de recaudación) y uno de probabilidad de reingreso (para priorizar a quién ofrecer cotización voluntaria mientras dura la laguna).</dd>
+    <dt>Resultado en el sandbox</dt><dd>El modelo de cese llega a AUC 0,887 a tres meses y 0,878 a seis meses (baseline de regla de negocio: 0,798 a tres meses); contactando al 10 % de mayor riesgo se captura alrededor del 63,1 % de los ceses reales (medido antes de la última recalibración de densidad de cotización; ver reserva). El modelo de reingreso, en cambio, hoy da AUC 0,608, bajo el umbral de 0,70 del brief.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>El número esperado de ceses por mes alimenta el presupuesto de recaudación esperada; el 10 % de mayor riesgo de cese recibe asesoría proactiva. Para reingreso, la campaña útil no es 'a quién va a reingresar' (la mayoría reingresa igual) sino la cola de menor probabilidad, filtrada por años a la pensión para no confundir con quien simplemente se está jubilando.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Alertas de cese y reingreso · riesgo_cese_cotizacion">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Alertas de cese y reingreso · riesgo_cese_cotizacion</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">0,887</div><div class="md-kpi-label">AUC cese 3 m</div></div><div class="md-kpi"><div class="md-kpi-num">63,1 %</div><div class="md-kpi-label">ceses capturados al 10 %</div></div><div class="md-kpi"><div class="md-kpi-num">0,608</div><div class="md-kpi-label">AUC reingreso (bajo el umbral)</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Reingreso poco predecible</td><td>AUC actual bajo el umbral del brief</td><td class="num">0,608 &lt; 0,70</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Cesantía en curso, sin señales de reingreso</td><td>término AFC reciente, cobertura de cesantía activa</td><td class="num">prioridad de asesoría</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Cese a 3 y 6 meses</td><td>sigue por sobre el umbral del brief tras la recalibración</td><td class="num">0,887 / 0,878</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 230" width="100%" height="auto" role="img" aria-label="AUC del modelo de cese y reingreso, tras la corrección de la ronda 3" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="190.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,000</text><line x1="58" y1="149.5" x2="546" y2="149.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="153.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,284</text><line x1="58" y1="113.0" x2="546" y2="113.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="117.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,568</text><line x1="58" y1="76.5" x2="546" y2="76.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="80.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,852</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1,135</text><rect x="79.1" y="71.9" width="98.7" height="114.1" fill="var(--accent)" rx="2"/><text x="128.5" y="65.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,887</text><text x="139.3" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 3 m</text><rect x="241.8" y="73.1" width="98.7" height="112.9" fill="var(--accent)" rx="2"/><text x="291.2" y="67.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,878</text><text x="302.0" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 6 m</text><rect x="404.5" y="107.8" width="98.7" height="78.2" fill="var(--accent)" rx="2"/><text x="453.8" y="101.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,608</text><text x="464.7" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Reingreso</text><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">AUC modelo</text></svg><figcaption>AUC del modelo por objetivo, tras la corrección de la ronda 3 (perfil sistema, semilla 42).</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">Se necesita el feed real de eventos del Seguro de Cesantía (AFC) y de la planilla previsional con su desfase real de recepción. El modelo de cese está listo para un piloto de alertas de asesoría; el de reingreso necesita, primero, que el generador sintético distinga cesantía reciente de cesantía crónica antes de volver a intentarlo, y luego repetir la validación con datos reales.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El AUC de reingreso cayó de 0,720 a 0,608 (sistema) cuando se recalibró la densidad de cotización del generador contra la Ficha 165 en la ronda 3, y quedó bajo el umbral de aceptación de 0,70. Se diagnosticó y se corrigió lo que se podía corregir en features (mejora de +0,003 a +0,008 AUC, y en un caso -0,005), pero, en palabras del propio informe, 'la dinámica actual del generador dejó el reingreso casi impredecible a nivel individual'. No es un problema de este modelo: es un límite del sandbox que hay que resolver en el generador antes de la próxima ronda.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/riesgo_cese_cotizacion/README.md §§1, 6, 7, 12</p>
+</article>
+
+<article class="proyecto" id="p05">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">05</span>
+    <h3>Riesgo de empleador (cobranza)</h3>
+    <span class="badge">riesgo_empleador</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿Qué empleadores van a declarar y no pagar, o van a pagar tarde este mes, y cuánta masa imponible de nuestros afiliados queda en riesgo?</dd>
+    <dt>Qué hace</dt><dd>Estima, por empleador y mes, la probabilidad de declaración-y-no-pago y la masa imponible esperada en riesgo, a partir del historial de puntualidad, el Boletín de Infractores y episodios de estrés financiero.</dd>
+    <dt>Resultado en el sandbox</dt><dd>Gestionando al 10 % de los empleadores (unos 1.000 en el universo de referencia) se cubre el 48,6 % de la masa imponible en riesgo en esta corrida &mdash; 51,9 % en promedio de cinco semillas &mdash; contra 44,1 % con la regla vigente (AUC 0,865 vs. 0,756). La precisión de la lista sube de 10,8 % a 21,9 %: una de cada cinco llamadas cae en un empleador que de verdad no va a pagar, contra una de cada nueve con la regla.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Cobranza trabaja dos listas: la ordenada por probabilidad (para maximizar casos gestionados) y la ordenada por masa esperada (para maximizar CLP protegidos), según el canal disponible ese mes (masivo telefónico vs. ejecutivo dedicado).</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Cobranza previsional · riesgo_empleador">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Cobranza previsional · riesgo_empleador</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">48,6 %</div><div class="md-kpi-label">masa en riesgo capturada al 10 %</div></div><div class="md-kpi"><div class="md-kpi-num">21,9 %</div><div class="md-kpi-label">precisión de la lista</div></div><div class="md-kpi"><div class="md-kpi-num">0,865</div><div class="md-kpi-label">AUC de test</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Empleador con boletín de infractores</td><td>12 meses consecutivos de deuda</td><td class="num">masa esperada alta</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Segmento GRANDE</td><td>el modelo ya gana aquí, pero con muy pocos casos de DNP</td><td class="num">vigilar, no reemplazar señales de respaldo</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Sector público</td><td>nunca cae en declaración y no pago</td><td class="num">0 casos, fuera de la gestión</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 220" width="100%" height="auto" role="img" aria-label="Captura de masa imponible en riesgo al 10 % y al 20 % de los empleadores gestionados" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="180.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0 %</text><line x1="58" y1="142.0" x2="546" y2="142.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="146.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">22,7 %</text><line x1="58" y1="108.0" x2="546" y2="108.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="112.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">45,4 %</text><line x1="58" y1="74.0" x2="546" y2="74.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="78.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">68,1 %</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">90,8 %</text><rect x="89.7" y="103.2" width="148.1" height="72.8" fill="var(--accent)" rx="2"/><text x="163.7" y="97.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">48,6 %</text><text x="180.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">10 % (referencia)</text><rect x="333.7" y="69.8" width="148.1" height="106.2" fill="var(--accent)" rx="2"/><text x="407.7" y="63.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">70,9 %</text><text x="424.0" y="196.0" text-anchor="middle" font-size="12" fill="var(--ink)">20 % (doble equipo)</text><line x1="58" y1="176.0" x2="546" y2="176.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Masa en riesgo capturada</text></svg><figcaption>Masa imponible en riesgo capturada al 10 % y al 20 % de los empleadores gestionados.</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">Se necesita la planilla Previred real con su calendario de recepción y el Boletín de Infractores de la Dirección del Trabajo. El agregado mensual de masa en riesgo sigue siendo demasiado volátil para comprometerse mes a mes: escalar a más empleadores lo mejora de forma predecible (la volatilidad cae como uno sobre la raíz del número de empleadores), así que ese es el primer paso antes de prometer un número mensual al negocio.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>La captura de masa en riesgo al 10 % queda en 48,6 % en la semilla de referencia, bajo el umbral de aceptación de 50 %, aunque el promedio de cinco semillas (51,9 %) se acerca. En palabras del propio informe, sigue siendo '45-55 % de la masa con el 10 % de la cartera, mejor que la regla en todos los casos', no un cumplimiento sólido. El error del agregado mensual tampoco cumple su criterio de ±10 %: mejoró de 0 a 2 de 12 meses al triplicar los empleadores, pero sigue lejos.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/riesgo_empleador/README.md §§1, 6.1, 6.3, 6.4, 7</p>
+</article>
+
+<article class="proyecto" id="p01">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">01</span>
+    <h3>Renta imponible en tiempo real (nowcasting)</h3>
+    <span class="badge">rim_nowcasting</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>La cotización de un afiliado llega a la AFP con dos meses de desfase. ¿Cuál es su renta imponible en esos dos meses que todavía no se conocen?</dd>
+    <dt>Qué hace</dt><dd>Proyecta la renta imponible de los dos meses abiertos con un modelo en dos etapas (¿cotiza o no?, y si cotiza, cuánto), y la reemplaza automáticamente por el dato real en cuanto el empleador declara.</dd>
+    <dt>Resultado en el sandbox</dt><dd>A un mes de desfase, el modelo llega a WAPE 0,115 en los afiliados dependientes (contra 0,215 de simplemente repetir el último dato conocido), igual en la cartera sistema que en la Cuprum. A dos meses el error sube a 0,182 en el sistema y 0,221 en Cuprum: pesa más la remuneración variable de finanzas y minería, que se conoce con más rezago. El clasificador de "cotiza o no" llega a AUC 0,969.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Alimenta cualquier reporte que necesite un número de recaudación o de saldo 'hoy', sin esperar dos meses: proyección de recaudación, saldo estimado de la cuenta obligatoria, e insumo de historia laboral para los demás modelos del laboratorio.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Recaudación proyectada · rim_nowcasting">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Recaudación proyectada · rim_nowcasting</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">0,115</div><div class="md-kpi-label">WAPE a un mes (dependientes)</div></div><div class="md-kpi"><div class="md-kpi-num">0,221</div><div class="md-kpi-label">WAPE a dos meses (Cuprum)</div></div><div class="md-kpi"><div class="md-kpi-num">0,969</div><div class="md-kpi-label">AUC cotiza/no cotiza</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Reemplazo mensual PREDICHA → REAL</td><td>los pagos que llegan sustituyen la proyección</td><td class="num">ciclo automático</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Independientes</td><td>renta anual vía SII, se redibuja cada año</td><td class="num">WAPE alto, modelo aparte recomendado</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Multiempleo y licencias</td><td>un segundo pagador o un subsidio llegan con más rezago</td><td class="num">PARCIAL hasta completarse</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">El pipeline ya está diseñado para escala real: PySpark, particionado por mes de recepción, sin colecciones al driver. Falta reemplazar el generador sintético por las tablas reales de Previred, SII y el Seguro de Cesantía, y decidir la cadencia de reentrenamiento (trimestral, o disparado cuando el error de los reemplazos mensuales supere un umbral).</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>Este resultado es de la ronda 2, con la densidad de cotización previa a la recalibración de la ronda 3 contra la Ficha 165. Como 01 comparte el generador base con el resto del laboratorio, es probable que sus métricas se muevan igual que las de los proyectos 02 a 06 al re-ejecutarse con la densidad ya recalibrada; esa corrida está en curso (ver tarjeta 'en curso' más abajo) y no se incluye en esta ficha.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/rim_nowcasting/README.md §§1, 10, 10b</p>
+</article>
+
+<article class="proyecto" id="p06">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">06</span>
+    <h3>Segmentación de afiliados</h3>
+    <span class="badge">segmentacion_afiliados</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿Qué segmentos de comportamiento existen en la cartera de Cuprum, y qué acción corresponde a cada uno?</dd>
+    <dt>Qué hace</dt><dd>Agrupa a toda la cartera (no solo dependientes) por renta, densidad de cotización, saldo, fondo, ahorro voluntario y uso digital, y valida los grupos contra las tasas reales de cese, traspaso y aporte APV de cada uno.</dd>
+    <dt>Resultado en el sandbox</dt><dd>Cuatro segmentos de comportamiento (silueta 0,2395, estable al re-muestrear la cartera: ARI 0,987; un clasificador los reproduce con 0,9812 de exactitud). Las tasas de cese, traspaso y aporte APV difieren 3,38×, 2,08× y 30,69× entre el segmento más y menos propenso: son grupos que de verdad se comportan distinto, no una partición estadística sin sentido de negocio.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Asignación de ejecutivos, priorización de campañas de retención y de APV, y diseño de mensajes de asesoría previsional distintos por segmento &mdash; una decisión operativa mensual, no un modelo de un evento puntual.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Mapa de segmentos · segmentacion_afiliados">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Mapa de segmentos · segmentacion_afiliados</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">4</div><div class="md-kpi-label">segmentos de comportamiento</div></div><div class="md-kpi"><div class="md-kpi-num">30,69×</div><div class="md-kpi-label">razón de aporte APV entre segmentos</div></div><div class="md-kpi"><div class="md-kpi-num">0,4655</div><div class="md-kpi-label">estabilidad a 6 meses (ARI)</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Segmento 1 · Ahorradores premium</td><td>mayor renta y saldo, líder en aporte APV</td><td class="num">retención de valor prioritaria</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Segmento 3 · Intermitentes</td><td>renta y densidad actuales muy bajas</td><td class="num">mayor tasa de cese</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Segmento 2 · Joven en acumulación</td><td>el más joven, fondo A/B, sin APV</td><td class="num">educación financiera + oferta de entrada</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 230" width="100%" height="auto" role="img" aria-label="Razón entre la tasa de negocio del segmento más propenso y el menos propenso" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="190.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0×</text><line x1="58" y1="149.5" x2="546" y2="149.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="153.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">8,8×</text><line x1="58" y1="113.0" x2="546" y2="113.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="117.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">17,5×</text><line x1="58" y1="76.5" x2="546" y2="76.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="80.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">26,2×</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">35,0×</text><rect x="79.1" y="171.9" width="98.7" height="14.1" fill="var(--accent-2)" rx="2"/><text x="128.5" y="165.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">3,4×</text><text x="139.3" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese</text><rect x="241.8" y="177.3" width="98.7" height="8.7" fill="var(--accent-2)" rx="2"/><text x="291.2" y="171.3" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">2,1×</text><text x="302.0" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Traspaso</text><rect x="404.5" y="58.0" width="98.7" height="128.0" fill="var(--accent-2)" rx="2"/><text x="453.8" y="52.0" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">30,7×</text><text x="464.7" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">APV</text><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent-2)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Razón entre el segmento de mayor y menor tasa</text></svg><figcaption>Razón de tasas de negocio entre el segmento más y menos propenso, por indicador.</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">El clustering usa exclusivamente tablas ya construidas por 02, 03 y el panel laboral propio, así que el camino más corto a producción es correrlo directamente sobre esas mismas fuentes reales una vez que 02 y 03 estén en producción. La asignación de un afiliado nuevo a un segmento no requiere reclusterizar: el clasificador ya entrenado lo hace en línea.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>La estabilidad entre re-muestreos de la misma cartera es alta (0,987), pero la estabilidad entre dos cortes separados por seis meses es más baja (0,4655): parte es deriva real del negocio (alguien deja de cotizar, empieza a aportar), no solo ruido del método, y el informe lo reporta tal cual, sin forzarlo al mismo umbral. El traspaso es, de las tres tasas de negocio, la que separa peor entre segmentos.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/segmentacion_afiliados/README.md §§1, 6, 7, 8</p>
+</article>
+
+<article class="proyecto" id="p07">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">07</span>
+    <h3>A quién conviene contactar (causalidad)</h3>
+    <span class="badge">uplift_retencion</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>Rankear por riesgo de traspaso mezcla a quien se queda igual, a quien se va igual, al persuadible (el contacto lo retiene) y al sleeping dog (el contacto lo hace irse). ¿A cuál de los cuatro tipos hay que llamar?</dd>
+    <dt>Qué hace</dt><dd>Separa el efecto causal del contacto del riesgo de traspaso con tres métodos de inferencia causal (T-, X- y DR-learner) sobre una campaña histórica sesgada más un pequeño holdout de contacto aleatorio.</dd>
+    <dt>Resultado en el sandbox</dt><dd>Separando el efecto causal del contacto (X-learner) se evitan 14,6 traspasos contactando al 10 % de la cartera, 4,54× lo que evita usar el ranking de riesgo de churn_traspaso como si fuera uplift (3,2 traspasos evitados). El X-learner también contacta muchos menos "sleeping dogs" (afiliados a quienes el contacto empuja a irse) que el ranking de riesgo.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>El ejecutivo propio prioriza su cupo de contacto por el ranking de uplift, no por el de riesgo: deja de llamar automáticamente a quien tiene baja actividad digital y alta sensibilidad a la comisión (sleeping dogs) y prioriza a quien tuvo un reclamo ya resuelto.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: A quién conviene contactar · uplift_retencion">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">A quién conviene contactar · uplift_retencion</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">4,54×</div><div class="md-kpi-label">veces más traspasos evitados que ordenar por riesgo</div></div><div class="md-kpi"><div class="md-kpi-num">14,6</div><div class="md-kpi-label">traspasos evitados al 10 %</div></div><div class="md-kpi"><div class="md-kpi-num">0,195</div><div class="md-kpi-label">correlación con el efecto causal real</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Persuadible</td><td>reclamo reciente ya resuelto, saldo y uso digital medios</td><td class="num">contactar: el contacto retiene</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Sleeping dog</td><td>uso digital bajo, muy sensible a la comisión</td><td class="num">NO contactar: el contacto empuja a irse</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Validación sin sesgo (holdout aleatorio)</td><td>el Qini del holdout no alcanza significancia estadística a esta escala</td><td class="num">ver reserva</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 580 240" width="100%" height="auto" role="img" aria-label="Traspasos evitados contactando al 10 % y 20 % de la cartera, causalidad vs. riesgo" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="196.0" x2="566" y2="196.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="200.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,0</text><line x1="58" y1="157.0" x2="566" y2="157.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="161.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">6,7</text><line x1="58" y1="118.0" x2="566" y2="118.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="122.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">13,3</text><line x1="58" y1="79.0" x2="566" y2="79.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="83.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">20,0</text><line x1="58" y1="40.0" x2="566" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">26,6</text><rect x="91.0" y="110.5" width="77.1" height="85.5" fill="var(--accent-2)" rx="2"/><text x="129.6" y="104.5" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">14,6</text><rect x="185.0" y="177.2" width="77.1" height="18.8" fill="var(--muted)" rx="2"/><text x="223.5" y="171.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">3,2</text><text x="185.0" y="216.0" text-anchor="middle" font-size="12" fill="var(--ink)">10 % de la cartera</text><rect x="345.0" y="74.1" width="77.1" height="121.9" fill="var(--accent-2)" rx="2"/><text x="383.6" y="68.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">20,8</text><rect x="439.0" y="151.5" width="77.1" height="44.5" fill="var(--muted)" rx="2"/><text x="477.5" y="145.5" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">7,6</text><text x="439.0" y="216.0" text-anchor="middle" font-size="12" fill="var(--ink)">20 % de la cartera</text><line x1="58" y1="196.0" x2="566" y2="196.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent-2)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Separar causalidad (X-learner)</text><rect x="298.0" y="9.0" width="11" height="11" fill="var(--muted)" rx="2"/><text x="314.0" y="18.0" font-size="11.5" fill="var(--ink)">Ordenar por riesgo (02)</text></svg><figcaption>Traspasos evitados contactando al 10 % y al 20 % de la cartera (verdad del simulador).</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">Esto exige lo que hoy no existe: un holdout aleatorio real de contacto (a quién se llama lo decide una moneda, no el ejecutivo) durante algunos meses, del tamaño suficiente para medir Qini con significancia. Sin ese piloto, la recomendación se apoya en la verdad del simulador, que solo existe en este sandbox.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El único criterio de aceptación duro (Qini positivo en los tres cortes de test, sobre el holdout aleatorio sin sesgo) lo cumple solo el X-learner, y con un intervalo de confianza que cruza cero: no se puede afirmar con confianza estadística que le gane al azar en ese holdout. La recomendación de negocio se apoya en la correlación contra la verdad del simulador y en la métrica de negocio oracular, ambas posibles solo en este sandbox, no en el mundo real todavía.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/uplift_retencion/README.md §§1, 6.2, 6.3, 6.4, 7, 8</p>
+</article>
+
+<article class="proyecto" id="p08">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">08</span>
+    <h3>Representación secuencial del afiliado</h3>
+    <span class="badge">secuencial_afiliado</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>¿Una red neuronal que lee la historia mensual completa del afiliado, en vez de un conjunto de features tabulares, predice mejor el traspaso y el cese que los modelos de producción de 02 y 04?</dd>
+    <dt>Qué hace</dt><dd>Entrena una red GRU multi-tarea sobre 24 meses de panel laboral del afiliado y la compara, en los mismos cortes y splits, contra el LightGBM de producción de cada proyecto y contra un LightGBM que ve exactamente la misma secuencia aplanada (para separar el efecto de la arquitectura del efecto de la información).</dd>
+    <dt>Resultado en el sandbox</dt><dd>La red (GRU de dos capas, multi-tarea) no mejora al LightGBM de producción en ninguna de las dos tareas: AUC 0,5848 vs. 0,7255 en traspaso (0,141 de caída) y 0,7768 vs. 0,8610 en cese (0,084 de caída). Pero, con la MISMA información que ve la red, un LightGBM sobre esa misma secuencia aplanada obtiene 0,5940 y 0,7775: prácticamente empatado con la red (diferencias de 0,001 a 0,009 AUC). La brecha grande no es de arquitectura: es que la secuencia (el panel laboral común, sin las tablas comerciales de la AFP) lleva mucha menos información que las features completas de traspaso y cese.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Ninguno todavía: la recomendación explícita es no reemplazar los pipelines tabulares de 02 y 04 con esta arquitectura, a este presupuesto de datos y cómputo.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Comparación de arquitecturas · secuencial_afiliado">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Comparación de arquitecturas · secuencial_afiliado</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">0,7255</div><div class="md-kpi-label">AUC LightGBM producción (traspaso)</div></div><div class="md-kpi"><div class="md-kpi-num">0,5848</div><div class="md-kpi-label">AUC red secuencial (traspaso)</div></div><div class="md-kpi"><div class="md-kpi-num">0,141</div><div class="md-kpi-label">brecha de AUC</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Red no aporta en ninguna cabeza</td><td>criterio del brief: mejora ≥ 0,01 AUC en al menos dos cabezas</td><td class="num">no se cumple</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Empata con LightGBM de la misma información</td><td>aísla arquitectura de información</td><td class="num">diferencia &lt; 0,01 AUC</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Multi-tarea no le gana al single-task</td><td>compartir encoder no ayudó a esta escala</td><td class="num">diferencia dentro del ruido</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 240" width="100%" height="auto" role="img" aria-label="AUC del LightGBM de producción vs. la red secuencial, traspaso y cese" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="196.0" x2="546" y2="196.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="200.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,000</text><line x1="58" y1="157.0" x2="546" y2="157.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="161.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,276</text><line x1="58" y1="118.0" x2="546" y2="118.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="122.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,551</text><line x1="58" y1="79.0" x2="546" y2="79.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="83.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,827</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1,102</text><rect x="89.7" y="93.3" width="74.0" height="102.7" fill="var(--accent)" rx="2"/><text x="126.7" y="87.3" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,726</text><rect x="180.0" y="113.2" width="74.0" height="82.8" fill="var(--accent-2)" rx="2"/><text x="217.0" y="107.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,585</text><text x="180.0" y="216.0" text-anchor="middle" font-size="12" fill="var(--ink)">Traspaso (02)</text><rect x="333.7" y="74.1" width="74.0" height="121.9" fill="var(--accent)" rx="2"/><text x="370.7" y="68.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,861</text><rect x="424.0" y="86.0" width="74.0" height="110.0" fill="var(--accent-2)" rx="2"/><text x="461.0" y="80.0" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,777</text><text x="424.0" y="216.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese (04)</text><line x1="58" y1="196.0" x2="546" y2="196.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">LightGBM de producción</text><rect x="245.2" y="9.0" width="11" height="11" fill="var(--accent-2)" rx="2"/><text x="261.2" y="18.0" font-size="11.5" fill="var(--ink)">Red secuencial (multi-tarea)</text></svg><figcaption>AUC del LightGBM de producción vs. la red secuencial multi-tarea, mismos cortes y splits.</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">No se recomienda avanzar con esta arquitectura mientras la secuencia no incorpore las mismas fuentes que ya usan los modelos de producción (contactos, reclamos, saldos, cambios de fondo, uso digital, brecha de rentabilidad). El valor futuro de una representación secuencial dependería de sumarle esas fuentes y de probarla en afiliados con historia más larga que la de este sandbox.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El entrenamiento se acotó a 7 cortes de entrenamiento, sin calibrar las probabilidades de la red y sin una búsqueda amplia de hiperparámetros (arquitectura, tamaño del embedding, número de capas), por presupuesto de esta ronda. La conclusión &mdash;'no aporta frente al modelo de producción'&mdash; es honesta y aísla bien la causa (información, no arquitectura), pero no cierra la pregunta de si una red secuencial con más datos y más búsqueda de hiperparámetros cambiaría el resultado.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/secuencial_afiliado/README.md §§1, 6, 7, 8</p>
+</article>
+
+<article class="proyecto" id="p09">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">09</span>
+    <h3>Bandit contextual de contacto</h3>
+    <span class="badge">bandit_contacto</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>Cada mes hay que elegir, para cada afiliado en riesgo, entre no contactar, email, llamada, visita o una oferta de ahorro. ¿Se puede aprender esa decisión sobre la marcha, y auditarla antes de arriesgar presupuesto real?</dd>
+    <dt>Qué hace</dt><dd>Compara una heurística de negocio con varios algoritmos de bandit contextual (epsilon-greedy, LinUCB, Thompson) que aprenden con la recompensa real (comisión retenida menos costo del contacto), y audita todo con evaluación fuera de política (IPS, SNIPS, doblemente robusto).</dd>
+    <dt>Resultado en el sandbox</dt><dd>Con la heterogeneidad calibrada para este sandbox, Thompson lineal gana a un simple promedio por canal (epsilon-greedy) en 3/5 semillas, no en las 4/5 que exige el criterio de aceptación. Recién le gana en 4/5 semillas si la heterogeneidad real fuera cuatro veces más fuerte de lo calibrado. La política vigente (heurística por riesgo) genera 80 M CLP más que no contactar a nadie en 24 meses, pero gastando el doble que las alternativas y contactando a más sleeping dogs.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Hoy, ninguno: la recomendación es no reemplazar la heurística vigente. El candidato para un piloto acotado, corriendo en paralelo sin desplazar la política actual, es la variante que aprende con LightGBM, que es la única que de verdad distingue a quién conviene o no contactar.</dd>
+  </dl>
+  
+<div class="mockup" role="group" aria-label="Mockup: Política de contacto · bandit_contacto">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Política de contacto · bandit_contacto</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">2,116 mil M CLP</div><div class="md-kpi-label">retención neta, política actual (mil M CLP)</div></div><div class="md-kpi"><div class="md-kpi-num">2,138 mil M CLP</div><div class="md-kpi-label">retención neta, Thompson lineal (mil M CLP)</div></div><div class="md-kpi"><div class="md-kpi-num">0,1 %</div><div class="md-kpi-label">error del mejor estimador off-policy</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Bandit contextual todavía no reemplaza la heurística</td><td>gana a eps-greedy en pocas semillas</td><td class="num">3/5 semillas (exigido: 4/5)</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>LinUCB se apaga</td><td>contacta a casi nadie, y peor que el azar cuando lo hace</td><td class="num">no desplegar tal cual</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Auditoría off-policy antes de arriesgar presupuesto</td><td>los tres estimadores dentro del umbral de error</td><td class="num">bajo 15 %</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 580 250" width="100%" height="auto" role="img" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="36.0" x2="566" y2="36.0" stroke="var(--border)"/><text x="50" y="40.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">2,160</text><line x1="58" y1="79.5" x2="566" y2="79.5" stroke="var(--border)"/><text x="50" y="83.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">2,150</text><line x1="58" y1="123.0" x2="566" y2="123.0" stroke="var(--border)"/><text x="50" y="127.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">2,141</text><line x1="58" y1="166.5" x2="566" y2="166.5" stroke="var(--border)"/><text x="50" y="170.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">2,131</text><line x1="58" y1="210.0" x2="566" y2="210.0" stroke="var(--border)"/><text x="50" y="214.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">2,121</text><text x="58.0" y="230.0" text-anchor="middle" font-size="12" fill="var(--ink)">0×</text><text x="227.3" y="230.0" text-anchor="middle" font-size="12" fill="var(--ink)">1×</text><text x="396.7" y="230.0" text-anchor="middle" font-size="12" fill="var(--ink)">2×</text><text x="566.0" y="230.0" text-anchor="middle" font-size="12" fill="var(--ink)">4×</text><polyline points="58.0,138.6 227.3,134.1 396.7,143.0 566.0,71.8" fill="none" stroke="var(--accent-2)" stroke-width="2.6"/><circle cx="58.0" cy="138.6" r="4" fill="var(--accent-2)"/><circle cx="227.3" cy="134.1" r="4" fill="var(--accent-2)"/><circle cx="396.7" cy="143.0" r="4" fill="var(--accent-2)"/><circle cx="566.0" cy="71.8" r="4" fill="var(--accent-2)"/><polyline points="58.0,134.1 227.3,169.7 396.7,174.2 566.0,147.5" fill="none" stroke="var(--muted)" stroke-width="2.6"/><circle cx="58.0" cy="134.1" r="4" fill="var(--muted)"/><circle cx="227.3" cy="169.7" r="4" fill="var(--muted)"/><circle cx="396.7" cy="174.2" r="4" fill="var(--muted)"/><circle cx="566.0" cy="147.5" r="4" fill="var(--muted)"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent-2)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Thompson lineal (bandit)</text><rect x="262.4" y="9.0" width="11" height="11" fill="var(--muted)" rx="2"/><text x="278.4" y="18.0" font-size="11.5" fill="var(--ink)">Epsilon-greedy (sin contexto)</text><line x1="58" y1="210.0" x2="566" y2="210.0" stroke="var(--ink)" stroke-width="1.2"/></svg><figcaption>Retención neta acumulada (24 meses) según qué tan fuerte sea la heterogeneidad de respuesta al contacto.</figcaption></figure></div>
+  </div>
+</div>
+  <h4>Camino a producción</h4>
+  <div class="medida">El guardrail principal, si algún día se despliega: nunca en explotación total, mantener siempre una fracción de exploración en los cinco brazos para poder seguir auditando con evaluación off-policy, y monitorear la tasa de contactos a quienes de todas formas terminan yéndose (proxy observable de sleeping dog, porque el tipo real nunca se observa).</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>Los resultados principales que el brief esperaba (Thompson o LinUCB le ganan a lo simple en cuatro de cinco semillas; el estimador doblemente robusto es el de menor error) no se cumplen tras la corrección del generador. En palabras del propio equipo: 'el bandit contextual, con esta calibración de señal y 24 meses, no justifica reemplazar la heurística todavía'. Se reporta así, sin forzarlo, porque el objetivo de esta ronda era saber, no ganar.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/bandit_contacto/README.md §§1, 6.1, 6.3, 6.5, 7, 8</p>
+</article>
+
+<article class="proyecto" id="planilla">
+  <div class="proyecto-head">
+    <span class="badge badge-accent">—</span>
+    <h3>Planilla regulatoria (modelo de datos)</h3>
+    <span class="badge">common/planilla</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Problema</dt><dd>Para que un modelo sirva en producción tiene que entrenar con la misma estructura de datos que va a ver ahí: los códigos oficiales de la planilla Previred, no una simplificación propia de cada proyecto.</dd>
+    <dt>Qué hace</dt><dd>Genera una planilla sintética línea a línea (afiliado × empleador × mes × tipo de pago) con los códigos de movimiento de personal, cotización, SIS y el aporte adicional de la reforma, coherente con el panel laboral común.</dd>
+    <dt>Resultado en el sandbox</dt><dd>La planilla sintética reproduce 12 códigos de movimiento de personal de la Tabla N° 7 (altas, bajas, licencias, cambios de contrato), con el mismo desfase de recepción que usan los modelos de renta y de cese. Cuando se probó como feature adicional en riesgo_cese_cotizacion, el aporte fue marginal e inconsistente en signo: la información ya estaba, por otra vía, en los eventos del Seguro de Cesantía.</dd>
+    <dt>Cómo lo usaría el área</dt><dd>Es infraestructura compartida, no un modelo de decisión propio: la usan riesgo_empleador (capa de recepción y pago del empleador) y se probó como feature en riesgo_cese_cotizacion.</dd>
+  </dl>
+  
+  <h4>Camino a producción</h4>
+  <div class="medida">Es la pieza más cercana a producción: en cuanto existan credenciales de acceso a la planilla real (Previred) y al Boletín de Infractores, los proyectos 01, 04 y 05 pueden apuntar a esa fuente sin cambiar su lógica de features, porque ya están escritos contra esta misma estructura de columnas.</div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El sorteo de recepción y estado de pago se hace línea por línea, no por planilla completa: dos líneas de la misma declaración pueden quedar con fecha de recepción distinta, lo que contradice el propio docstring del módulo. Es un defecto de código menor, ya identificado y documentado, pendiente de corregir; no invalida ningún resultado de los proyectos que la usan.</p></div>
+  <p class="fuente-cita">Fuente: afp_lab/common/BRIEF_PLANILLA.md; afp_lab/riesgo_empleador/README.md §2; afp_lab/riesgo_cese_cotizacion/README.md §11.2</p>
+</article>
+
+<article class="proyecto encurso" id="p01-correccion">
+  <div class="proyecto-head">
+    <span class="badge">—</span>
+    <h3>Recalibración de 01 contra la nueva densidad</h3>
+    <span class="badge">rim_nowcasting (corrección)</span>
+    <span class="chip chip-info">En curso</span>
+  </div>
+  <dl class="campos medida">
+    <dt>Pregunta de negocio</dt><dd>¿Cambian las métricas de proyección de renta imponible con la densidad de cotización ya recalibrada contra la Ficha 165, igual que cambiaron las de los demás proyectos del laboratorio?</dd>
+    <dt>Diseño del experimento</dt><dd>Repetir la misma corrida de referencia de 01, ahora con los perfiles de cartera ya recalibrados, y comparar el error de proyección y la exactitud de cotiza-o-no antes y después, con el mismo método que ya se usó para comparar los otros proyectos del laboratorio ante ese mismo cambio.</dd>
+  </dl>
+  <p class="medida" style="color:var(--muted);font-size:.9rem;">Todavía sin resultados: esta tarjeta se
+  completa cuando el gerente envíe la corrida de referencia. No lleva números porque no hay ninguno
+  todavía que reportar con honestidad.</p>
+</article>
+
+</section>
+
+<section id="torre-control">
+  <h2>Torre de control: los ocho casos en un solo tablero</h2>
+  <p class="medida">Así se vería un tablero mensual que junta las alertas de las principales capacidades
+  de priorización. No es una pantalla que exista hoy: es el mockup de a qué apunta el equipo si el negocio
+  decide poner uno o más de estos modelos en producción.</p>
+  
+<div class="mockup" role="group" aria-label="Mockup: Torre de control · portafolio Cuprum">
+  <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+    <span class="mockup-title">Torre de control · portafolio Cuprum</span></div>
+  <div class="mockup-body">
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">35,0 %</div><div class="md-kpi-label">traspasos capturados (churn, 10 %)</div></div><div class="md-kpi"><div class="md-kpi-num">67,8 %</div><div class="md-kpi-label">ahorro APV capturado (10 %)</div></div><div class="md-kpi"><div class="md-kpi-num">63,1 %</div><div class="md-kpi-label">ceses capturados (10 %)</div></div><div class="md-kpi"><div class="md-kpi-num">48,6 %</div><div class="md-kpi-label">masa en riesgo capturada (10 %)</div></div><div class="md-kpi"><div class="md-kpi-num">23.943 MM CLP</div><div class="md-kpi-label">en riesgo, licitación 2027</div></div><div class="md-kpi"><div class="md-kpi-num">2,116 mil M CLP</div><div class="md-kpi-label">retención neta, política actual (24 meses)</div></div></div>
+    <div class="md-table-wrap">
+      <table class="md-table">
+        <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
+        <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Licitación de stock 2027</td><td>sorteo de afiliados no pensionados, Ley 21.735</td><td class="num">6,2 % del saldo Cuprum</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Reingreso tras cese</td><td>AUC bajo el umbral del brief tras recalibrar la densidad</td><td class="num">0,608</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Masa en riesgo de empleadores</td><td>captura al 10 % en el límite del criterio de negocio</td><td class="num">48,6 %</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Traspaso voluntario</td><td>el modelo gana a la regla en todos los segmentos grandes</td><td class="num">1,80× la regla</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Ahorro voluntario (APV)</td><td>líderes de mercado, captura muy por sobre ordenar por renta</td><td class="num">67,8 %</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
+      </table>
+    </div>
+    <div class="md-chart"><figure><svg viewBox="0 0 680 280" width="100%" height="auto" role="img" aria-label="AUC del modelo vs. la práctica actual, cuatro capacidades de priorización" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="236.0" x2="666" y2="236.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="240.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,000</text><line x1="58" y1="187.0" x2="666" y2="187.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="191.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,284</text><line x1="58" y1="138.0" x2="666" y2="138.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="142.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,568</text><line x1="58" y1="89.0" x2="666" y2="89.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="93.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,852</text><line x1="58" y1="40.0" x2="666" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1,135</text><rect x="77.8" y="111.7" width="46.1" height="124.3" fill="var(--accent)" rx="2"/><text x="100.8" y="105.7" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,720</text><rect x="134.0" y="132.8" width="46.1" height="103.2" fill="var(--muted)" rx="2"/><text x="157.1" y="126.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,598</text><text x="134.0" y="256.0" text-anchor="middle" font-size="12" fill="var(--ink)">Traspaso (02)</text><rect x="229.8" y="91.7" width="46.1" height="144.3" fill="var(--accent)" rx="2"/><text x="252.8" y="85.7" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,836</text><rect x="286.0" y="113.6" width="46.1" height="122.4" fill="var(--muted)" rx="2"/><text x="309.1" y="107.6" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,709</text><text x="286.0" y="256.0" text-anchor="middle" font-size="12" fill="var(--ink)">APV (03)</text><rect x="381.8" y="82.9" width="46.1" height="153.1" fill="var(--accent)" rx="2"/><text x="404.8" y="76.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,887</text><rect x="438.0" y="98.2" width="46.1" height="137.8" fill="var(--muted)" rx="2"/><text x="461.1" y="92.2" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,798</text><text x="438.0" y="256.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese (04)</text><rect x="533.8" y="86.7" width="46.1" height="149.3" fill="var(--accent)" rx="2"/><text x="556.8" y="80.7" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,865</text><rect x="590.0" y="105.5" width="46.1" height="130.5" fill="var(--muted)" rx="2"/><text x="613.1" y="99.5" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,756</text><text x="590.0" y="256.0" text-anchor="middle" font-size="12" fill="var(--ink)">Empleador (05)</text><line x1="58" y1="236.0" x2="666" y2="236.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">Modelo</text><rect x="139.6" y="9.0" width="11" height="11" fill="var(--muted)" rx="2"/><text x="155.6" y="18.0" font-size="11.5" fill="var(--ink)">Práctica actual</text></svg><figcaption>AUC del modelo vs. la práctica actual hoy, en las cuatro capacidades de priorización de cartera.</figcaption></figure></div>
+  </div>
+</div>
+</section>
+
+<section id="roadmap">
+  <h2>Roadmap (6-12 meses)</h2>
+  <p class="medida">En este orden porque cada paso reduce el riesgo del siguiente: primero medir con un
+  piloto real, después conectar datos reales, después escalar. Es la única sección del informe con pasos
+  numerados, porque aquí sí es una secuencia.</p>
+  <ol class="roadmap medida"><li><h4>Piloto de retención con holdout aleatorio real</h4><p>Reservar un grupo de contacto aleatorio (churn_traspaso y uplift_retencion) durante algunos meses, del tamaño suficiente para medir con significancia si separar causalidad mejora la retención. Es el mismo diseño que ya se simuló, pero con afiliados reales.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Datos y patrocinio: capacidad de contacto del equipo comercial, y que el negocio acepte que un grupo de control no se contacte por un tiempo definido.</p></li><li><h4>Datos reales de planilla, AFC y Boletín de Infractores</h4><p>Conectar 01, 04 y 05 a la planilla Previred real (con su calendario de recepción), a los eventos del Seguro de Cesantía y al Boletín de Infractores de la Dirección del Trabajo.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Patrocinio de TI/Operaciones para el acceso, y un ciclo de validación con los mismos criterios que ya se aplicaron en el sandbox.</p></li><li><h4>Corregir el generador para que el reingreso vuelva a ser predecible</h4><p>Antes de reintentar 04 con datos reales, separar en el generador sintético la cesantía reciente de la crónica, como ya lo propone el propio informe de la ronda 3.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Solo trabajo interno del equipo; ningún dato ni patrocinio externo.</p></li><li><h4>Escalar riesgo_empleador a la cartera completa de empleadores</h4><p>Repetir la corrida con el universo completo de empleadores de Cuprum (no solo una muestra), porque la volatilidad del agregado mensual baja de forma predecible al escalar.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Patrocinio para correr a esa escala y, más adelante, datos reales de cobranza.</p></li><li><h4>Presupuesto separado para la licitación de 2027</h4><p>Preparar, con un año de anticipación, dos campañas de retención separadas: una para el sorteo de la licitación de stock y otra para el churn voluntario de siempre, porque compiten por el mismo cupo de contacto y el sorteo lo consume casi todo.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Decisión y presupuesto del negocio, con tiempo suficiente antes de agosto de 2027.</p></li><li><h4>Piloto acotado del bandit de contacto, sin desplazar la heurística</h4><p>Correr en paralelo, con más presupuesto de contactos y más tiempo que los 24 meses simulados, la variante que aprendió a discriminar de verdad (Thompson con LightGBM), y volver a auditar con evaluación off-policy antes de subir su participación.</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> Patrocinio para un piloto controlado; ningún cambio a la política vigente todavía.</p></li></ol>
+</section>
+
+<section id="supuestos">
+  <h2>Supuestos, reservas y límites</h2>
+  <p class="medida">Todo lo que se afirma en este informe con un número viene del sandbox sintético, salvo
+  cuando se cita explícitamente la Ficha 165 de la Superintendencia de Pensiones o la Ley
+  21.735. Ningún resultado se presenta "en el límite" como si cumpliera: cuando una cifra queda al borde de
+  un umbral (masa en riesgo de riesgo_empleador) o por debajo de él (reingreso de riesgo_cese_cotizacion,
+  el criterio de Thompson en bandit_contacto), se dice tal cual, con las mismas palabras que usó la
+  revisión.</p>
+  <h3>Sobre los datos</h3>
+  <ul class="medida">
+    <li>Las seis AFP del sandbox, sus comisiones y rentabilidades son ficticias salvo Cuprum, cuya
+    comisión (1,44 %) y rentabilidad a 36 meses (fondo C: 5,99 %)
+    sí son la cifra real de la Ficha 165.</li>
+    <li>La densidad de cotización del universo sintético se recalibró en la ronda 3 contra la Ficha
+    165: el perfil sistema pasó de 78-79 % a 47,7-47,8 %
+    (objetivo: 47,3 %) y el perfil Cuprum de 71-73 % a
+    66,4-66,5 % (objetivo: 66,94 %).</li>
+    <li>Los parámetros de comportamiento (probabilidades de reclamo, de visita de la competencia, de
+    aporte voluntario, de declaración y no pago) son supuestos razonables para Chile, documentados uno por
+    uno en cada README, no series oficiales.</li>
+    <li>La fuga bruta mensual de Cuprum (a diferencia del neto, que sí publica la Ficha
+    165: 4.128 traspasos netos en junio de 2026) no está
+    disponible públicamente; se usa un supuesto de trabajo anclado al promedio del sistema.</li>
+  </ul>
+  <h3>Sobre los modelos</h3>
+  <ul class="medida">
+    <li>Ninguna cifra de este informe se redondeó hacia arriba. Donde una cifra tiene rango entre semillas,
+    se muestra el rango o la semilla de referencia, no el mejor caso.</li>
+    <li>Los criterios de aceptación se fijaron antes de ver los resultados y no se relajaron para que un
+    proyecto pasara: donde no se cumplen (04 reingreso, 05 masa en riesgo, 09 bandit), se dice.</li>
+    <li>Todos los proyectos comparten universo, pero no todos comparten escala: uplift_retencion y
+    bandit_contacto corrieron a 10.000 afiliados (no 20.000 afiliados) por restricción de
+    tiempo de esta ronda, validado además a mayor escala en uplift_retencion.</li>
+  </ul>
+</section>
+
+<section id="anexo">
+  <h2>Anexo técnico</h2>
+  <p class="medida">Una fila por proyecto: escala de datos, tipo de modelo, métrica principal, tests,
+  tiempo de ejecución de la corrida de referencia y estado de revisión. El detalle completo &mdash;
+  parámetros, features, splits, baselines&mdash; vive en el README de cada proyecto.</p>
+  <div class="tabla-wrap">
+    <table class="tabla">
+      <thead><tr><th>Proyecto</th><th>Datos</th><th>Modelo</th><th>Métrica principal</th>
+      <th>Tests</th><th>Runtime</th><th>Revisión</th></tr></thead>
+      <tbody><tr><td>01 rim_nowcasting</td><td>5.000 afiliados, PySpark</td><td>Hurdle: GBT clasificador + regresor</td><td class='num'>WAPE 0,115 (h=1)</td><td class='num'>—</td><td class='num'>—</td><td>Cerrado ronda 1/2</td></tr><tr><td>02 churn_traspaso</td><td>20.000 afiliados</td><td>LightGBM binario + calibración</td><td class='num'>AUC 0,720</td><td class='num'>39</td><td class='num'>60 s</td><td>Aprobado con reserva (ronda 3)</td></tr><tr><td>03 propension_apv</td><td>20.000 afiliados</td><td>Hurdle: LightGBM clasificador + regresor</td><td class='num'>AUC 0,836</td><td class='num'>26</td><td class='num'>86 s</td><td>Aprobado (ronda 2)</td></tr><tr><td>04 riesgo_cese_cotizacion</td><td>20.000 afiliados</td><td>3 × LightGBM binario + calibración</td><td class='num'>AUC cese 0,887</td><td class='num'>29</td><td class='num'>50,1 s</td><td>Aprobado con corrección (ronda 3)</td></tr><tr><td>05 riesgo_empleador</td><td>20.000 afiliados (~1.000 empleadores)</td><td>LightGBM binario por objetivo</td><td class='num'>AUC 0,865</td><td class='num'>21</td><td class='num'>26 s</td><td>Aprobado con reserva (ronda 3)</td></tr><tr><td>06 segmentacion_afiliados</td><td>20.000 afiliados</td><td>k-means + clasificador LightGBM</td><td class='num'>Silueta 0,2395</td><td class='num'>14</td><td class='num'>90,8 s</td><td>Aprobado (ronda 2)</td></tr><tr><td>07 uplift_retencion</td><td>10.000 afiliados</td><td>T-, X- y DR-learner sobre LightGBM</td><td class='num'>Qini X-learner 0,00086</td><td class='num'>13</td><td class='num'>26,2 s</td><td>Aprobado con reserva (ronda 4)</td></tr><tr><td>08 secuencial_afiliado</td><td>10.000 afiliados</td><td>GRU multi-tarea (PyTorch) vs. LightGBM</td><td class='num'>AUC 0,5848 (red, traspaso)</td><td class='num'>7</td><td class='num'>228,9 s</td><td>Aprobado, no aporta (ronda 4)</td></tr><tr><td>09 bandit_contacto</td><td>10.000 afiliados</td><td>ε-greedy, LinUCB, Thompson (lineal y LightGBM)</td><td class='num'>DR err. 0,1 % (ε-greedy)</td><td class='num'>19</td><td class='num'>8-9 s</td><td>Aprobado (ronda 4)</td></tr></tbody>
+    </table>
+  </div>
+  <p class="fuente-cita">Suite completa del laboratorio: 155 tests,
+  0 fallos, 9 min 46 s (<code>python -m pytest afp_lab -q</code>,
+  incluido el proyecto 01 con Spark). Fuente: README.md raíz, y el README y la carpeta
+  <code>docs/revisiones/</code> de cada proyecto.</p>
+</section>
+
+<section id="glosario">
+  <h2>Glosario</h2>
+  <dl class="glosario medida"><dt>Afiliado / cotizante</dt><dd>Afiliado es cualquier persona con cuenta en la AFP; cotizante es quien pagó una cotización el mes de referencia. La razón entre ambos es la densidad de cotización.</dd><dt>AUC</dt><dd>Qué tan bien ordena el modelo a quién le va a pasar el evento primero. 0,50 es no mejor que el azar; 1,00 es perfecto. No dice nada sobre el número absoluto de casos.</dd><dt>Baseline / regla de negocio</dt><dd>La forma en que se decide hoy, sin el modelo (por ejemplo, ordenar por renta o por una regla simple). Es la vara con la que se mide si el modelo aporta.</dd><dt>Captura al 10 %</dt><dd>Del total de casos que van a ocurrir, qué fracción cae dentro del 10 % de la cartera que el modelo marca como más riesgosa u oportuna. Es la métrica de negocio, no la técnica.</dd><dt>Cortes / periodo_corte</dt><dd>El mes en que se toma la decisión ('hoy' para el modelo). El resultado se mide en los meses siguientes, nunca antes.</dd><dt>Densidad de cotización</dt><dd>Fracción de afiliados que cotizó en un mes típico. Cuprum tiene la densidad más alta del sistema.</dd><dt>Fuga de información (leakage)</dt><dd>Cuando el modelo, por error, ve información del futuro al entrenar. Cada proyecto tiene tests específicos para detectarla.</dd><dt>Gap (purga)</dt><dd>Meses que se descartan entre el entrenamiento y la prueba de un modelo, para que ningún dato de entrenamiento roce el periodo que se está evaluando.</dd><dt>Latente</dt><dd>Un dato que existe solo dentro del simulador para generar la dinámica (por ejemplo, la propensión verdadera a irse). Nunca puede ser una feature del modelo, porque en la vida real no se observa.</dd><dt>Off-policy (evaluación fuera de política)</dt><dd>Estimar qué tan bien habría funcionado una política nueva usando solo los datos que ya se registraron con la política vieja, sin haberla corrido de verdad.</dd><dt>Qini / AUUC</dt><dd>Mide si un ranking de a quién contactar identifica bien a quienes el contacto de verdad cambia de decisión, usando un grupo de control aleatorio como referencia.</dd><dt>Sandbox sintético</dt><dd>Todos los datos de este informe, salvo donde se cita la Ficha 165, son generados por un simulador, no de afiliados reales.</dd><dt>Sleeping dog</dt><dd>Alguien a quien contactar empeora las cosas: sin el contacto se habría quedado, y el contacto lo hace irse.</dd><dt>Uplift / efecto causal</dt><dd>El cambio que provoca de verdad una acción (como un contacto), distinto del riesgo que ya tenía la persona antes de la acción.</dd><dt>WAPE</dt><dd>Error relativo de una proyección de montos, robusto a los ceros (a diferencia del MAPE). 0 es perfecto; 1 significa un error del mismo tamaño que el propio monto.</dd></dl>
+</section>
+<footer class="pie">Informe generado por <code>docs/build_reporte.py</code> a partir de <code>docs/reporte_datos.json</code>. Datos 100&nbsp;% sintéticos salvo donde se cita la Ficha Estadística Previsional N° 165 de la Superintendencia de Pensiones o la Ley 21.735. AFP Cuprum es la persona de este sandbox; ningún dato describe a un afiliado real.</footer></main>
+</div>
+</body>
+</html>

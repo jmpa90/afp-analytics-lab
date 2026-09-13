@@ -624,7 +624,7 @@ def _card02():
         ["10 % (referencia)", "20 % (doble equipo)"],
         {"Captura de traspasos": [num("p02_captura10_traspasos"), num("p02_captura20_traspasos")]},
         {"Captura de traspasos": COL_MODELO},
-        fmt=_fmt1, unit_suffix=" %", width=560, height=220,
+        fmt=_fmt1, unit_suffix=" %", width=560, height=220, value_max=100,
         aria="Captura de traspasos al 10 % y al 20 % de cobertura",
     )
     resultado = (
@@ -711,7 +711,7 @@ def _card03():
         ["Modelo (monto esperado)", "Orden por renta (hoy)"],
         {"Captura al 10 %": [num("p03_captura10_monto"), num("p03_captura10_monto_renta")]},
         {"Captura al 10 %": COL_MODELO},
-        fmt=_fmt1, unit_suffix=" %", width=560, height=220,
+        fmt=_fmt1, unit_suffix=" %", width=560, height=220, value_max=100,
         aria="Captura de ahorro voluntario al 10 % de la cartera, modelo vs. orden por renta",
     )
     mockup = mini_dashboard(
@@ -764,7 +764,7 @@ def _card04():
             "AUC modelo": [num("p04_auc_cese3m"), num("p04_auc_cese6m"), num("p04_auc_reingreso_actual")],
         },
         {"AUC modelo": COL_MODELO},
-        fmt=_fmt3, width=560, height=230,
+        fmt=_fmt3, width=560, height=230, value_max=1.0,
         aria="AUC del modelo de cese y reingreso, con la corrección posterior a la ronda 3 hecha en la ronda 4",
     )
     resultado = (
@@ -834,7 +834,7 @@ def _card05():
         ["10 % (referencia)", "20 % (doble equipo)"],
         {"Masa en riesgo capturada": [num("p05_captura10_masa"), num("p05_captura20_masa")]},
         {"Masa en riesgo capturada": COL_MODELO},
-        fmt=_fmt1, unit_suffix=" %", width=560, height=220,
+        fmt=_fmt1, unit_suffix=" %", width=560, height=220, value_max=100,
         aria="Captura de masa imponible en riesgo al 10 % y al 20 % de los empleadores gestionados",
     )
     resultado = (
@@ -1189,7 +1189,7 @@ def _card08():
             "Red secuencial (multi-tarea)": [num("p08_auc_red_multitarea_traspaso"), num("p08_auc_red_multitarea_cese")],
         },
         {"LightGBM de producción": COL_MODELO, "Red secuencial (multi-tarea)": COL_A2},
-        fmt=_fmt3, width=560, height=240,
+        fmt=_fmt3, width=560, height=240, value_max=1.0,
         aria="AUC del LightGBM de producción vs. la red secuencial, traspaso y cese",
     )
     resultado = (
@@ -1364,7 +1364,7 @@ def sec_torre_control():
             "Práctica actual": [num("p02_auc_baseline"), num("p03_auc_regla"), num("p04_auc_regla_cese3m"), num("p05_auc_regla")],
         },
         {"Modelo": COL_MODELO, "Práctica actual": COL_BASE},
-        fmt=_fmt3, width=680, height=280,
+        fmt=_fmt3, width=680, height=280, value_max=1.0,
         aria="AUC del modelo vs. la práctica actual, cuatro capacidades de priorización",
     )
     filas5 = [
@@ -1731,6 +1731,7 @@ def build_app_data():
             "metrica_principal": _case_metrica_principal(c["id_"]),
             "reserva_corta": _case_reserva_corta(c["id_"]),
             "problema_html": c["problema"],
+            "que_hace_html": c["que_hace"],
             "resultado_html": c["resultado_html"],
             "uso_html": c["uso_html"],
             "dashboard_html": c["mockup_html"],
@@ -1924,7 +1925,7 @@ JS_APP = """
     {id:'glosario', label:'Glosario'}
   ];
 
-  var state = {screen:'inicio', caseSlug:null, tab:'problema', areaFilter:null, search:''};
+  var state = {screen:'inicio', caseSlug:null, tab:'resumen', areaFilter:null, search:''};
 
   function lsGet(key, fallback){
     try { var v = localStorage.getItem(key); return v === null ? fallback : v; }
@@ -1950,7 +1951,7 @@ JS_APP = """
     var h = location.hash.replace(/^#\/?/, '');
     var parts = h.split('/').filter(function(x){return x.length>0;});
     if (!parts.length) return null;
-    var out = {screen:parts[0], caseSlug:null, tab:'problema'};
+    var out = {screen:parts[0], caseSlug:null, tab:'resumen'};
     if (out.screen === 'casos' && parts[1]){
       out.caseSlug = decodeURIComponent(parts[1]);
       if (parts[2]) out.tab = parts[2];
@@ -1969,13 +1970,13 @@ JS_APP = """
     var parsed = parseHash();
     if (!parsed){
       var last = lsGet('cuprum_screen', 'inicio');
-      state.screen = last; state.caseSlug = null; state.tab = 'problema';
+      state.screen = last; state.caseSlug = null; state.tab = 'resumen';
       history.replaceState(null, '', '#/' + last);
       return;
     }
     state.screen = parsed.screen;
     state.caseSlug = parsed.caseSlug;
-    state.tab = parsed.tab || 'problema';
+    state.tab = parsed.tab || 'resumen';
   }
 
   function chipClass(nivel){
@@ -2056,16 +2057,16 @@ JS_APP = """
     grid.innerHTML = html || '<p class="medida">Ningún caso coincide con el filtro.</p>';
   }
   var TABS = [
-    {id:'problema', label:'Problema'}, {id:'resultado', label:'Resultado'},
-    {id:'dashboard', label:'Dashboard'}, {id:'produccion', label:'Producción'},
-    {id:'reserva', label:'Reserva'}, {id:'fuente', label:'Fuente'}
+    {id:'resumen', label:'Resumen'}, {id:'dashboard', label:'Dashboard'},
+    {id:'produccion', label:'Producción'}, {id:'fuente', label:'Fuente'}
   ];
   function tabContent(c, tab){
-    if (tab === 'problema') return '<div class="medida">' + c.problema_html + '</div>';
-    if (tab === 'resultado') return '<div class="medida">' + c.resultado_html + '<h4>Cómo lo usaría el área</h4>' + c.uso_html + '</div>';
+    if (tab === 'resumen') return '<div class="medida"><h4>Problema</h4>' + c.problema_html +
+      '<h4>Qué hace</h4>' + c.que_hace_html +
+      '<h4>Resultado en el sandbox</h4>' + c.resultado_html +
+      '<h4>Cómo lo usaría el área</h4>' + c.uso_html + '</div>' + c.reserva_html;
     if (tab === 'dashboard') return c.dashboard_html;
     if (tab === 'produccion') return '<div class="medida">' + c.produccion_html + '</div>';
-    if (tab === 'reserva') return c.reserva_html;
     if (tab === 'fuente') return '<p class="fuente-cita">Fuente: ' + esc(c.fuente_texto) + '</p>';
     return '';
   }

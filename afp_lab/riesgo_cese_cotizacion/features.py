@@ -71,10 +71,17 @@ FEATURES_NUMERICAS = (
        "cesantia_en_curso", "cesantia_giros_restantes", "cesantia_tasa_actual",
        "edad", "meses_hasta_pension", "meses_desde_afiliacion",
        "mes_corte", "es_enero", "es_marzo", "es_abril", "es_julio", "es_sept", "es_dic",
-       "desempleo_corte", "estacionalidad_rubro"]
+       "desempleo_corte", "estacionalidad_rubro", "estacionalidad_rubro_ultimo_empleo"]
 )
 FEATURES_CATEGORICAS = ["tipo_afiliado", "sexo", "nivel_educacional", "region", "rubro", "tamano_empleador",
-                        "tipo_contrato"]
+                        "tipo_contrato", "rubro_ultimo_empleo", "tamano_ultimo_empleo"]
+# Corr. ronda 4 (correccion_04.md, ver `_features_historia_rim`): rubro/tamano/estacionalidad
+# de la ULTIMA relacion laboral conocida (empleada o no HOY), a diferencia de
+# `rubro`/`tamano_empleador`/`estacionalidad_rubro` que describen el empleador VIGENTE y
+# caen siempre a "SIN_EMPLEADOR"/1-12 constante para toda la poblacion `pop_reingreso` (nadie
+# cotiza hoy, por definicion de esa poblacion). Estas dos son iguales a las de arriba cuando
+# el afiliado SI cotiza hoy (mismo empleador), y solo aportan senal nueva cuando esta
+# cesante.
 
 # ronda 2 (BRIEF_RONDA2.md #2): codigos de movimiento de personal de la planilla Previred
 # sintetica (afp_lab/common/planilla.py), con el MISMO desfase que la RIM (l1 = corte-2,
@@ -135,6 +142,20 @@ def _features_historia_rim(cot: pd.DataFrame, afiliados: pd.DataFrame, corte: in
           .fillna({"rim": 0.0, "n_pagadores": 0}))
     df = df.sort_values(["afiliado_id", "periodo"]).reset_index(drop=True)
     df["cotiza"] = (df["rim"] > 0).astype(int)
+    # Corr. ronda 4 (correccion_04.md): `empleador_principal` solo existe en meses con RIM
+    # conocida > 0 (por construccion de `_rim_conocida_asof`), asi que para alguien cesante
+    # EN `corte_rim` (rim_l1 == 0: toda la poblacion `pop_reingreso`) queda NaN y las
+    # features de rubro/tamano/estacionalidad derivadas de el (mas abajo, en
+    # `construir_features`) caen siempre a "SIN_EMPLEADOR"/1-12 constante: el modelo de
+    # reingreso queda ciego al rubro de la ULTIMA relacion laboral, justo la variable que en
+    # el generador (rim_nowcasting.synthetic._simular_particion, SEASON_HIRE[rubro_pref,
+    # mes]) determina la estacionalidad de recontratacion de cada persona. `empleador_ref_hist`
+    # es el ultimo empleador conocido (con RIM > 0) hasta cada mes, propagado hacia adelante
+    # (ffill) dentro de la ventana: para quien sigue cotizando coincide con
+    # `empleador_principal`; para quien esta cesante, es el empleador de la relacion que
+    # perdio (as-of: solo usa RIM ya conocida a `corte-1`, igual que el resto de esta
+    # ventana).
+    df["empleador_ref_hist"] = df.groupby("afiliado_id", sort=False)["empleador_principal"].ffill()
     g = df.groupby("afiliado_id", sort=False)
 
     # cambio de nivel (persistencia rota): sin dato previo, cambio de 0<->positivo, o salto > 2%
@@ -201,6 +222,7 @@ def _features_historia_rim(cot: pd.DataFrame, afiliados: pd.DataFrame, corte: in
 
     out = pd.DataFrame(index=ultima.index)
     out["empleador_principal"] = ultima["empleador_principal"]
+    out["empleador_ref_hist"] = ultima["empleador_ref_hist"]
     out = out.join(lag_piv).join(stats_df)
     out["meses_historia"] = ultima["meses_historia"]
     out["meses_con_empleador"] = ultima["meses_con_empleador"]
@@ -458,12 +480,20 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
 
     dim_emp = empleadores[["empleador_id", "rubro", "tamano_empleador", "region_empleador"]] \
         .rename(columns={"empleador_id": "empleador_principal"})
+    # Corr. ronda 4 (ver `_features_historia_rim`): rubro/tamano de la ULTIMA relacion
+    # laboral conocida (`empleador_ref_hist`, ffill de `empleador_principal`), no solo la
+    # vigente. Para quien SI cotiza hoy es el mismo empleador (mismo valor que `rubro`); para
+    # `pop_reingreso` (nadie cotiza hoy) es la unica fuente de rubro/tamano disponible.
+    dim_emp_hist = empleadores[["empleador_id", "rubro", "tamano_empleador"]].rename(
+        columns={"empleador_id": "empleador_ref_hist", "rubro": "rubro_ultimo_empleo",
+                 "tamano_empleador": "tamano_ultimo_empleo"})
 
     df = (activos.merge(f_rim, on="afiliado_id", how="left")
           .merge(f_ev, on="afiliado_id", how="left")
           .merge(f_mov, on="afiliado_id", how="left")
           .merge(f_emp, on="empleador_principal", how="left")
           .merge(dim_emp, on="empleador_principal", how="left")
+          .merge(dim_emp_hist, on="empleador_ref_hist", how="left")
           # tipo de contrato atado a la relacion VIGENTE (afiliado + su empleador de
           # referencia), no a cualquier inicio pasado del afiliado (menor #8, ronda 1)
           .merge(f_tc.rename(columns={"empleador_id": "empleador_principal"}),
@@ -497,6 +527,12 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
     df["desempleo_corte"] = float(m_corte["desempleo"])
     est = _estacionalidad_rubro(tablas["afc_eventos"], empleadores, corte)
     df["estacionalidad_rubro"] = df["rubro"].map(est).fillna(1 / 12)
+    # Corr. ronda 4: mismo indice de estacionalidad, pero del rubro de la ULTIMA relacion
+    # laboral (`rubro_ultimo_empleo`), no del empleador vigente (siempre "SIN_EMPLEADOR" en
+    # `pop_reingreso`, ver comentario en la construccion de `dim_emp_hist` arriba).
+    df["rubro_ultimo_empleo"] = df["rubro_ultimo_empleo"].fillna("SIN_EMPLEADOR")
+    df["tamano_ultimo_empleo"] = df["tamano_ultimo_empleo"].fillna("SIN_EMPLEADOR")
+    df["estacionalidad_rubro_ultimo_empleo"] = df["rubro_ultimo_empleo"].map(est).fillna(1 / 12)
 
     df["edad"] = df["edad_inicio"] + (periodo_to_idx(corte) - periodo_to_idx(periodo_inicio)) // 12
     df["meses_hasta_pension"] = (np.where(df["sexo"] == "F", 60, 65) - df["edad"]) * 12
@@ -548,7 +584,7 @@ def construir_features(tablas: dict[str, pd.DataFrame], periodo_corte: int) -> p
 
     cols = (["afiliado_id", "periodo_corte", "corte_rim", "pop_cese", "pop_reingreso",
              "tipo_afiliado", "sexo", "nivel_educacional", "region", "rubro", "tamano_empleador",
-             "tipo_contrato"]
+             "tipo_contrato", "rubro_ultimo_empleo", "tamano_ultimo_empleo"]
             + FEATURES_NUMERICAS + FEATURES_PLANILLA)
     return df[cols].reset_index(drop=True)
 

@@ -572,6 +572,14 @@ conocer antes de usarla para un compromiso operativo mes a mes (ver más en §7 
   umbral, pero el margen ya es más ajustado (0,020) y, como documenta §6, ese AUC global
   está sostenido en gran parte por el gradiente de edad/jubilación (dentro de la edad
   laboral cae a 0,602).
+  **⚠ Desactualizado por un cambio ajeno a este proyecto**: con la densidad de
+  `afp_lab/common/synth_base.PERFILES` recalibrada en la ronda 3 de otro worktree
+  (`empleador`), el AUC de reingreso mide hoy **0,608** (sistema) — bajo el umbral de 0,70,
+  aunque el de cese lo sigue cumpliendo (0,887). Ver **§12 "Ronda 3 — corrección"** para el
+  diagnóstico, la corrección aplicada y por qué se concluye que el generador (no este
+  proyecto) necesita un ajuste para volver a dejar el reingreso predecible sobre 0,70; el
+  resto de esta sección (§6) describe el estado **previo** a ese cambio de densidad y se
+  deja sin reescribir por alcance/presupuesto de esa corrección (ver §12).
 * Brier del modelo mejor que el de la tasa base en los 3 targets ✓.
 * Error relativo mensual del agregado (población del modelo: dependientes/pensionados)
   dentro de ±10 % en los 9 meses×target evaluados (peor caso +8,2 %) ✓ — a diferencia de la
@@ -835,3 +843,105 @@ Nada fuera de `afp_lab/riesgo_cese_cotizacion/`. `afp_lab/common/planilla.py` y
 proceso (ver el informe de ese encargo); este proyecto solo los **usa**, sin modificarlos.
 `afp_lab.common.synth_base.generar_universo` tampoco se tocó: `perfil` ya existía. Tests:
 25 (subieron de 20), ~21 s (ver §9).
+
+## 12. Ronda 3 — corrección (`docs/briefs/ronda_4/correccion_04.md`)
+
+Nombre de la sección tal como lo pidió el encargo, aunque **la causa es la ronda 3 de un
+worktree ajeno** (`empleador`, ver `afp_lab/common/README.md` "Ronda 3"), no una ronda propia
+de este proyecto (no confundir con "Correcciones de la ronda 3 (revisión del gerente)" al
+inicio de este documento, que es otra cosa — ver la advertencia del encabezado). Trabajo
+hecho en el worktree `ronda-4/cese`, sin tocar `afp_lab/common/`.
+
+**Qué pasó.** Al calibrar `PERFILES["sistema"]`/`PERFILES["cuprum"]` a la Ficha 165
+(`p_activo_inicial`/`factor_contratacion` más bajos, densidad de cotización 79 %→48 % en
+sistema), el AUC de **reingreso** (n=20 000, seed=42) cayó de **0,720 a 0,605** en sistema,
+cruzando el umbral del brief (≥0,70); el de cese se mantuvo (0,868→0,888 a 3 m).
+
+**Diagnóstico, con evidencia (reproducido con monkeypatch de `PERFILES` en memoria — sin
+tocar `afp_lab/common/synth_base.py` — para reconstruir el "antes"; sistema, n=20 000,
+seed=42):**
+
+1. **La prevalencia del target colapsa dentro de la propia población de reingreso**
+   (`pop_reingreso`: dependientes sin RIM conocida en `corte-2` **ni** `corte-3`, con ≥1
+   cotización en 24 m): de 70,6 % (train+val) / 66,2 % (test) **antes**, a 23,6 % / 23,1 %
+   **después** — la mecánica del generador (`rim_nowcasting.synthetic._simular_particion`)
+   muestra por qué: la probabilidad mensual de contratación (`p_hire_base = 0,16 ×
+   factor_contratacion × (1 − 4·(desempleo−0,08))`) es **memoryless** (no depende de cuánto
+   lleva cesante la persona) y prácticamente homogénea entre individuos — solo varía por
+   `edad>55` (mitad de probabilidad), el rubro **latente preferido** del afiliado
+   (`lat_rubro_pref`, vía `SEASON_HIRE[rubro_pref, mes]`, prohibido como feature) y el
+   desempleo macro del mes. Bajar `factor_contratacion` 5× (sistema: 1,0→0,20) comprime esa
+   ya poca heterogeneidad hacia un rango de probabilidades más bajo y más estrecho.
+2. **El AUC cae incluso dentro del mismo tramo de duración de cese** (`racha_cero`, meses
+   consecutivos sin cotizar), no solo por cambio de mezcla poblacional: p. ej. con 13-24
+   meses de cese, AUC 0,810 (antes) → 0,622 (después); con 7-12 meses, 0,732 → 0,601; con 2
+   meses, 0,671 → 0,627. Esto es consistente con (1): el generador no da más "para
+   discriminar" dentro de un tramo de duración, y la duración en sí no es causal del
+   reingreso (es memoryless) — solo actuaba antes como proxy indirecto de heterogeneidad
+   por selección (frailty), un efecto que se debilita al comprimir las probabilidades.
+3. **Bug real encontrado (no relacionado con la densidad, pero que sí agrava el problema):**
+   `rubro`, `tamano_empleador` y `estacionalidad_rubro` describen el empleador **vigente**
+   (`empleador_principal`, definido solo cuando hay RIM conocida > 0 en `corte-2`) — por
+   definición de `pop_reingreso` (nadie cotiza hoy), esas 3 columnas son **siempre**
+   "SIN_EMPLEADOR"/1/12 constante en el 100 % de las filas de reingreso, antes **y**
+   después del cambio de densidad (ya documentado como limitación en §6/§8, pero nunca
+   corregido). Es exactamente la variable que el generador sí usa para modular la
+   contratación (rubro preferido × estacionalidad), y el modelo de reingreso no la veía
+   nunca.
+
+**Corrección aplicada en `features.py`** (sin bajar el umbral, sin tocar `common/`): se
+agrega `empleador_ref_hist` (el último empleador con RIM conocida, propagado hacia adelante
+—`ffill`— dentro de la ventana de historia; coincide con el vigente si el afiliado cotiza
+hoy, y es el de la relación perdida si no) y, a partir de él, tres features nuevas —
+`rubro_ultimo_empleo`, `tamano_ultimo_empleo` (categóricas) y
+`estacionalidad_rubro_ultimo_empleo` (numérica, mismo índice que `estacionalidad_rubro` pero
+sobre este rubro) — todas **as-of** (derivadas 100 % de la misma RIM conocida que
+`rim_l1..rim_l12`, mismo desfase `corte-2`/`corte-1`; ver `test_leakage_ultimo_empleo_no_usa_rim_futura`)
+e incorporadas a `COLUMNAS` (el modelo de producción, no un ablation aparte: a diferencia de
+la planilla en la ronda 2, aquí la señal es real — `rubro_ultimo_empleo` queda en el top-4
+de importancia por ganancia del modelo de reingreso corregido).
+
+**Resultado de la corrección** (mismo split, mismas filas de test; `auc_reingreso_antes_fix`
+= `COLUMNAS` sin las 3 features nuevas, `auc_reingreso_despues_fix` = `COLUMNAS` completo —
+aísla el efecto de la corrección del ruido de regenerar el universo; n=20 000):
+
+| Perfil | Seed | AUC y3 | AUC y6 | Prevalencia reingreso (test) | AUC reingreso antes_fix | AUC reingreso después_fix | Δ |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sistema | 42 | 0,8870 | 0,8780 | 23,1 % | 0,6053 | 0,6081 | +0,0028 |
+| sistema | 7 | 0,8981 | 0,8855 | 23,1 % | 0,5931 | 0,5962 | +0,0031 |
+| cuprum | 42 | 0,8891 | 0,8732 | 37,9 % | 0,6186 | 0,6261 | +0,0075 |
+| cuprum | 7 | 0,8890 | 0,8728 | 38,1 % | 0,6218 | 0,6167 | −0,0051 |
+
+**Conclusión (honesta): la corrección es real y se queda (mejora en 3 de 4 combinaciones, sin
+leakage, features mecánicamente justificadas) pero su efecto (+0,003 a +0,008 AUC, y en un
+caso −0,005) está dentro del ruido de entrenamiento de LightGBM — no alcanza, ni de lejos, a
+recuperar el umbral de 0,70.** Con la evidencia de los puntos 1-2 de arriba, el diagnóstico
+central no es un gap de features (ese se corrigió y ayudó poco) sino que **la dinámica actual
+del generador dejó el reingreso casi impredecible a nivel individual**: con `factor_contratacion`
+memoryless y sin heterogeneidad individual real más allá de edad/rubro-mes/desempleo, el techo
+de AUC alcanzable con **cualquier** feature as-of que no sea la asignación latente de rubro
+está estructuralmente cerca de donde quedó (~0,60-0,63). No se probaron horizonte (12 m) ni
+redefinir el target (ya exige ≥1 mes de cotización efectiva, no es el problema) por
+presupuesto — quedan en pendientes.
+
+**Ajuste mínimo propuesto al generador para la próxima ronda (NO aplicado — `common/` no se
+toca en este brief):** igual que ya propone `afp_lab/common/README.md` ("Propuestas para
+próximas rondas" #1), dar a `p_hire` una dependencia leve y explícita de la duración de cese
+(p. ej. un factor que decaiga o crezca con los meses desde el término, o separar
+"cesante reciente" de "cesante crónico" con una probabilidad de contratación distinta para
+cada uno) para que la duración observada (`racha_cero`, ya disponible como feature) vuelva a
+ser genuinamente informativa y no solo un proxy débil por selección.
+
+**Tests**: 4 nuevos (`test_rubro_ultimo_empleo_disponible_en_poblacion_reingreso`,
+`test_rubro_ultimo_empleo_coincide_con_vigente_si_cotiza_hoy`,
+`test_features_ultimo_empleo_en_produccion`, `test_leakage_ultimo_empleo_no_usa_rim_futura`);
+29 en total (subieron de 25), ~19 s.
+
+**Cómo reproducir**: `PYTHONPATH=. python3 -m afp_lab.riesgo_cese_cotizacion.run --n-afiliados
+20000 --perfil ambos --seed 42` (y `--seed 7`) da los AUC de cese/reingreso **después** de la
+corrección para ambos perfiles con la densidad actual; el "antes" de la tabla de arriba se
+reprodujo con un script ad-hoc que monkeypatchea `afp_lab.common.synth_base.PERFILES` en
+memoria (valores pre-ronda-3: sistema `p_activo_inicial=0,78, factor_contratacion=1,0`;
+cuprum `p_activo_inicial=0,68, factor_contratacion=0,60`) y entrena con y sin las 3 columnas
+nuevas sobre el mismo split — no se guardó como test (es diagnóstico puntual, no una
+regresión a vigilar), pero queda documentado aquí para que sea reproducible.

@@ -539,3 +539,72 @@ def test_aporte_planilla_ablation(split_chico):
     tabla = resultado["importancias_comparadas"]
     assert set(FEATURES_PLANILLA) <= set(tabla["feature"])
     assert 0 <= resultado["n_features_planilla_con_señal"] <= len(FEATURES_PLANILLA)
+
+
+# ================================================================================ Ronda 4 ===
+# docs/briefs/ronda_4/correccion_04.md: la calibracion de densidad de `common/synth_base.py`
+# (ronda 3, worktree `empleador`) bajo el AUC de reingreso de 0,720 a 0,605 (sistema, n=20000,
+# seed=42). Diagnostico (ver README "Ronda 3 - correccion"): `rubro`/`tamano_empleador`/
+# `estacionalidad_rubro` describen el empleador VIGENTE, que por definicion de `pop_reingreso`
+# (nadie cotiza hoy) es siempre nulo -> esas 3 features caian siempre a "SIN_EMPLEADOR"/1/12,
+# dejando al modelo de reingreso ciego al rubro de la ultima relacion laboral, justo la
+# variable que en el generador (rim_nowcasting.synthetic.SEASON_HIRE[rubro_pref, mes])
+# determina la estacionalidad de recontratacion de cada persona. Correccion: `rubro_ultimo_empleo`
+# / `tamano_ultimo_empleo` / `estacionalidad_rubro_ultimo_empleo`, derivadas de
+# `empleador_ref_hist` (ffill as-of de `empleador_principal` dentro de la ventana de historia).
+def test_rubro_ultimo_empleo_disponible_en_poblacion_reingreso(features):
+    """`pop_reingreso` exige `n_cotiza_24 > 0`: hubo al menos un mes con RIM conocida en los
+    24 meses previos, dentro de `VENTANA_HISTORIA` (26 meses) - el ffill siempre debe
+    encontrar ese empleador. A diferencia de `rubro`/`tamano_empleador` (siempre
+    "SIN_EMPLEADOR" en esta poblacion, ver README), las nuevas features deben tener el rubro
+    real de esa ultima relacion, con variedad (no la misma categoria ni la misma
+    estacionalidad para todos)."""
+    pob_b = features[features["pop_reingreso"] == 1]
+    assert len(pob_b) > 0
+    assert (pob_b["rubro"] == "SIN_EMPLEADOR").all()  # sigue documentado asi (no se cambia)
+    assert (pob_b["rubro_ultimo_empleo"] != "SIN_EMPLEADOR").all()
+    assert (pob_b["tamano_ultimo_empleo"] != "SIN_EMPLEADOR").all()
+    assert pob_b["rubro_ultimo_empleo"].nunique() > 1
+    assert pob_b["estacionalidad_rubro_ultimo_empleo"].nunique() > 1
+
+
+def test_rubro_ultimo_empleo_coincide_con_vigente_si_cotiza_hoy(features):
+    """Para quien SI cotiza hoy (`pop_cese`: RIM conocida > 0 en `corte-2`), el ultimo
+    empleador conocido es, por construccion, el mismo que el vigente: `rubro_ultimo_empleo`
+    debe coincidir con `rubro` (y `tamano_ultimo_empleo` con `tamano_empleador`) fila a fila."""
+    pob_a = features[features["pop_cese"] == 1]
+    assert len(pob_a) > 0
+    assert (pob_a["rubro_ultimo_empleo"] == pob_a["rubro"]).all()
+    assert (pob_a["tamano_ultimo_empleo"] == pob_a["tamano_empleador"]).all()
+
+
+def test_features_ultimo_empleo_en_produccion():
+    """La correccion debe estar en el set de PRODUCCION (`COLUMNAS`), no solo en un
+    ablation: a diferencia de las features de planilla (ronda 2, ver
+    `test_columnas_produccion_no_incluyen_planilla`), aqui la evidencia (README "Ronda 3 -
+    correccion") mostro aporte real y se decidio incorporarlas."""
+    nuevas = {"rubro_ultimo_empleo", "tamano_ultimo_empleo", "estacionalidad_rubro_ultimo_empleo"}
+    assert nuevas <= set(COLUMNAS)
+    assert nuevas <= set(FEATURES_CATEGORICAS) | set(FEATURES_NUMERICAS)
+
+
+def test_leakage_ultimo_empleo_no_usa_rim_futura(tablas):
+    """Igual que el resto de las features de historia (`test_leakage_alterar_futuro_no_cambia_features`
+    ya cubre esto de forma general para todo `construir_features`, incluidas las 3 columnas
+    nuevas): `empleador_ref_hist` se deriva 100% de `_rim_conocida_asof` (misma RIM conocida
+    que `rim_l1..rim_l12`), asi que alterar cotizaciones POSTERIORES al corte no debe mover
+    ni `rubro_ultimo_empleo` ni `tamano_ultimo_empleo` ni la estacionalidad derivada. Test
+    dedicado (ademas del generico) porque son las features que motivaron esta ronda."""
+    base = construir_features(tablas, CORTE)
+    cols_nuevas = ["rubro_ultimo_empleo", "tamano_ultimo_empleo", "estacionalidad_rubro_ultimo_empleo"]
+
+    t2 = dict(tablas)
+    cot = tablas["cotizaciones_conocidas"].copy()
+    fut = cot["periodo"] > CORTE
+    cot.loc[fut, "rim"] = 999_999_999.0
+    t2["cotizaciones_conocidas"] = cot
+
+    alt = construir_features(t2, CORTE)
+    b = base.set_index("afiliado_id")[cols_nuevas]
+    a = alt.set_index("afiliado_id")[cols_nuevas]
+    pd.testing.assert_frame_equal(b, a.reindex(b.index))

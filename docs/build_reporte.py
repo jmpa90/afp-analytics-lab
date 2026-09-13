@@ -452,9 +452,9 @@ def sec_portada():
     kpi_html = "".join(kpi_card(num, lbl, sub) for num, lbl, sub in kpis)
 
     mensajes = [
-        "El equipo de Data Analytics completó nueve capacidades analíticas, con una actualización en curso "
-        "sobre la primera, todas sobre un mismo laboratorio sintético de AFP Cuprum y con revisión "
-        "adversarial antes de aprobarse.",
+        "El equipo de Data Analytics completó nueve capacidades analíticas y una actualización sobre la "
+        "primera, todas sobre un mismo laboratorio sintético de AFP Cuprum y con revisión adversarial "
+        "antes de aprobarse.",
         "Cada modelo mejora la práctica comercial actual con la misma capacidad de contacto: no se pide más "
         "gente, se pide priorizar mejor a quién llamar, visitar o escribir.",
         f'La licitación de afiliados de {n("f165_licitacion_anio")} (Ley 21.735) es el mayor riesgo de fuga de '
@@ -877,10 +877,10 @@ def _card01():
     )
     reserva = card_reserva(
         f'Este resultado es de la ronda 2, con la densidad de cotización previa a la recalibración de la '
-        f'ronda 3 contra la Ficha {n("f165_numero")}. Como 01 comparte el generador base con el resto del '
-        "laboratorio, es probable que sus métricas se muevan igual que las de los proyectos 02 a 06 al "
-        "re-ejecutarse con la densidad ya recalibrada; esa corrida está en curso (ver tarjeta 'en curso' "
-        "más abajo) y no se incluye en esta ficha."
+        f'ronda 3 contra la Ficha {n("f165_numero")}. La corrección de la ronda 3 que sí se hizo sobre '
+        "este proyecto (código de movimiento de personal, ficha siguiente) no tocó la densidad; como 01 "
+        "comparte el generador base con el resto del laboratorio, la pregunta de si el nowcasting cambia "
+        "con la densidad ya recalibrada, como pasó en 02-06, sigue abierta."
     )
     return proyecto_card(
         id_="p01", numero="01", nombre="rim_nowcasting",
@@ -1085,8 +1085,10 @@ def _card_planilla():
         f'La planilla sintética reproduce {n("planilla_codigos")} de movimiento de personal de la Tabla '
         "N° 7 (altas, bajas, licencias, cambios de contrato), con el mismo desfase de recepción que usan "
         "los modelos de renta y de cese. Cuando se probó como feature adicional en riesgo_cese_cotizacion, "
-        "el aporte fue marginal e inconsistente en signo: la información ya estaba, por otra vía, en los "
-        "eventos del Seguro de Cesantía."
+        "el aporte fue marginal e inconsistente en signo, y en rim_nowcasting fue chico y concentrado en "
+        "la cartera Cuprum: en los dos casos buena parte de la información ya estaba, por otra vía, en los "
+        "eventos del Seguro de Cesantía. El esquema de columnas quedó además documentado, columna por "
+        "columna, contra la norma (Compendio de la SP y Previred) en docs/modelo_datos_regulatorio.md."
     )
     mockup_html = ""
     produccion = (
@@ -1204,30 +1206,89 @@ def _card08():
     )
 
 
-def sec_01_correccion_en_curso():
-    return _card_en_curso(
-        id_="p01-correccion", numero="—", nombre="rim_nowcasting (corrección)",
-        titulo="Recalibración de 01 contra la nueva densidad",
-        pregunta="¿Cambian las métricas de proyección de renta imponible con la densidad de cotización "
-                 "ya recalibrada contra la Ficha 165, igual que cambiaron las de los demás proyectos del "
-                 "laboratorio?",
-        diseno="Repetir la misma corrida de referencia de 01, ahora con los perfiles de cartera ya "
-               "recalibrados, y comparar el error de proyección y la exactitud de cotiza-o-no antes y "
-               "después, con el mismo método que ya se usó para comparar los otros proyectos del "
-               "laboratorio ante ese mismo cambio.",
+def _card01_correccion():
+    chart = grouped_bar_chart(
+        ["Sistema h=1", "Sistema h=2", "Cuprum h=1", "Cuprum h=2"],
+        {
+            "Antes (sin código de movimiento)": [
+                num("p01c_wape_h1_sistema_antes"), num("p01c_wape_h2_sistema_antes"),
+                num("p01c_wape_h1_cuprum_antes"), num("p01c_wape_h2_cuprum_antes"),
+            ],
+            "Después (con código Tabla N° 7)": [
+                num("p01c_wape_h1_sistema_despues"), num("p01c_wape_h2_sistema_despues"),
+                num("p01c_wape_h1_cuprum_despues"), num("p01c_wape_h2_cuprum_despues"),
+            ],
+        },
+        {"Antes (sin código de movimiento)": COL_BASE, "Después (con código Tabla N° 7)": COL_A2},
+        fmt=_fmt3, width=620, height=250,
+        aria="WAPE antes y después de agregar el código de movimiento de personal, por perfil y horizonte",
+    )
+    resultado = (
+        f'A escala de referencia ({n("p01c_escala")}, {n("p01c_snapshots")}), agregar el código de '
+        f'movimiento de personal (Tabla N° 7) al nowcasting de RIM no cambia el WAPE de Sistema '
+        f'({n("p01c_wape_h1_sistema_antes")} → {n("p01c_wape_h1_sistema_despues")} a un mes; '
+        f'{n("p01c_wape_h2_sistema_antes")} → {n("p01c_wape_h2_sistema_despues")} a dos meses), y sí '
+        f'mejora a Cuprum a dos meses ({n("p01c_wape_h2_cuprum_antes")} → {n("p01c_wape_h2_cuprum_despues")}, '
+        f'sesgo agregado de {n("p01c_sesgo_h2_cuprum_antes")} a {n("p01c_sesgo_h2_cuprum_despues")}); a un '
+        f'mes Cuprum queda igual ({n("p01c_wape_h1_cuprum_antes")} → {n("p01c_wape_h1_cuprum_despues")}). El '
+        f'AUC de cotiza/no cotiza no se mueve ({n("p01c_auc_h1_sistema")} a un mes; '
+        f'{n("p01c_auc_h2_sistema_antes")} → {n("p01c_auc_h2_sistema_despues")} a dos meses). El runtime de '
+        f'la corrida de referencia sigue en torno a {n("p01c_runtime")}, sin aumento medible.'
+    )
+    mockup = mini_dashboard(
+        "Nowcasting con código de movimiento · rim_nowcasting",
+        [(n("p01c_wape_h2_cuprum_despues"), "WAPE Cuprum h=2 (con el código nuevo)"),
+         (n("p01c_wape_h2_sistema_despues"), "WAPE Sistema h=2 (sin cambio material)"),
+         (n("p01c_seg_termino_sesgo"), "sesgo en término reciente (debilidad previa)")],
+        [
+            ("ok", "Cuprum, segundo mes", "el código de movimiento sí aporta aquí", f'{n("p01c_wape_h2_cuprum_antes")} → {n("p01c_wape_h2_cuprum_despues")}'),
+            ("warn", "Con subsidio (licencia en curso)", "mejora algo en ambos horizontes", f'{n("p01c_seg_subsidio_h1_antes")} → {n("p01c_seg_subsidio_h1_despues")}'),
+            ("critical", "Término reciente (aviso AFC)", "sesgo grande en ambas versiones, no lo corrige el código nuevo", f'≈{n("p01c_seg_termino_sesgo")}'),
+        ],
+        chart, "WAPE antes y después de agregar el código de movimiento de personal, por perfil y horizonte.",
+    )
+    produccion = (
+        "El diseño as-of ya está probado (siete tests nuevos, sin fuga hacia el futuro) y usa las mismas "
+        "constantes de la planilla común, así que sumar esta familia de features en producción es barato "
+        "una vez conectada la planilla Previred real. La recomendación es dejarla como familia de "
+        "features opcional, no obligatoria: el aporte es chico y concentrado en un segmento."
+    )
+    reserva = card_reserva(
+        f'La señal es en gran parte redundante con el aviso del Seguro de Cesantía: el código de término '
+        f'coincide con el término AFC en el {n("p01c_coincidencia_termino_afc")} de los casos, lo que explica '
+        f'el efecto casi nulo en Sistema. Con una sola semilla, un delta de ±{n("p01c_delta_umbral")} en un '
+        f'segmento chico (independientes, '
+        f'{n("p01c_seg_independiente_rango")} de WAPE) no se puede declarar significativo. El segmento de '
+        f'término reciente sigue con un sesgo cercano a {n("p01c_seg_termino_sesgo")} en ambas versiones: '
+        "una debilidad previa del modelo que este código no corrige."
+    )
+    return proyecto_card(
+        id_="p01-correccion", numero="—", nombre="rim_nowcasting (ronda 3)",
+        titulo="Código de movimiento de personal en el nowcasting",
+        problema="¿Ayuda a proyectar mejor la renta imponible agregar a 01 el código de movimiento de "
+                 "personal de la propia planilla (altas, bajas, licencias) además del aviso del Seguro de "
+                 "Cesantía que ya usaba?",
+        que_hace="Agrega 14 features nuevas derivadas del código de movimiento (Tabla N° 7) a las "
+                 "features existentes de 01, y compara el error de proyección antes y después, en Sistema "
+                 "y en Cuprum.",
+        resultado_html=resultado,
+        uso_html="Queda disponible como familia de features opcional: no se activa por defecto porque su "
+                 "aporte es chico salvo en la cartera Cuprum a dos meses, donde sí vale la pena.",
+        mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
+        fuente_texto="afp_lab/rim_nowcasting/README.md §10c",
     )
 
 
 def sec_casos():
     tarjetas = (
         _card02() + _card03() + _card04() + _card05() + _card01() + _card06() + _card07() + _card08() + _card09()
-        + _card_planilla() + sec_01_correccion_en_curso()
+        + _card_planilla() + _card01_correccion()
     )
     return f"""
 <section id="casos">
   <h2>Un caso de uso por proyecto</h2>
-  <p class="medida">Nueve capacidades completas, la planilla regulatoria que las sostiene a todas, y una
-  actualización en curso. Cada tarjeta dice el problema, qué hace el modelo, el resultado en el sandbox
+  <p class="medida">Nueve capacidades completas, la planilla regulatoria que las sostiene a todas, y la
+  actualización de la ronda 3 sobre la primera. Cada tarjeta dice el problema, qué hace el modelo, el resultado en el sandbox
   traducido a negocio, cómo lo usaría el área, un mockup de dashboard, el camino a producción y la reserva
   principal &mdash; visible aquí, no escondida en el anexo.</p>
   {tarjetas}

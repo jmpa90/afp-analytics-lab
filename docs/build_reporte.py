@@ -778,7 +778,9 @@ def _card04():
         f'de {n("p04_captura10_cese3m")} / {n("p04_captura10_cese6m")} y el baseline de regla de negocio '
         f'({n("p04_auc_regla_cese3m")}) se midieron ANTES de esta recalibración de densidad y no se '
         "volvieron a medir después; se muestran igual, con esta salvedad explícita, porque el mecanismo de "
-        "captura no cambió, solo la población."
+        "captura no cambió, solo la población. Decisión: la cabeza de reingreso no se usa en producción "
+        "hasta ajustar el generador (probabilidad de contratación dependiente de la duración del cese) o "
+        "validar con datos reales; las cabezas de cese a 3 y 6 meses sí quedan disponibles."
     )
     return proyecto_card(
         id_="p04", numero="04", nombre="riesgo_cese_cotizacion",
@@ -790,13 +792,13 @@ def _card04():
                  "priorizar a quién ofrecer cotización voluntaria mientras dura la laguna).",
         resultado_html=resultado,
         uso_html="El número esperado de ceses por mes alimenta el presupuesto de recaudación esperada; el "
-                 "10 % de mayor riesgo de cese recibe asesoría proactiva. Para reingreso, la campaña útil "
-                 "no es 'a quién va a reingresar' (la mayoría reingresa igual) sino la cola de menor "
-                 "probabilidad, filtrada por años a la pensión para no confundir con quien simplemente se "
-                 "está jubilando.",
+                 "10 % de mayor riesgo de cese recibe asesoría proactiva &mdash; estas dos cabezas ya están "
+                 "disponibles. La cabeza de reingreso queda diseñada (la campaña útil no sería 'a quién va "
+                 "a reingresar', sino la cola de menor probabilidad, filtrada por años a la pensión) pero "
+                 "no se usa en producción todavía: ver la decisión en la reserva.",
         mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
         fuente_texto="afp_lab/riesgo_cese_cotizacion/README.md §§1, 6, 7, 12",
-        estado_chip="Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso; resultado en docs/revisiones/ronda_4/",
+        estado_chip="Corrección aprobada (revisión ronda 4, docs/revisiones/ronda_4/cese_correccion.md)",
     )
 
 
@@ -1198,7 +1200,13 @@ def _card08():
         "embedding, número de capas), por presupuesto de esta ronda. La conclusión &mdash;'no aporta frente "
         "al modelo de producción'&mdash; es honesta y aísla bien la causa (información, no arquitectura), "
         "pero no cierra la pregunta de si una red secuencial con más datos y más búsqueda de "
-        "hiperparámetros cambiaría el resultado."
+        f'hiperparámetros cambiaría el resultado. La revisión adversarial (aprobada con reserva) marca dos '
+        f'puntos de alcance: el proyecto cubre dos de las cuatro cabezas del brief (traspaso y cese; '
+        f'faltan APV y RIM), y el runtime nunca se corrió a la escala de {n("meta_universo_afiliados")} '
+        f'afiliados que exige la convención del laboratorio, solo a {n("p08_escala")}. El revisor '
+        f'reprodujo las cifras casi dígito a dígito; la única que no calzó exacto fue el LightGBM de '
+        f'producción en cese ({n("p08_reprod_lgbm_cese")} reproducido vs. {n("p08_auc_lgbm_cese")} del '
+        "README), una diferencia mínima que no cambia ninguna conclusión."
     )
     return proyecto_card(
         id_="p08", numero="08", nombre="secuencial_afiliado",
@@ -1215,7 +1223,7 @@ def _card08():
                  "02 y 04 con esta arquitectura, a este presupuesto de datos y cómputo.",
         mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
         fuente_texto="afp_lab/secuencial_afiliado/README.md §§1, 6, 7, 8",
-        estado_chip="Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/",
+        estado_chip="Aprobado con reserva (revisión ronda 4, docs/revisiones/ronda_4/secuencial.md)",
     )
 
 
@@ -1466,7 +1474,7 @@ def sec_anexo():
         ("04 riesgo_cese_cotizacion", n("p04_escala"),
          "3 × LightGBM binario + calibración", f'AUC cese {n("p04_auc_cese3m")}', n("p04_tests"), n("p04_runtime"),
          "Rondas 1 y 2 — docs/revisiones/ronda_1/riesgo_cese_cotizacion.md; ronda_2/riesgo_cese_cotizacion.md. "
-         "Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso — docs/revisiones/ronda_4/"),
+         "Corrección posterior a la ronda 3 (ronda 4): aprobada — docs/revisiones/ronda_4/cese_correccion.md"),
         ("05 riesgo_empleador", n("p05_escala") + f' (~{n("p05_empleadores")} empleadores)',
          "LightGBM binario por objetivo", f'AUC {n("p05_auc")}', n("p05_tests"), n("p05_runtime"),
          "Rondas 2 y 3 — docs/revisiones/ronda_2/riesgo_empleador.md; ronda_3/empleador.md"),
@@ -1478,7 +1486,7 @@ def sec_anexo():
          "Ronda 4 — docs/revisiones/ronda_4/uplift.md"),
         ("08 secuencial_afiliado", n("p08_escala"),
          "GRU multi-tarea (PyTorch) vs. LightGBM", f'AUC {n("p08_auc_red_multitarea_traspaso")} (red, traspaso)', n("p08_tests"), n("p08_runtime"),
-         "Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/"),
+         "Aprobado con reserva (ronda 4) — docs/revisiones/ronda_4/secuencial.md"),
         ("09 bandit_contacto", n("p09_escala"),
          "ε-greedy, LinUCB, Thompson (lineal y LightGBM)", f'DR err. {n("p09_dr_error_epsgreedy")} (ε-greedy)', n("p09_tests"), n("p09_runtime"),
          "Ronda 4 — docs/revisiones/ronda_4/bandit.md"),

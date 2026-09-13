@@ -204,6 +204,7 @@
   "p04_fix_delta_neg": {"valor": "0,005", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (la única combinación donde la corrección empeora, cuprum semilla 7)", "sintetico": true},
   "p08_delta_lags_min": {"valor": "0,001", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (diferencia entre la red y el LightGBM con la misma información)", "sintetico": true},
   "p08_delta_lags_max": {"valor": "0,009", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6", "sintetico": true},
+  "p08_reprod_lgbm_cese": {"valor": "0,8614", "unidad": "", "fuente": "docs/revisiones/ronda_4/secuencial.md (cifra reproducida de forma independiente por el revisor, cese, lightgbm_produccion)", "sintetico": true},
   "p08_umbral_auc": {"valor": "0,01", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (criterio del brief: 'reemplaza' si mejora ≥0,01 AUC en ≥2 cabezas)", "sintetico": false},
   "glosario_auc_min": {"valor": "0,50", "unidad": "", "fuente": "Definición estándar de AUC (0,5 = azar)", "sintetico": false},
   "glosario_auc_max": {"valor": "1,00", "unidad": "", "fuente": "Definición estándar de AUC (1,0 = perfecto)", "sintetico": false},

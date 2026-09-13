@@ -183,6 +183,13 @@ Salidas en `--salida`: `fuentes/` (tablas sintéticas en parquet), `features/per
 `reportes/*.csv` con métricas, importancias y reemplazos.
 
 Otros comandos: `generar`, `backtest`, `entrenar`, `proyectar` (usar `--reusar-fuentes` para no regenerar).
+Desde la ronda 3, `backtest` también deja `reportes/backtest_*.csv` (métricas globales, clasificador,
+por tipo/tramo/snapshot/segmento e importancias) y acepta `--gbt-max-depth` además de `--gbt-iter`,
+`--n-train`, `--n-test`, `--n-afiliados` y `--perfil {sistema,cuprum}`, de modo que cualquier corrida a
+escala reducida (por ejemplo la de la suite de tests: 300 afiliados, 3/1 snapshots, GBT 5 / prof. 3) se
+reproduce con el comando oficial y no con scripts fuera del repo. Para comparar dos versiones del
+código, ejecutar cada una desde un directorio que no contenga `afp_lab/` (con `python -m`, el cwd va
+antes que `PYTHONPATH` en `sys.path` y tapa el árbol que se quiere medir).
 
 ## 9. Estructura
 
@@ -254,6 +261,182 @@ rezago. El tope imponible importa más (7 % de cotizantes topados): el error en 
 siendo el menor en términos relativos. La masa imponible proyectada por mes sube de ~4.500 a ~6.400
 millones para los mismos 5.000 afiliados.
 
+## 10c. Ronda 3: código de movimiento de personal (Tabla N° 7)
+
+`afp_lab/common/planilla.py` (ronda 2) ya generaba una planilla Previred completa, pero a grano
+línea/concepto y sin que este proyecto la usara. Esta ronda le agrega a **la propia tabla
+`cotizaciones`** de 01 (grano afiliado × período × entidad pagadora × movimiento) los campos de la
+Tabla N° 7 del Compendio/Previred (ver `docs/normativa_tablas_afp.md`), reusando las mismas
+constantes de `common.planilla` en vez de reescribirlas.
+
+**Qué se agregó**
+
+1. `synthetic.generar_movimiento_personal(cfg, verdad)`: `cod_movimiento` (0,1,2,3,4,7,11,12 — los
+   mismos omitidos que `common.planilla`, 5/6/13, más el 8 que tampoco se genera aquí, ver
+   limitación), `dias_trabajados` y `fecha_desde`/`fecha_hasta`, calculados con expresiones Spark
+   (no `mapInPandas`) sobre el panel de verdad (`evento_afc`, `dias_licencia`), importando
+   `P_PERMISO_SIN_GOCE`/`P_AUSENTISMO` directamente de `common.planilla` (mismos valores, no
+   redefinidos). `generar_cotizaciones` adjunta estas columnas a la línea `EMPLEADOR` (vínculo
+   principal) y `SUBSIDIO` del mismo período; la línea del segundo empleador (multiempleo) queda con
+   código 0 fijo (igual que `common.planilla._lineas_segundo_empleador`); SII (independientes) y
+   AFILIADO (voluntarios) quedan sin código (no declaran Previred). Una `RECTIFICACION` reemplaza el
+   código por 12 (reliquidación), igual convención que `common.planilla`. Todo viaja con el mismo
+   `periodo_recepcion` que ya gobierna la RIM, así que cualquier feature as-of que respete
+   `periodo_recepcion <= hasta_recepcion` no puede ver estos campos antes de tiempo (tests abajo).
+2. `features._features_movimiento`: 14 features nuevas — `dias_trabajados_l1`; `mov_termino_l1/l2`,
+   `mov_subsidio_l1/l2`; `n_mov_termino_3/6/12`, `n_mov_subsidio_3/6/12`, `n_mov_otros_3/6/12`
+   (permiso sin goce + ausentismo). Complementan (no duplican) a `afc_termino_l1`/`dias_licencia_l1`:
+   estos últimos llegan por un feed más rápido (m+1), mientras que el código de movimiento viaja en
+   la propia planilla y puede demorar lo mismo que la RIM (oportuno, tardío, rezago o DNP).
+3. 7 tests nuevos (`afp_lab/rim_nowcasting/tests/test_afp_rim_forecast.py`): dominio de códigos
+   válidos; sólo `EMPLEADOR`/`SUBSIDIO` declaran código; coherencia con `evento_afc` (INICIO/TERMINO
+   del panel de verdad, con `left_anti` porque no toda combinación produce una línea en
+   `cotizaciones` — una licencia de mes completo hace que esa línea se redondee a RIM 0 y
+   `generar_cotizaciones` la descarte, lógica previa a esta ronda); `dias_trabajados` coherente con
+   el código; `fecha_desde`/`fecha_hasta` cubren el período declarado; respeto de `periodo_recepcion`
+   (agregar una declaración con recepción futura no cambia las features, mismo patrón que
+   `test_rim_conocida_respeta_recepcion`); rango y consistencia interna de las nuevas features
+   (ventanas 3/6/12 acumulativas). Se extendió además `test_features_sin_leakage` con las columnas
+   nuevas.
+
+**Limitación propia de esta ronda** (no de `common/planilla.py`): no se genera el código 8 (cambio
+de contrato de plazo fijo a indefinido) porque requiere encadenar el estado a través de meses
+consecutivos del mismo vínculo — la continuidad por afiliado que la implementación evita a
+propósito (ver docstring de `generar_movimiento_personal`).
+
+**Otras limitaciones de `_features_movimiento`**: (a) `dias_trabajados_l1` se rellena con 30 ("sin
+movimiento", el valor por defecto de `generar_movimiento_personal` con código 0) cuando no hay
+declaración vigente del vínculo principal en el mes de corte — incluido el caso de una licencia
+médica de mes completo (`dias_licencia == 30`): ahí `generar_cotizaciones` descarta la línea
+`EMPLEADOR` (RIM redondeada a 0, decisión de diseño anterior a esta ronda) y la feature no puede
+distinguirlo de un mes completo trabajado; la señal queda en `dias_licencia_l1`/`licencia_en_curso`
+(feed de licencias, m+1), no en el código de movimiento. Caso de baja frecuencia, documentado también
+en el docstring de `test_cod_movimiento_coincide_con_evento_afc`. (b) Sólo se mira el vínculo
+principal (`empleador_principal` de `serie_conocida`): el código del segundo empleador (siempre 0 en
+el generador) no aporta.
+
+**Antes / después: tests del proyecto**
+
+| | Antes (rama base) | Después (esta ronda) |
+|---|---|---|
+| Tests | 11 | 18 (+7 nuevos) |
+| Resultado | 11 passed | **18 passed** en una sola corrida completa de punta a punta (pasada de corrección; en la primera entrega fueron 17 passed + 1 test corregido y reverificado aislado) |
+| `driver_memory` del fixture `spark` (tests) | 3 g | 6 g (subido: las features nuevas amplían el plan de `construir_features`, y los tests que llaman con `materializar=False` — sin el checkpoint que sí usa producción — canonicalizaban ese plan más veces; con 3 g el último test del archivo llegó a `OutOfMemoryError` en Catalyst. Se agregó además `.cache()` al resultado de `_features_movimiento`, igual patrón que `serie`/`abiertas`, para acotar el tamaño del plan. Contribuye también a la presión de memoria que esos tres cachés (`serie`, `abiertas`, `f_mov`) sólo se liberan con `.unpersist()` en la rama `materializar=True` de `construir_features`: los tests que llaman con `materializar=False` dejan ahora tres cachés vivos por llamada, en vez de dos, en una sesión Spark que dura toda la suite — no se liberan ahí porque el DataFrame devuelto sin checkpoint sigue dependiendo de ellos) |
+| Tiempo total suite | ~13,7 min (11 tests) | 1380 s / 23,0 min (18 tests, corrida final, con otro workstream usando la máquina en paralelo; la revisión midió 1036 s / 17,3 min en aislado). El 18° test (`test_cod_movimiento_coincide_con_evento_afc`) había fallado en la primera entrega por un supuesto de test demasiado estricto, no por el código; ya corregido |
+
+Comando: `PYTHONPATH=/home/user/wt/datos python -m pytest afp_lab/rim_nowcasting/tests -q` (o
+`-k test_cod_movimiento_coincide_con_evento_afc` para repetir solo el test corregido). El entorno
+de esta ronda resultó mucho más lento que un laptop de 4 núcleos (máquina de 4 vCPU compartida con
+otro workstream del laboratorio corriendo en paralelo); a la misma escala (300 afiliados) esa es la
+duración real observada, muy por encima del límite de "2 minutos" de CONVENCIONES — documentado
+como limitación de esta ronda, no una regresión de rendimiento del código en producción (que usa
+`materializar=True`, con checkpoint, y no se ve afectado).
+
+**Antes / después: backtest con el comando oficial (`pipeline backtest`), pasada de corrección**
+
+La primera versión de esta sección reportaba un delta medido con un script fuera del repo
+(`datos_r3_eval.py`, sólo en el scratchpad de la sesión): WAPE h=1 0,490 → 0,529 y runtime +82 %.
+La revisión no pudo reproducirlo y, reproducido con el comando oficial, no se sostiene. **Esos
+números quedan retirados**; lo que sigue se obtiene sólo con `python -m afp_lab.rim_nowcasting.pipeline
+backtest` (que ahora acepta `--gbt-max-depth` y deja `reportes/backtest_*.csv`), a la escala de
+referencia de la sección 10 y para ambos perfiles.
+
+Método. "Antes" = copia de `afp_lab/` con `synthetic.py` y `features.py` de `main` (`git show
+main:…`, sólo lectura); "después" = este worktree. `pipeline.py`, `config.py` y `model.py` son los
+mismos en ambos (idénticos a `main` salvo el flag y los csv agregados en esta pasada). Cada corrida en
+su propio `--salida`, un solo Spark a la vez, y "antes" ejecutado con cwd fuera del worktree (ver §8:
+con `python -m` el cwd tapa a `PYTHONPATH`; un primer intento de esta pasada cometió ese error y midió
+dos veces el mismo árbol — se detectó porque las importancias de "antes" contenían `mov_termino_l1`;
+esas corridas se descartaron, pero sirven como prueba de repetibilidad: el mismo código dos veces da
+métricas idénticas y un tiempo de pared que varía ±5-11 % en esta máquina compartida).
+
+```bash
+# después (worktree)
+cd /home/user/wt/datos && PYTHONPATH=/home/user/wt/datos \
+  python -m afp_lab.rim_nowcasting.pipeline backtest --perfil sistema --salida /tmp/bt_ref_despues_sistema
+# antes: copia del paquete con synthetic.py/features.py de main
+mkdir -p /tmp/antes_rim_lab && cp -r /home/user/wt/datos/afp_lab /tmp/antes_rim_lab/ && cd /home/user/wt/datos \
+  && git show main:afp_lab/rim_nowcasting/synthetic.py > /tmp/antes_rim_lab/afp_lab/rim_nowcasting/synthetic.py \
+  && git show main:afp_lab/rim_nowcasting/features.py  > /tmp/antes_rim_lab/afp_lab/rim_nowcasting/features.py
+cd /tmp/antes_rim_lab && PYTHONPATH=/tmp/antes_rim_lab \
+  python -m afp_lab.rim_nowcasting.pipeline backtest --perfil sistema --salida /tmp/bt_ref_antes_sistema
+# ídem con --perfil cuprum. Escala reducida (la de la suite de tests): agregar
+#   --n-afiliados 300 --n-train 3 --n-test 1 --gbt-iter 5 --gbt-max-depth 3 --inicio 202301 --snapshot 202506 --seed 42
+```
+
+**Escala de referencia** (5.000 afiliados, 2022-01 a 2026-09, 12 orígenes de entrenamiento, GBT 40 iteraciones / profundidad 5, test 2026-08 y 2026-09; `rim_proyectada`, n=9.627 h=1 / 10.000 h=2 en Sistema):
+
+| `rim_proyectada` | Sistema antes | Sistema después | Δ | Cuprum antes | Cuprum después | Δ |
+|---|---|---|---|---|---|---|
+| WAPE h=1 | 0.196 | 0.194 | -0.002 | 0.210 | 0.212 | +0.002 |
+| Sesgo agregado h=1 | -4.1 % | -4.6 % | -0.5 pp | -3.4 % | -4.2 % | -0.8 pp |
+| AUC cotiza/no cotiza h=1 | 0.969 | 0.969 | +0.000 | 0.968 | 0.968 | +0.000 |
+| Exactitud cero/no-cero h=1 | 0.926 | 0.925 | -0.001 | 0.918 | 0.916 | -0.002 |
+| WAPE h=2 | 0.258 | 0.259 | +0.001 | 0.304 | 0.270 | -0.034 |
+| Sesgo agregado h=2 | -4.3 % | -4.8 % | -0.5 pp | -6.8 % | -3.4 % | +3.4 pp |
+| AUC cotiza/no cotiza h=2 | 0.918 | 0.919 | +0.001 | 0.919 | 0.920 | +0.001 |
+| Exactitud cero/no-cero h=2 | 0.873 | 0.872 | -0.001 | 0.868 | 0.868 | +0.000 |
+| Filas train / test | 113828 / 19627 | 113828 / 19627 | — | 113390 / 19643 | 113390 / 19643 | — |
+| Tiempo `pipeline backtest` (generar+features+entrenar+evaluar) | 542 s | 375 s | -30.9 % | 438 s | 323 s | -26.2 % |
+
+**Por segmento, escala de referencia** (`reportes/backtest_metricas_por_segmento.csv`; segmentos definidos sólo con columnas que existen antes y después, para que el delta sea comparable):
+
+**Sistema** (`rim_proyectada`; segmento = independiente / termino_reciente (aviso AFC en el corte) / con_subsidio (licencia en el corte) / resto)
+
+| Segmento | h | n | WAPE antes | WAPE después | Δ WAPE | Sesgo antes | Sesgo después |
+|---|---|---|---|---|---|---|---|
+| con_subsidio | 1 | 410 | 0.169 | 0.154 | -0.015 | -2.0 % | -1.9 % |
+| independiente | 1 | 808 | 0.854 | 0.868 | +0.014 | -7.1 % | -9.9 % |
+| resto | 1 | 8169 | 0.119 | 0.116 | -0.002 | -3.3 % | -3.6 % |
+| termino_reciente | 1 | 240 | 0.939 | 0.997 | +0.058 | -92.4 % | -98.0 % |
+| con_subsidio | 2 | 425 | 0.218 | 0.206 | -0.012 | +5.1 % | +4.3 % |
+| independiente | 2 | 808 | 0.840 | 0.885 | +0.044 | +4.7 % | +6.9 % |
+| resto | 2 | 8525 | 0.192 | 0.188 | -0.004 | -5.0 % | -5.6 % |
+| termino_reciente | 2 | 242 | 0.961 | 0.995 | +0.034 | -93.9 % | -98.5 % |
+
+(Cuprum por segmento: la corrida "después" de referencia se hizo antes de que `backtest` guardara los csv por segmento; pendiente repetirla con `--reusar-fuentes` sobre `/tmp/bt_ref_despues_cuprum`, ~3,5 min, no se hizo para no solapar dos Spark en la máquina compartida.)
+
+**Lectura.** A la escala de referencia el código de movimiento **no cambia el WAPE global de
+Sistema** (0,196 → 0,194 en h=1; 0,258 → 0,259 en h=2) y **mejora Cuprum en h=2** (0,304 → 0,270,
+con el sesgo agregado de −6,8 % a −3,4 %); en h=1 Cuprum queda igual (0,210 → 0,212). AUC y
+exactitud cero/no-cero no se mueven. El modelo sí usa las features nuevas: `mov_termino_l1` (0,042)
+y `n_mov_termino_3` (0,039) entran al top 15 de importancia del clasificador, pero la señal es en
+gran parte redundante con el feed AFC (`mov_termino_l1` coincide con `afc_termino_l1` en el 87 % de
+los casos del snapshot 2026-03), lo que explica el efecto global casi nulo. Por segmento (Sistema):
+`con_subsidio` mejora (−0,015 / −0,012), `resto` queda igual (−0,002 / −0,004), los independientes
+(8,4 % de las filas; no declaran planilla, así que son el control sin código) empeoran +0,014 /
++0,044, y `termino_reciente` (2,5 % de las filas) empeora +0,058 / +0,034 — en ese segmento ambas
+versiones tienen sesgo ≈ −92 % … −98 %: tras un aviso AFC de término el modelo proyecta ≈ 0, pero
+una parte de esos afiliados sigue con RIM > 0 en el target (reingreso, finiquito o segundo empleador);
+es una debilidad previa del modelo que el código de movimiento no corrige. Con una sola semilla y dos
+orígenes de test no medimos la variabilidad entre semillas, así que un delta del orden de ±0,03 en un
+segmento chico no se puede declarar significativo. Conclusión honesta: **no rompe nada, ayuda a
+Cuprum en h=2, neutro en Sistema**; queda como familia de features opcional y el siguiente paso es
+repetir con más semillas / más orígenes de test antes de decidir si se mantiene en producción.
+
+**Runtime.** El +82 % anterior no reproduce. Las corridas "después" a escala de referencia tardaron
+358 s y 375 s (Sistema, dos corridas del mismo código) y 323 s y 340 s (Cuprum); las de "antes"
+(542 s y 438 s) corrieron con otro workstream del laboratorio ocupando la máquina (load average 4,6-5,5
+en 4 vCPU), así que el delta de tiempo de pared no se pudo aislar de la contención; ninguna medición
+del árbol "después" supera a la de "antes" ni el presupuesto de ~12 min del `demo` de la sección 10,
+por lo que no hay evidencia de un sobrecosto cercano al +30 % del brief. Las etapas internas del log
+(features por snapshot: 14-19 s "después" vs. 14-16 s "antes" en las corridas menos cargadas) apuntan
+a un sobrecosto de un dígito por ciento, del mismo orden que la variación entre dos corridas iguales.
+
+**Escala reducida** (la de la suite de tests: 300 afiliados, 2023-01 a 2025-06, 3 orígenes de entrenamiento / 1 de test, GBT 5 iteraciones / profundidad 3, seed 42; perfil Sistema, `rim_proyectada`, n=296 h=1 / 300 h=2):
+
+| `rim_proyectada` | Sistema antes | Sistema después | Δ |
+|---|---|---|---|
+| WAPE h=1 | 0.399 | 0.392 | -0.007 |
+| Sesgo agregado h=1 | +9.8 % | +10.1 % | +0.3 pp |
+| AUC h=1 | 0.925 | 0.907 | -0.018 |
+| WAPE h=2 | 0.465 | 0.450 | -0.015 |
+| Sesgo agregado h=2 | +13.5 % | +11.7 % | -1.8 pp |
+| AUC h=2 | 0.875 | 0.871 | -0.004 |
+| Tiempo `pipeline backtest` | 112 s | 96 s | -13.7 % |
+
+A esta escala el WAPE h=1 baja 0,399 → 0,392 y h=2 0,465 → 0,450 (misma dirección que la revisión, magnitud chica); el baseline `media_3` (0,380 / 0,410) sigue ganando al modelo en ambas versiones, un problema preexistente de evaluar con 5 árboles y 1.646 filas, no de esta ronda. La corrida reducida "antes" de Cuprum abortó por un `DIVIDE_BY_ZERO` en las métricas por segmento nuevas (un segmento chico sin RIM real > 0 a 300 afiliados); se corrigió con `F.try_divide` en `evaluate.metricas` y no se repitió para no solapar dos Spark con la suite de tests — Cuprum queda evaluado a la escala de referencia (tabla anterior), que es la que pide el brief.
+
 ## 11. Supuestos y próximos pasos
 
 * Los parámetros macro y las proporciones (rotación, DNP, pagos tardíos) son supuestos razonables para
@@ -274,3 +457,20 @@ millones para los mismos 5.000 afiliados.
 * Mejoras naturales: modelo específico para independientes (anual, vía Operación Renta), cuantiles
   (P10/P90) para intervalos, calibración del umbral por segmento según el costo de cada error,
   reentrenamiento automático por drift del reporte de reemplazos, y explicabilidad (SHAP) para auditoría.
+* Ronda 3 (código de movimiento, sección 10c): el delta antes/después ya se midió a la escala de
+  referencia (5.000 afiliados / 12 snapshots / GBT 40) para Sistema y Cuprum con el comando oficial:
+  neutro en Sistema, mejora Cuprum en h=2; queda pendiente medir la variabilidad entre semillas y
+  con más orígenes de test antes de decidir si la familia de features se mantiene; generar el código 8 (cambio de contrato) requeriría procesar la historia completa de cada
+  afiliado en un mismo lote (no compatible con el enfoque columna-a-columna usado aquí, sí con un
+  `mapInPandas` agrupado por afiliado, más costoso); evaluar además si conviene fusionar esta tabla
+  con `common/planilla.py` (mismo dominio, dos implementaciones e independientes, ver "Propuestas
+  para common" en la sección siguiente).
+
+**Propuestas para `common/`**: `afp_lab/rim_nowcasting/synthetic.py` y `afp_lab/common/planilla.py`
+ahora generan, por separado, el mismo concepto (código de movimiento de personal, Tabla N° 7) con
+grano distinto (pagador vs. concepto) y motores distintos (Spark vs. pandas) — comparten sólo las
+constantes (`P_PERMISO_SIN_GOCE`, `P_AUSENTISMO`, importadas). Valdría la pena, en una ronda futura,
+extraer a `common/tablas_equivalencia.py` una única función pura `codigo_movimiento(evento_afc,
+tipo_contrato, dias_licencia) -> int` que ambos módulos llamen (con `numpy` vectorizado en
+`common/planilla.py` y con `F.when` — o un `pandas_udf` que envuelva la misma función — en
+`rim_nowcasting`), para no mantener la misma regla de negocio dos veces.

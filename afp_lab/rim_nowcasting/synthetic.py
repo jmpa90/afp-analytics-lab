@@ -16,6 +16,8 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
+from afp_lab.common.planilla import P_AUSENTISMO, P_PERMISO_SIN_GOCE
+
 from .calendario import (col_add_months, macro_pandas, periodo_to_idx, rango_periodos)
 from .config import Config
 
@@ -482,6 +484,70 @@ def simular_verdad_mensual(spark: SparkSession, cfg: Config, afiliados: DataFram
             .mapInPandas(fn, schema=VERDAD_SCHEMA))
 
 
+# ---------------------------------------- codigo de movimiento de personal (Previred, Tabla N 7)
+def generar_movimiento_personal(cfg: Config, verdad: DataFrame) -> DataFrame:
+    """Codigo de movimiento de personal (Tabla N 7 del Compendio/Previred; ver
+    `docs/normativa_tablas_afp.md` y `afp_lab.common.tablas_equivalencia.MOVIMIENTO_PERSONAL`),
+    `dias_trabajados` y `fecha_desde`/`fecha_hasta` del vinculo PRINCIPAL de cada (afiliado,
+    periodo), calculado sobre el panel de verdad (`evento_afc`, `dias_licencia`) para los
+    afiliados con empleador vigente ese mes y RIM > 0 — misma elegibilidad que
+    `common.planilla.generar_planilla` ("sólo declaran planilla los dependientes/pensionados
+    activos con empleador vigente").
+
+    Reglas (mismas que `common.planilla._movimiento_y_dias`, mismas probabilidades
+    `P_PERMISO_SIN_GOCE`/`P_AUSENTISMO` de ese modulo): 1/7 en el mes de INICIO segun el tipo de
+    contrato informado a la AFC, 2 en el mes de TERMINO, 3 con licencia medica (`dias_licencia >
+    0`), 4 permiso sin goce y 11 ausentismo como sorteos de baja probabilidad entre los meses
+    "sin movimiento"; 0 en el resto. `dias_trabajados` se reduce en 1/7 (mes parcial de
+    entrada), 2 (mes parcial de salida), 3 (dias de licencia), 4 y 11.
+
+    Implementacion: expresiones Spark sobre TODO el DataFrame (no `mapInPandas` por particion,
+    a diferencia de la simulacion mensual de `_simular_particion`) porque cada codigo depende
+    SOLO de columnas de la MISMA fila (evento_afc, dias_licencia): no hace falta la historia
+    completa de un afiliado en un mismo lote. Es la forma de "replicar la logica con las mismas
+    constantes" que escala a millones de filas sin arriesgar que un batch de Arrow corte a un
+    afiliado a la mitad dentro de una particion (mapInPandas no garantiza que las filas de un
+    mismo afiliado lleguen juntas a la funcion cuando el grano de entrada ya es afiliado x
+    periodo, a diferencia de `_simular_particion` donde el grano de entrada es 1 fila = 1
+    afiliado). Limitacion: no se genera el codigo 8 (cambio de contrato de plazo fijo a
+    indefinido) porque requiere encadenar el estado a traves de meses consecutivos del mismo
+    vinculo (la "racha" de antiguedad), lo que si exige la continuidad por afiliado que este
+    enfoque evita a proposito; documentado junto a 5/6/13 (`tablas_equivalencia.CODIGOS_NO_GENERADOS`)
+    como codigos no generados en este proyecto.
+    """
+    s = cfg.seed
+    elegible = verdad.filter(F.col("empleador_id").isNotNull() & (F.col("rim_emp1") > 0))
+
+    codigo = (F.when(F.col("evento_afc") == "INICIO",
+                     F.when(F.col("tipo_contrato") == "INDEFINIDO", 1).otherwise(7))
+             .when(F.col("evento_afc") == "TERMINO", 2)
+             .when(F.col("dias_licencia") > 0, 3)
+             .otherwise(0))
+    df = elegible.withColumn("cod_movimiento", codigo)
+    df = df.withColumn("cod_movimiento",
+                       F.when((F.col("cod_movimiento") == 0) & (F.rand(s + 910) < P_PERMISO_SIN_GOCE), 4)
+                       .otherwise(F.col("cod_movimiento")))
+    df = df.withColumn("cod_movimiento",
+                       F.when((F.col("cod_movimiento") == 0) & (F.rand(s + 911) < P_AUSENTISMO), 11)
+                       .otherwise(F.col("cod_movimiento")))
+
+    dias = (F.when(F.col("cod_movimiento").isin(1, 7), 8 + F.floor(F.rand(s + 912) * 21))
+            .when(F.col("cod_movimiento") == 2, 3 + F.floor(F.rand(s + 913) * 23))
+            .when(F.col("cod_movimiento") == 3,
+                 F.greatest(F.lit(0), F.least(F.lit(30), F.lit(30) - F.col("dias_licencia"))))
+            .when(F.col("cod_movimiento") == 4, F.lit(30) - (3 + F.floor(F.rand(s + 914) * 12)))
+            .when(F.col("cod_movimiento") == 11, F.lit(30) - (1 + F.floor(F.rand(s + 915) * 5)))
+            .otherwise(30))
+    fecha_desde = F.to_date(F.concat(F.col("periodo").cast("string"), F.lit("01")), "yyyyMMdd")
+    df = (df.withColumn("cod_movimiento", F.col("cod_movimiento").cast("int"))
+          .withColumn("dias_trabajados", dias.cast("int"))
+          .withColumn("fecha_desde", fecha_desde)
+          .withColumn("fecha_hasta", F.last_day(fecha_desde))
+          .select("afiliado_id", "periodo", "empleador_id", "cod_movimiento", "dias_trabajados",
+                  "fecha_desde", "fecha_hasta"))
+    return df
+
+
 # ------------------------------------------------------ movimientos (pagos)
 def generar_cotizaciones(cfg: Config, verdad: DataFrame, empleadores: DataFrame) -> DataFrame:
     """Movimientos de cotizacion tal como los recibe la AFP, con el mes en que llegan.
@@ -493,11 +559,22 @@ def generar_cotizaciones(cfg: Config, verdad: DataFrame, empleadores: DataFrame)
     - SII: independientes, toda la renta del anio llega en junio del anio siguiente.
     - AFILIADO: voluntarios, pagan directo (m o m+1).
     Un porcentaje de declaraciones recibe una RECTIFICACION posterior.
+
+    `cod_movimiento`/`dias_trabajados`/`fecha_desde`/`fecha_hasta` (Tabla N 7, ver
+    `generar_movimiento_personal`) viajan en la MISMA fila de la declaracion del empleador
+    (principal y segundo empleador) y del pagador SUBSIDIO del mismo vinculo, por lo que quedan
+    sujetos al mismo `periodo_recepcion` (y a la misma RECTIFICACION, que en Previred es tambien
+    una reliquidacion: codigo 12) que ya gobierna la RIM — ningun feature que respete
+    `periodo_recepcion <= hasta_recepcion` puede ver estos campos antes de lo que correspondia.
+    SII (independientes) y AFILIADO (voluntarios) no declaran planilla Previred (misma
+    limitacion documentada en `common/planilla.py`): quedan sin codigo.
     """
     s = cfg.seed
     emp_pago = F.broadcast(empleadores.select(
         "empleador_id", "p_pago_anticipado", "p_pago_oportuno", "p_pago_tardio", "p_rezago", "p_dnp",
         "p_rectificacion"))
+    mov_personal = generar_movimiento_personal(cfg, verdad)
+    cols_planilla = ["cod_movimiento", "dias_trabajados", "fecha_desde", "fecha_hasta"]
 
     base = verdad.select("afiliado_id", "periodo", "estado", "empleador_id", "empleador2_id",
                          "rim_emp1", "rim_emp2", "dias_licencia")
@@ -506,25 +583,44 @@ def generar_cotizaciones(cfg: Config, verdad: DataFrame, empleadores: DataFrame)
     emp1 = (base.filter(F.col("empleador_id").isNotNull() & (F.col("rim_emp1") > 0))
             .withColumn("rim", F.round(F.col("rim_emp1") * (30 - F.col("dias_licencia")) / 30, 0))
             .withColumn("entidad_pagadora", F.lit("EMPLEADOR"))
-            .select("afiliado_id", "periodo", "empleador_id", "entidad_pagadora", "rim", "dias_licencia"))
-    # subsidio por licencia (misma remuneracion, pagador distinto, mas lento)
+            .select("afiliado_id", "periodo", "empleador_id", "entidad_pagadora", "rim", "dias_licencia")
+            .join(mov_personal, ["afiliado_id", "periodo", "empleador_id"], "left"))
+    # subsidio por licencia (misma remuneracion, pagador distinto, mas lento; mismo vinculo y por
+    # lo tanto mismo movimiento de personal que la linea EMPLEADOR de ese mes)
     subs = (base.filter(F.col("dias_licencia") > 0)
             .withColumn("rim", F.round(F.col("rim_emp1") * F.col("dias_licencia") / 30, 0))
             .withColumn("entidad_pagadora", F.lit("SUBSIDIO"))
             .withColumn("empleador_id", F.col("empleador_id"))
-            .select("afiliado_id", "periodo", "empleador_id", "entidad_pagadora", "rim", "dias_licencia"))
+            .select("afiliado_id", "periodo", "empleador_id", "entidad_pagadora", "rim", "dias_licencia")
+            .join(mov_personal, ["afiliado_id", "periodo", "empleador_id"], "left"))
+    # segundo empleador (multiempleo): sin desglose de movimiento propio (simplificacion, igual
+    # que `common.planilla._lineas_segundo_empleador`)
+    fecha_desde_lit = F.to_date(F.concat(F.col("periodo").cast("string"), F.lit("01")), "yyyyMMdd")
     emp2 = (base.filter(F.col("empleador2_id").isNotNull() & (F.col("rim_emp2") > 0))
             .select("afiliado_id", "periodo", F.col("empleador2_id").alias("empleador_id"),
                     F.lit("EMPLEADOR").alias("entidad_pagadora"), F.col("rim_emp2").alias("rim"),
-                    F.lit(0).alias("dias_licencia")))
+                    F.lit(0).alias("dias_licencia"))
+            .withColumn("cod_movimiento", F.lit(0))
+            .withColumn("dias_trabajados", F.lit(30))
+            .withColumn("fecha_desde", fecha_desde_lit)
+            .withColumn("fecha_hasta", F.last_day(F.col("fecha_desde"))))
+    # SII (independientes) y AFILIADO (voluntarios): no pasan por Previred, sin codigo Tabla N 7
     indep = (base.filter((F.col("estado") == "INDEPENDIENTE") & (F.col("rim_emp1") > 0))
              .select("afiliado_id", "periodo", F.lit(None).cast("long").alias("empleador_id"),
                      F.lit("SII").alias("entidad_pagadora"), F.col("rim_emp1").alias("rim"),
-                     F.lit(0).alias("dias_licencia")))
+                     F.lit(0).alias("dias_licencia"))
+            .withColumn("cod_movimiento", F.lit(None).cast("int"))
+            .withColumn("dias_trabajados", F.lit(None).cast("int"))
+            .withColumn("fecha_desde", F.lit(None).cast("date"))
+            .withColumn("fecha_hasta", F.lit(None).cast("date")))
     volun = (base.filter((F.col("estado") == "VOLUNTARIO") & (F.col("rim_emp1") > 0))
              .select("afiliado_id", "periodo", F.lit(None).cast("long").alias("empleador_id"),
                      F.lit("AFILIADO").alias("entidad_pagadora"), F.col("rim_emp1").alias("rim"),
-                     F.lit(0).alias("dias_licencia")))
+                     F.lit(0).alias("dias_licencia"))
+            .withColumn("cod_movimiento", F.lit(None).cast("int"))
+            .withColumn("dias_trabajados", F.lit(None).cast("int"))
+            .withColumn("fecha_desde", F.lit(None).cast("date"))
+            .withColumn("fecha_hasta", F.lit(None).cast("date")))
 
     mov = (emp1.unionByName(subs).unionByName(emp2).unionByName(indep).unionByName(volun)
            .filter(F.col("rim") > 0)
@@ -549,12 +645,16 @@ def generar_cotizaciones(cfg: Config, verdad: DataFrame, empleadores: DataFrame)
                           & (F.rand(s + 105) < F.col("p_rectificacion"))))
 
     decl = mov.select("afiliado_id", "periodo", "empleador_id", "entidad_pagadora", "tipo_movimiento",
-                      "estado_pago", "rim", "periodo_recepcion", "_rect")
+                      "estado_pago", "rim", "periodo_recepcion", *cols_planilla, "_rect")
     rect = (mov.filter("_rect")
             .withColumn("tipo_movimiento", F.lit("RECTIFICACION"))
             .withColumn("rim", F.round(F.col("rim") * (0.85 + F.rand(s + 106) * 0.35), 0))
             .withColumn("periodo_recepcion",
                         col_add_months(F.col("periodo_recepcion"), 1 + F.floor(F.rand(s + 107) * 3)).cast("int"))
+            # una rectificacion es tambien una reliquidacion (Tabla N 7, codigo 12); solo se
+            # marca en filas con vinculo Previred (emp1/emp2, que ya traen cod_movimiento)
+            .withColumn("cod_movimiento", F.when(F.col("cod_movimiento").isNotNull(), F.lit(12))
+                        .otherwise(F.col("cod_movimiento")))
             .select(*decl.columns))
     # la regularizacion de una DNP (pago posterior) no cambia la RIM declarada: se registra como PAGO
     pago_dnp = (mov.filter("estado_pago = 'DNP'")
@@ -566,7 +666,7 @@ def generar_cotizaciones(cfg: Config, verdad: DataFrame, empleadores: DataFrame)
     out = (decl.unionByName(rect).unionByName(pago_dnp).drop("_rect")
            .withColumn("movimiento_id", F.monotonically_increasing_id()))
     return out.select("movimiento_id", "afiliado_id", "periodo", "empleador_id", "entidad_pagadora",
-                      "tipo_movimiento", "estado_pago", "rim", "periodo_recepcion")
+                      "tipo_movimiento", "estado_pago", "rim", "periodo_recepcion", *cols_planilla)
 
 
 def generar_licencias(verdad: DataFrame) -> DataFrame:

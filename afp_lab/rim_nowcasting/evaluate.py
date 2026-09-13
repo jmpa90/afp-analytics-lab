@@ -37,8 +37,10 @@ def metricas(df: DataFrame, por: list[str] | None = None) -> pd.DataFrame:
             F.count("*").alias("n"),
             F.avg(F.abs(e)).alias("mae"),
             F.sqrt(F.avg(e * e)).alias("rmse"),
-            (F.sum(F.abs(e)) / F.sum(F.abs(F.col("rim_real")))).alias("wape"),
-            ((F.sum(F.col(p)) - F.sum("rim_real")) / F.sum("rim_real")).alias("sesgo_agregado"),
+            # try_divide: un corte (segmento x horizonte) sin RIM real > 0 deja WAPE/sesgo en NULL en vez
+            # de abortar con DIVIDE_BY_ZERO (ANSI de Spark 4); ocurre en segmentos chicos a escala reducida
+            F.try_divide(F.sum(F.abs(e)), F.sum(F.abs(F.col("rim_real")))).alias("wape"),
+            F.try_divide(F.sum(F.col(p)) - F.sum("rim_real"), F.sum("rim_real")).alias("sesgo_agregado"),
             F.avg(((F.col(p) > 0) == (F.col("rim_real") > 0)).cast("double")).alias("exactitud_cero"),
             F.avg(F.when(F.col("rim_real") > 0, F.abs(e) / F.col("rim_real"))).alias("mape_cond"),
         ).withColumn("predictor", F.lit(p)))

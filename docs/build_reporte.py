@@ -336,6 +336,7 @@ section{margin-bottom:2.4rem;}
   padding:.15em .65em; margin-right:.5em;}
 .badge-accent{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
 .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.9rem; margin:1.2rem 0;}
+.kpi-grid.cinco{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));}
 .kpi-card{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.05rem;
   border-top:4px solid var(--accent);}
 .kpi-num{font-size:1.7rem; font-weight:600; color:var(--accent); line-height:1.1;}
@@ -480,7 +481,7 @@ def sec_portada():
   <ul class="mensajes medida">{mensajes_html}</ul>
 
   <h2>Cinco números</h2>
-  <div class="kpi-grid">{kpi_html}</div>
+  <div class="kpi-grid cinco">{kpi_html}</div>
   <p class="fuente-cita">Todas las cifras de esta portada son sintéticas (sandbox del laboratorio), salvo el
   saldo en riesgo de la licitación, que también es una simulación sobre el universo sintético calibrado
   contra la Ficha 165. Detalle y fuente exacta de cada número en su ficha de proyecto y en

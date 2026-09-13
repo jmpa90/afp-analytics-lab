@@ -138,7 +138,14 @@ def backtest(spark: SparkSession, cfg: Config, tablas: dict[str, DataFrame], t0:
 
     verdad_final = rim_conocida(tablas["cotizaciones"], tablas["macro"], None)
     ds_test = features_para_entrenar(f_test.filter(F.col("target_ya_conocido") == 0), verdad_final)
-    pred = agregar_baselines(modelo.transform(ds_test)).withColumn("tramo_renta", tramo_renta()).cache()
+    # segmentos propios del proyecto (ronda 3): definidos SOLO con columnas que existen antes y despues
+    # del codigo de movimiento (as-of, ya en el modelo), para que el delta antes/despues sea comparable
+    segmento = (F.when(F.col("tipo_afiliado") == "INDEPENDIENTE", "independiente")
+                .when(F.col("afc_termino_l1") == 1, "termino_reciente")      # aviso AFC de termino en el corte
+                .when(F.col("dias_licencia_l1") > 0, "con_subsidio")         # licencia en el corte => subsidio
+                .otherwise("resto"))
+    pred = (agregar_baselines(modelo.transform(ds_test)).withColumn("tramo_renta", tramo_renta())
+            .withColumn("segmento", segmento).cache())
     _log(f"dataset test: {pred.count()} filas", t0)
 
     res = {
@@ -149,6 +156,7 @@ def backtest(spark: SparkSession, cfg: Config, tablas: dict[str, DataFrame], t0:
         "metricas_por_tipo": metricas(pred, ["tipo_afiliado"]),
         "metricas_por_tramo": metricas(pred, ["tramo_renta"]),
         "metricas_por_snapshot": metricas(pred, ["periodo_snapshot"]),
+        "metricas_por_segmento": metricas(pred, ["segmento"]),
         "importancias": modelo.importancias(),
     }
     ds_train.unpersist()
@@ -252,6 +260,8 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--n-train", type=int, default=Config.n_snapshots_entrenamiento)
         sp.add_argument("--n-test", type=int, default=Config.n_snapshots_test)
         sp.add_argument("--gbt-iter", type=int, default=Config.gbt_max_iter)
+        sp.add_argument("--gbt-max-depth", type=int, default=Config.gbt_max_depth,
+                        help="profundidad maxima de los arboles GBT (para reproducir corridas a escala reducida)")
         sp.add_argument("--reusar-fuentes", action="store_true", help="no regenerar datos si existen")
         sp.add_argument("--perfil", default=Config.perfil, choices=["sistema", "cuprum"], help="perfil de cartera")
     return p
@@ -260,7 +270,8 @@ def _parser() -> argparse.ArgumentParser:
 def _cfg_desde_args(a: argparse.Namespace) -> Config:
     return Config(n_afiliados=a.n_afiliados, ruta_salida=a.salida, periodo_snapshot=a.snapshot,
                   periodo_inicio=a.inicio, seed=a.seed, n_snapshots_entrenamiento=a.n_train,
-                  n_snapshots_test=a.n_test, gbt_max_iter=a.gbt_iter, perfil=a.perfil)
+                  n_snapshots_test=a.n_test, gbt_max_iter=a.gbt_iter, gbt_max_depth=a.gbt_max_depth,
+                  perfil=a.perfil)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -276,8 +287,18 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "backtest":
         tablas = cargar_o_generar(spark, cfg, not a.reusar_fuentes, t0)
         res = backtest(spark, cfg, tablas, t0)
+        # se persisten todas las tablas del backtest (igual que `demo`) para que una corrida de
+        # referencia deje evidencia reproducible en disco y no solo en la consola
+        os.makedirs(f"{cfg.ruta_salida}/reportes", exist_ok=True)
+        for k, v in res.items():
+            v.to_csv(f"{cfg.ruta_salida}/reportes/backtest_{k}.csv", index=False)
         _imprimir("Backtest", res["metricas"])
         _imprimir("Clasificador", res["metricas_clasificador"])
+        sel = res["metricas_por_segmento"]
+        _imprimir("Backtest por segmento (rim_proyectada vs persistencia)",
+                  sel[sel.predictor.isin(["rim_proyectada", "persistencia"])])
+        _imprimir("Importancia de features (top 25)", res["importancias"])
+        _log(f"reportes del backtest en {cfg.ruta_salida}/reportes", t0)
     elif a.cmd == "entrenar":
         tablas = cargar_o_generar(spark, cfg, not a.reusar_fuentes, t0)
         entrenar_final(spark, cfg, tablas, t0)

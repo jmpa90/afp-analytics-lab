@@ -108,6 +108,30 @@ directo) no pasan por Previred y no aparecen en esta tabla. Ver el docstring de
 `afp_lab/common/planilla.py` para las demás simplificaciones (líneas 03/04 no generadas, código 8
 sólo afecta una columna propia `tipo_contrato_planilla`, etc.).
 
+### Implementado (ronda 3, workstream `datos`): `afp_lab/rim_nowcasting/synthetic.py` (proyecto 01)
+
+El proyecto 01 (PySpark) no reusaba lo anterior porque su tabla `cotizaciones` (grano afiliado ×
+período × entidad pagadora × movimiento, no línea de concepto) es previa a `common/planilla.py` y
+tiene un grano distinto. Esta ronda le agrega, con los MISMOS códigos y probabilidades
+(`common.planilla.P_PERMISO_SIN_GOCE`/`P_AUSENTISMO`, importados directamente, no reescritos):
+`cod_movimiento` (Tabla N° 7: 0,1,2,3,4,7,11,12 — mismos omitidos 5/6/13, más el 8 que tampoco se
+genera aquí, ver limitación abajo), `dias_trabajados` y `fecha_desde`/`fecha_hasta`, calculados en
+`synthetic.generar_movimiento_personal` sobre el panel de verdad del propio proyecto (`evento_afc`,
+`dias_licencia`) y adjuntados a la línea `EMPLEADOR`/`SUBSIDIO` del vínculo principal (y con código 0
+fijo en la línea del segundo empleador, igual que `common.planilla._lineas_segundo_empleador`). Se
+implementó con expresiones Spark en vez de `mapInPandas` porque cada código depende sólo de columnas
+de la misma fila (a diferencia de `common.planilla._movimiento_y_dias`, que corre una vez sobre un
+DataFrame de pandas completo): evita que un batch de Arrow corte a un afiliado a la mitad dentro de
+una partición cuando el grano de entrada ya es afiliado × período. Limitación adicional (propia de
+esta implementación, no de `common/planilla.py`): no se genera el código 8 (cambio de contrato de
+plazo fijo a indefinido) porque requiere encadenar el estado a través de meses consecutivos del mismo
+vínculo, la continuidad por afiliado que este enfoque evita a propósito. `features.py` agrega
+features as-of derivadas (`_features_movimiento`): conteos por código en 3/6/12 meses, días
+trabajados del último período conocido y flags de término/subsidio recientes — con el mismo desfase
+de recepción que la RIM (potencialmente más lento que `afc_eventos`/`licencias`, que llegan por un
+feed más rápido). Detalle y números antes/después en la sección "Ronda 3" del README de 01
+(`afp_lab/rim_nowcasting/README.md`).
+
 ## Fuentes (los sitios están bloqueados para lectura directa desde la sandbox; se consultaron por buscador)
 - SP · Compendio de Normas: Libro I (Archivo Previsional; Registro de Afiliados; Traspaso electrónico entre
   AFP; Anexos de transmisión de archivos), Libro II (Cotizaciones), Libro V (Transferencia de información;

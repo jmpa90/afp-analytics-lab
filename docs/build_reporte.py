@@ -19,6 +19,7 @@ from html.parser import HTMLParser
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE, "reporte_datos.json")
 OUT_PATH = os.path.join(BASE, "reporte_ejecutivo.html")
+DOC_OUT_PATH = os.path.join(BASE, "reporte_ejecutivo_documento.html")
 
 with open(DATA_PATH, "r", encoding="utf-8") as fh:
     _RAW = json.load(fh)
@@ -451,6 +452,7 @@ def sec_portada():
          f'{n("p02_licitacion_saldo_pct")} del saldo administrado de Cuprum · churn_traspaso'),
     ]
     kpi_html = "".join(kpi_card(num, lbl, sub) for num, lbl, sub in kpis)
+    APP_RAW["kpis"] = [{"valor": v, "label": lbl, "sub": sub} for v, lbl, sub in kpis]
 
     mensajes = [
         "El equipo de Data Analytics completó nueve capacidades analíticas y una actualización sobre la "
@@ -467,6 +469,7 @@ def sec_portada():
         "ayuda de verdad; una red secuencial para el afiliado y usar bandits para decidir el canal todavía "
         "no le ganan a lo simple.",
     ]
+    APP_RAW["mensajes"] = list(mensajes)
     mensajes_html = "".join(f"<li>{m}</li>" for m in mensajes)
 
     return f"""
@@ -526,6 +529,19 @@ def sec_capacidades():
          "La planilla Previred sintética de common/ usa los códigos oficiales de la Tabla N° 7, para que "
          "los modelos entrenen con la misma estructura de datos que verían en producción."),
     ]
+    APP_RAW["capacidades"] = [{"titulo": t, "sub": s, "desc": d} for t, s, d in capacidades]
+    APP_RAW["construccion"] = {
+        "chart_densidad": chart_densidad,
+        "kpis": [
+            {"valor": n("meta_tests_total"), "label": "tests automatizados en la suite del laboratorio", "sub": f'{n("meta_tests_fallos")} fallos · {n("meta_tests_runtime")}'},
+            {"valor": n("f165_densidad_sistema"), "label": "densidad de cotización del sistema (Ficha 165)", "sub": "el universo sintético se recalibró contra esta cifra en la ronda 3"},
+            {"valor": n("f165_densidad_cuprum_memoria"), "label": "densidad de cotización propia de Cuprum", "sub": "la más alta del sistema; memoria 2025"},
+        ],
+        "chart_caption": (
+            f'Densidad de cotización del universo sintético antes y después de la recalibración de la ronda 3, '
+            f'contra el objetivo real de la Ficha 165 (sistema {n("f165_densidad_sistema")}, Cuprum {n("f165_densidad_cuprum_memoria")}).'
+        ),
+    }
     cap_html = "".join(
         f'<div class="cap-card"><h4>{esc(t)}</h4><p style="font-size:.86rem;color:var(--muted);margin:0 0 .3rem;">{esc(s)}</p>'
         f'<p style="font-size:.9rem;margin:0;">{d}</p></div>'
@@ -566,9 +582,19 @@ def sec_capacidades():
 # Casos de uso: una tarjeta por proyecto
 # --------------------------------------------------------------------------
 
+CASE_REGISTRY = []
+APP_RAW = {}
+
+
 def proyecto_card(*, id_, numero, nombre, titulo, problema, que_hace, resultado_html,
                    uso_html, mockup_html, produccion_html, reserva_html, fuente_texto,
                    estado_chip=""):
+    CASE_REGISTRY.append(dict(
+        id_=id_, numero=numero, nombre=nombre, titulo=titulo, problema=problema,
+        que_hace=que_hace, resultado_html=resultado_html, uso_html=uso_html,
+        mockup_html=mockup_html, produccion_html=produccion_html,
+        reserva_html=reserva_html, fuente_texto=fuente_texto, estado_chip=estado_chip,
+    ))
     chip_html = f'<span class="chip chip-info">{esc(estado_chip)}</span>' if estado_chip else ""
     return f"""
 <article class="proyecto" id="{id_}">
@@ -1341,15 +1367,22 @@ def sec_torre_control():
         fmt=_fmt3, width=680, height=280,
         aria="AUC del modelo vs. la práctica actual, cuatro capacidades de priorización",
     )
-    filas = [
-        ("critical", "Licitación de stock 2027", "sorteo de afiliados no pensionados, Ley 21.735", n("p02_licitacion_saldo_pct") + " del saldo Cuprum"),
-        ("warn", "Reingreso tras cese", "AUC bajo el umbral del brief tras recalibrar la densidad", n("p04_auc_reingreso_actual")),
-        ("warn", "Masa en riesgo de empleadores", "captura al 10 % en el límite del criterio de negocio", n("p05_captura10_masa")),
-        ("ok", "Traspaso voluntario", "el modelo gana a la regla en todos los segmentos grandes", n("p02_razon_vs_regla") + " la regla"),
-        ("ok", "Ahorro voluntario (APV)", "líderes de mercado, captura muy por sobre ordenar por renta", n("p03_captura10_monto")),
+    filas5 = [
+        ("Tesorería", "critical", "Licitación de stock 2027", "sorteo de afiliados no pensionados, Ley 21.735", n("p02_licitacion_saldo_pct") + " del saldo Cuprum"),
+        ("Riesgo", "warn", "Reingreso tras cese", "AUC bajo el umbral del brief tras recalibrar la densidad", n("p04_auc_reingreso_actual")),
+        ("Riesgo", "warn", "Masa en riesgo de empleadores", "captura al 10 % en el límite del criterio de negocio", n("p05_captura10_masa")),
+        ("Comercial", "ok", "Traspaso voluntario", "el modelo gana a la regla en todos los segmentos grandes", n("p02_razon_vs_regla") + " la regla"),
+        ("Comercial", "ok", "Ahorro voluntario (APV)", "líderes de mercado, captura muy por sobre ordenar por renta", n("p03_captura10_monto")),
     ]
-    mockup = mini_dashboard("Torre de control · portafolio Cuprum", kpis, filas, chart,
-                             "AUC del modelo vs. la práctica actual hoy, en las cuatro capacidades de priorización de cartera.")
+    filas = [(sev, nom, det, val) for (_area, sev, nom, det, val) in filas5]
+    caption = ("AUC del modelo vs. la práctica actual hoy, en las cuatro capacidades de priorización de cartera.")
+    APP_RAW["torre_control"] = {
+        "kpis": kpis,
+        "filas": [{"area": a, "severidad": sv, "alerta": nm, "detalle": dt, "valor": vl} for (a, sv, nm, dt, vl) in filas5],
+        "chart_svg": chart,
+        "chart_caption": caption,
+    }
+    mockup = mini_dashboard("Torre de control · portafolio Cuprum", kpis, filas, chart, caption)
     return f"""
 <section id="torre-control">
   <h2>Torre de control: los ocho casos en un solo tablero</h2>
@@ -1397,6 +1430,7 @@ def sec_roadmap():
          "con evaluación off-policy antes de subir su participación.",
          "Patrocinio para un piloto controlado; ningún cambio a la política vigente todavía."),
     ]
+    APP_RAW["roadmap"] = [{"titulo": t, "desc": d, "pide": p} for t, d, p in pasos]
     items = "".join(
         f'<li><h4>{esc(t)}</h4><p>{d}</p><p style="color:var(--muted);font-size:.86rem;"><strong>Se pide al negocio:</strong> {p}</p></li>'
         for t, d, p in pasos
@@ -1417,41 +1451,49 @@ def sec_roadmap():
 # --------------------------------------------------------------------------
 
 def sec_supuestos():
+    intro = (
+        f'Todo lo que se afirma en este informe con un número viene del sandbox sintético, salvo '
+        f'cuando se cita explícitamente la Ficha {n("f165_numero")} de la Superintendencia de Pensiones o la Ley '
+        '21.735. Ningún resultado se presenta "en el límite" como si cumpliera: cuando una cifra queda al borde de '
+        'un umbral (masa en riesgo de riesgo_empleador) o por debajo de él (reingreso de riesgo_cese_cotizacion, '
+        'el criterio de Thompson en bandit_contacto), se dice tal cual, con las mismas palabras que usó la '
+        'revisión.'
+    )
+    datos_items = [
+        f'Las seis AFP del sandbox, sus comisiones y rentabilidades son ficticias salvo Cuprum, cuya '
+        f'comisión ({n("f165_cuprum_comision")}) y rentabilidad a {n("f165_rent36_meses")} (fondo C: '
+        f'{n("f165_cuprum_rent36_c")}) sí son la cifra real de la Ficha {n("f165_numero")}.',
+        f'La densidad de cotización del universo sintético se recalibró en la ronda 3 contra la Ficha '
+        f'{n("f165_numero")}: el perfil sistema pasó de {n("dens_sistema_antes")} a {n("dens_sistema_despues")} '
+        f'(objetivo: {n("f165_densidad_sistema")}) y el perfil Cuprum de {n("dens_cuprum_antes")} a '
+        f'{n("dens_cuprum_despues")} (objetivo: {n("f165_densidad_cuprum_memoria")}).',
+        'Los parámetros de comportamiento (probabilidades de reclamo, de visita de la competencia, de '
+        'aporte voluntario, de declaración y no pago) son supuestos razonables para Chile, documentados uno por '
+        'uno en cada README, no series oficiales.',
+        f'La fuga bruta mensual de Cuprum (a diferencia del neto, que sí publica la Ficha '
+        f'{n("f165_numero")}: {n("f165_cuprum_traspasos_netos")} traspasos netos en junio de 2026) no está '
+        'disponible públicamente; se usa un supuesto de trabajo anclado al promedio del sistema.',
+    ]
+    modelos_items = [
+        'Ninguna cifra de este informe se redondeó hacia arriba. Donde una cifra tiene rango entre semillas, '
+        'se muestra el rango o la semilla de referencia, no el mejor caso.',
+        'Los criterios de aceptación se fijaron antes de ver los resultados y no se relajaron para que un '
+        'proyecto pasara: donde no se cumplen (04 reingreso, 05 masa en riesgo, 09 bandit), se dice.',
+        f'Todos los proyectos comparten universo, pero no todos comparten escala: uplift_retencion y '
+        f'bandit_contacto corrieron a {n("p07_escala")} (no {n("p02_escala")}) por restricción de '
+        'tiempo de esta ronda, validado además a mayor escala en uplift_retencion.',
+    ]
+    APP_RAW["supuestos"] = {"intro": intro, "datos": datos_items, "modelos": modelos_items}
+    datos_html = "".join(f"<li>{x}</li>" for x in datos_items)
+    modelos_html = "".join(f"<li>{x}</li>" for x in modelos_items)
     return f"""
 <section id="supuestos">
   <h2>Supuestos, reservas y límites</h2>
-  <p class="medida">Todo lo que se afirma en este informe con un número viene del sandbox sintético, salvo
-  cuando se cita explícitamente la Ficha {n("f165_numero")} de la Superintendencia de Pensiones o la Ley
-  21.735. Ningún resultado se presenta "en el límite" como si cumpliera: cuando una cifra queda al borde de
-  un umbral (masa en riesgo de riesgo_empleador) o por debajo de él (reingreso de riesgo_cese_cotizacion,
-  el criterio de Thompson en bandit_contacto), se dice tal cual, con las mismas palabras que usó la
-  revisión.</p>
+  <p class="medida">{intro}</p>
   <h3>Sobre los datos</h3>
-  <ul class="medida">
-    <li>Las seis AFP del sandbox, sus comisiones y rentabilidades son ficticias salvo Cuprum, cuya
-    comisión ({n("f165_cuprum_comision")}) y rentabilidad a {n("f165_rent36_meses")} (fondo C: {n("f165_cuprum_rent36_c")})
-    sí son la cifra real de la Ficha {n("f165_numero")}.</li>
-    <li>La densidad de cotización del universo sintético se recalibró en la ronda 3 contra la Ficha
-    {n("f165_numero")}: el perfil sistema pasó de {n("dens_sistema_antes")} a {n("dens_sistema_despues")}
-    (objetivo: {n("f165_densidad_sistema")}) y el perfil Cuprum de {n("dens_cuprum_antes")} a
-    {n("dens_cuprum_despues")} (objetivo: {n("f165_densidad_cuprum_memoria")}).</li>
-    <li>Los parámetros de comportamiento (probabilidades de reclamo, de visita de la competencia, de
-    aporte voluntario, de declaración y no pago) son supuestos razonables para Chile, documentados uno por
-    uno en cada README, no series oficiales.</li>
-    <li>La fuga bruta mensual de Cuprum (a diferencia del neto, que sí publica la Ficha
-    {n("f165_numero")}: {n("f165_cuprum_traspasos_netos")} traspasos netos en junio de 2026) no está
-    disponible públicamente; se usa un supuesto de trabajo anclado al promedio del sistema.</li>
-  </ul>
+  <ul class="medida">{datos_html}</ul>
   <h3>Sobre los modelos</h3>
-  <ul class="medida">
-    <li>Ninguna cifra de este informe se redondeó hacia arriba. Donde una cifra tiene rango entre semillas,
-    se muestra el rango o la semilla de referencia, no el mejor caso.</li>
-    <li>Los criterios de aceptación se fijaron antes de ver los resultados y no se relajaron para que un
-    proyecto pasara: donde no se cumplen (04 reingreso, 05 masa en riesgo, 09 bandit), se dice.</li>
-    <li>Todos los proyectos comparten universo, pero no todos comparten escala: uplift_retencion y
-    bandit_contacto corrieron a {n("p07_escala")} (no {n("p02_escala")}) por restricción de
-    tiempo de esta ronda, validado además a mayor escala en uplift_retencion.</li>
-  </ul>
+  <ul class="medida">{modelos_html}</ul>
 </section>
 """
 
@@ -1491,6 +1533,10 @@ def sec_anexo():
         ("09 bandit_contacto", n("p09_escala"),
          "ε-greedy, LinUCB, Thompson (lineal y LightGBM)", f'DR err. {n("p09_dr_error_epsgreedy")} (ε-greedy)', n("p09_tests"), n("p09_runtime"),
          "Ronda 4 — docs/revisiones/ronda_4/bandit.md"),
+    ]
+    APP_RAW["anexo"] = [
+        {"proyecto": p, "datos": d, "modelo": m, "metrica": me, "tests": t, "runtime": r, "revision": v}
+        for p, d, m, me, t, r, v in filas
     ]
     filas_html = "".join(
         f"<tr><td>{esc(p)}</td><td>{esc(d)}</td><td>{esc(m)}</td><td class='num'>{esc(me)}</td>"
@@ -1559,6 +1605,7 @@ def sec_glosario():
         ("WAPE", "Error relativo de una proyección de montos, robusto a los ceros (a diferencia del MAPE). "
          "0 es perfecto; 1 significa un error del mismo tamaño que el propio monto."),
     ]
+    APP_RAW["glosario"] = [{"termino": t, "definicion": d} for t, d in terminos]
     dts = "".join(f"<dt>{esc(t)}</dt><dd>{esc(d)}</dd>" for t, d in terminos)
     return f"""
 <section id="glosario">
@@ -1584,6 +1631,145 @@ INDICE = [
 ]
 
 
+# --------------------------------------------------------------------------
+# Modelo de contenido para la app (mismo generador, mismos datos, otro producto)
+# --------------------------------------------------------------------------
+
+CASE_META = {
+    "p01": dict(area="Tesorería", estado_nivel="ok", estado_texto="Cerrado (rondas 1 y 2)"),
+    "p01-correccion": dict(area="Tesorería", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 3)"),
+    "p02": dict(area="Comercial", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 3)"),
+    "p03": dict(area="Comercial", estado_nivel="ok", estado_texto="Aprobado (ronda 2)"),
+    "p04": dict(area="Riesgo", estado_nivel="reserva", estado_texto="Corrección aprobada (ronda 4)"),
+    "p05": dict(area="Riesgo", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 3)"),
+    "p06": dict(area="Comercial", estado_nivel="ok", estado_texto="Aprobado (ronda 2)"),
+    "p07": dict(area="Comercial", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 4)"),
+    "p08": dict(area="Operaciones", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 4)"),
+    "p09": dict(area="Comercial", estado_nivel="ok", estado_texto="Aprobado (ronda 4)"),
+    "planilla": dict(area="Normativa", estado_nivel="ok", estado_texto="Aprobado (ronda 2)"),
+}
+
+
+def _case_metrica_principal(id_):
+    return {
+        "p01": f'WAPE {n("p01_wape_h1")} (h=1)',
+        "p01-correccion": f'WAPE Cuprum h=2 {n("p01c_wape_h2_cuprum_despues")}',
+        "p02": f'AUC {n("p02_auc_modelo")}',
+        "p03": f'AUC {n("p03_auc")}',
+        "p04": f'AUC cese {n("p04_auc_cese3m")}',
+        "p05": f'AUC {n("p05_auc")}',
+        "p06": f'Silueta {n("p06_silueta")}',
+        "p07": f'Qini X-learner {n("p07_qini_xlearner")}',
+        "p08": f'AUC red {n("p08_auc_red_multitarea_traspaso")}',
+        "p09": f'DR err. {n("p09_dr_error_epsgreedy")}',
+        "planilla": f'{n("planilla_codigos")} de la Tabla N° 7',
+    }[id_]
+
+
+def _case_reserva_corta(id_):
+    return {
+        "p01": "Ronda 2, previa a la recalibración de densidad de la ronda 3.",
+        "p01-correccion": f'Redundante en {n("p01c_coincidencia_termino_afc")} con el aviso AFC; ayuda solo en Cuprum a dos meses.',
+        "p02": "El saldo en riesgo esperado no se entrega esta ronda (sesgo de nivel entre semillas).",
+        "p03": f'No ordena bien al segmento VOLUNTARIO ({n("p03_voluntario_pct")} de la cartera elegible).',
+        "p04": f'Reingreso en {n("p04_auc_reingreso_actual")}, bajo el umbral de {n("p04_auc_reingreso_umbral")}; no se usa en producción.',
+        "p05": f'Captura al 10 % en {n("p05_captura10_masa")}, en el límite del criterio de {n("p05_umbral_captura")}.',
+        "p06": f'ARI temporal ({n("p06_ari_temporal")}) más bajo que el de remuestreo: hay deriva real del negocio.',
+        "p07": "El Qini del holdout aleatorio no alcanza significancia estadística a esta escala.",
+        "p08": f'Alcance de dos de cuatro cabezas; runtime no validado a {n("meta_universo_afiliados")}.',
+        "p09": f'Gana a eps-greedy en {n("p09_gana_epsgreedy_thompson")} semillas, no en las {n("p09_umbral_semillas")} exigidas.',
+        "planilla": "El sorteo de recepción es por línea, no por planilla completa (defecto menor).",
+    }[id_]
+
+
+def _mini_spark(values, *, unit_suffix="", width=64, height=22, color=None):
+    color = color or COL_A2
+    vmin, vmax = min(values), max(values)
+    if vmax == vmin:
+        vmax = vmin + 1
+    n_ = len(values)
+    gap = 3
+    bw = (width - gap * (n_ - 1)) / n_
+    parts = [f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+             f'role="img" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">']
+    for i, v in enumerate(values):
+        h = 3 + (height - 6) * (v - vmin) / (vmax - vmin) if vmax != vmin else height - 3
+        x = i * (bw + gap)
+        y = height - h
+        opacity = 0.55 + 0.45 * (i / max(n_ - 1, 1))
+        parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{h:.1f}" '
+                     f'fill="{color}" opacity="{opacity:.2f}" rx="1.5"/>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def build_app_data():
+    """Fuerza la construcción de todas las secciones (efecto secundario: llena
+    CASE_REGISTRY y APP_RAW) y arma el modelo de contenido único para la app."""
+    CASE_REGISTRY.clear()
+    APP_RAW.clear()
+    sec_portada()
+    sec_capacidades()
+    sec_casos()
+    sec_torre_control()
+    sec_roadmap()
+    sec_supuestos()
+    sec_anexo()
+    sec_glosario()
+
+    casos = []
+    for c in CASE_REGISTRY:
+        meta = CASE_META[c["id_"]]
+        casos.append({
+            "id": c["id_"],
+            "numero": c["numero"],
+            "nombre": c["nombre"],
+            "titulo": c["titulo"],
+            "area": meta["area"],
+            "estado_nivel": meta["estado_nivel"],
+            "estado_texto": meta["estado_texto"],
+            "metrica_principal": _case_metrica_principal(c["id_"]),
+            "reserva_corta": _case_reserva_corta(c["id_"]),
+            "problema_html": c["problema"],
+            "resultado_html": c["resultado_html"],
+            "uso_html": c["uso_html"],
+            "dashboard_html": c["mockup_html"],
+            "produccion_html": c["produccion_html"],
+            "reserva_html": c["reserva_html"],
+            "fuente_texto": c["fuente_texto"],
+        })
+
+    kpi_sparks = [
+        _mini_spark([num("p02_captura10_traspasos"), num("p02_captura20_traspasos")]),
+        _mini_spark([num("p03_captura10_monto"), num("p03_captura20_monto")]),
+        _mini_spark([num("p04_captura10_cese3m"), num("p04_captura10_cese6m")]),
+        _mini_spark([num("p05_captura10_masa"), num("p05_captura20_masa")]),
+        _mini_spark([num("p02_esc55_prioridad"), num("p02_escenario_saldo_retenido_valor"), num("p02_esc75_prioridad")]),
+    ]
+    kpis = APP_RAW["kpis"]
+    for i, sp in enumerate(kpi_sparks):
+        kpis[i]["spark"] = sp
+
+    data = {
+        "titulo": "Portafolio Analítico Cuprum",
+        "areas": ["Comercial", "Operaciones", "Riesgo", "Tesorería", "Normativa"],
+        "kpis": kpis,
+        "mensajes": APP_RAW["mensajes"],
+        "capacidades": APP_RAW["capacidades"],
+        "construccion": APP_RAW["construccion"],
+        "casos": casos,
+        "torre_control": APP_RAW["torre_control"],
+        "roadmap": APP_RAW["roadmap"],
+        "supuestos": APP_RAW["supuestos"],
+        "anexo": APP_RAW["anexo"],
+        "glosario": APP_RAW["glosario"],
+        "footer": {
+            "pct_sintetico": n("meta_pct_sintetico"),
+        },
+    }
+    return data
+
+
 def sec_nav():
     items = "".join(f'<li><a href="#{sid}">{esc(label)}</a></li>' for sid, label in INDICE)
     return f"""<nav class="indice" aria-label="Índice"><h2>Índice</h2><ul>{items}</ul></nav>"""
@@ -1592,6 +1778,617 @@ def sec_nav():
 # --------------------------------------------------------------------------
 # Ensamblaje final
 # --------------------------------------------------------------------------
+
+CSS_APP = """
+/* ===================== App shell (SPA) ===================== */
+[hidden]{display:none!important;}
+html, body{height:100%;}
+body.app{margin:0; padding:0; overflow:hidden;}
+.app-shell{position:fixed; inset:0; display:flex; flex-direction:column; background:var(--bg);}
+.topbar{
+  flex:0 0 auto; display:flex; align-items:stretch; gap:.7rem; flex-wrap:wrap;
+  padding:.5rem .8rem; border-bottom:1px solid var(--border); background:var(--surface);
+  min-width:0;
+}
+.topbar-title{font-family:var(--font-display); font-weight:700; font-size:1.05rem; white-space:nowrap; align-self:center;}
+.topbar-chips{display:flex; gap:.35rem; flex-wrap:wrap; align-items:center; min-width:0;}
+.topbar-chip{
+  font-family:var(--font-body); font-size:.78rem; border:1px solid var(--border); background:var(--surface-2);
+  color:var(--ink); border-radius:999px; padding:.25em .7em; cursor:pointer;
+}
+.topbar-chip[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+.topbar-search{margin-left:auto; min-width:0; flex:0 1 220px; align-self:center;}
+.topbar-search input{
+  width:100%; box-sizing:border-box; font-family:var(--font-body); font-size:.85rem;
+  padding:.35em .7em; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--ink);
+}
+.app-body{flex:1 1 auto; min-height:0; display:flex; align-items:stretch; min-width:0;}
+.navrail{
+  flex:0 0 auto; width:96px; border-right:1px solid var(--border); background:var(--surface);
+  display:flex; flex-direction:column; align-items:stretch; padding:.5rem .25rem; gap:.15rem; overflow-y:auto;
+}
+.navrail a{
+  display:flex; flex-direction:column; align-items:center; gap:.15rem; padding:.5rem .2rem; border-radius:8px;
+  color:var(--muted); text-decoration:none; font-size:.68rem; text-align:center; line-height:1.15;
+}
+.navrail a[aria-current="page"]{background:var(--surface-2); color:var(--accent); font-weight:600;}
+.nav-dot{width:8px; height:8px; border-radius:50%; background:currentColor; opacity:.55; align-self:center;}
+#app-main{flex:1 1 auto; min-width:0; overflow-y:auto; padding:1.1rem 1rem 1.4rem;}
+.tabbar{
+  display:none; flex:0 0 auto; border-top:1px solid var(--border); background:var(--surface);
+  align-items:stretch;
+}
+.tabbar a{
+  flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:.1rem; padding:.4rem .1rem; color:var(--muted); text-decoration:none; font-size:.64rem; text-align:center;
+}
+.tabbar a[aria-current="page"]{color:var(--accent); font-weight:600;}
+@media (max-width:880px){
+  .navrail{display:none;}
+  .tabbar{display:flex;}
+  #app-main{padding-bottom:1.2rem;}
+}
+.screen h1{margin-top:.2rem;}
+.screen h2{margin-top:1.6rem;}
+.kpi-grid.cinco{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));}
+.kpi-spark{margin:.3rem 0;}
+.accesos-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:.8rem; margin:1rem 0;}
+.acceso-card{
+  display:flex; flex-direction:column; gap:.2rem; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding:.8rem .9rem; text-decoration:none; color:var(--ink); min-width:0;
+  border-left:4px solid var(--accent-2);
+}
+.acceso-area{font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);}
+.acceso-titulo{font-weight:600; font-size:.94rem;}
+.acceso-metrica{font-size:.82rem; color:var(--accent);}
+.cap-sub{font-size:.86rem; color:var(--muted); margin:0 0 .3rem;}
+.cap-desc{font-size:.9rem; margin:0;}
+#casos-toolbar{display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin:.6rem 0 1rem;}
+.grid-casos{display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:.9rem;}
+.caso-card{
+  display:flex; flex-direction:column; gap:.35rem; background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; padding:.9rem 1rem; text-decoration:none; color:var(--ink); min-width:0;
+}
+.caso-card:hover, .caso-card:focus-visible{border-color:var(--accent);}
+.caso-card-head{display:flex; align-items:center; justify-content:space-between; gap:.4rem; flex-wrap:wrap;}
+.caso-card h3{margin:0; font-size:1rem;}
+.caso-card-area{font-size:.78rem; color:var(--muted); margin:0;}
+.caso-card-metrica{font-size:.86rem; color:var(--accent); margin:0;}
+.caso-card-reserva{font-size:.78rem; color:var(--muted); margin:0; border-top:1px dashed var(--border); padding-top:.35rem;}
+#caso-detalle{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:.9rem 1rem 1.2rem; min-width:0;}
+.detalle-head{display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; position:relative; padding-right:2.2rem;}
+.detalle-head h3{margin:0; min-width:0;}
+.btn-icon{
+  position:absolute; top:-.2rem; right:-.2rem; width:2rem; height:2rem; border-radius:50%; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--ink); font-size:1.2rem; line-height:1; cursor:pointer;
+}
+.detalle-tabs{display:flex; gap:.3rem; flex-wrap:wrap; margin:.8rem 0; border-bottom:1px solid var(--border); padding-bottom:.5rem;}
+.detalle-tab{
+  font-family:var(--font-body); font-size:.82rem; padding:.35em .8em; border-radius:999px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--ink); cursor:pointer;
+}
+.detalle-tab[aria-selected="true"]{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+.detalle-body{min-height:6rem; min-width:0;}
+.detalle-nav{display:flex; justify-content:space-between; gap:.6rem; margin-top:1rem; flex-wrap:wrap;}
+.btn-nav{
+  font-size:.82rem; text-decoration:none; color:var(--ink); background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; padding:.4em .8em; min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.torre-filtros{display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin:.7rem 0;}
+.filtro-label{font-size:.78rem; color:var(--muted); margin-left:.4rem;}
+.filtro-label:first-child{margin-left:0;}
+.chip-filter{
+  font-family:var(--font-body); font-size:.78rem; border:1px solid var(--border); background:var(--surface-2);
+  color:var(--ink); border-radius:999px; padding:.2em .65em; cursor:pointer;
+}
+.chip-filter[aria-pressed="true"]{background:var(--accent-2); color:var(--accent-2-ink); border-color:var(--accent-2);}
+#torre-sev{font-family:var(--font-body); font-size:.8rem; padding:.25em .5em; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--ink);}
+.roadmap-pide{color:var(--muted); font-size:.86rem;}
+table.sortable th{cursor:pointer; user-select:none; white-space:nowrap;}
+table.sortable th[aria-sort]::after{content:""; display:inline-block; margin-left:.35em; width:0; height:0; vertical-align:middle;}
+table.sortable th[aria-sort="ascending"]::after{border-left:4px solid transparent; border-right:4px solid transparent; border-bottom:5px solid var(--accent);}
+table.sortable th[aria-sort="descending"]::after{border-left:4px solid transparent; border-right:4px solid transparent; border-top:5px solid var(--accent);}
+.buscador{
+  width:100%; max-width:340px; box-sizing:border-box; font-family:var(--font-body); font-size:.9rem;
+  padding:.4em .8em; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--ink);
+  margin:.6rem 0 1rem;
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.001ms!important; animation-duration:.001ms!important;}
+}
+@media print{
+  body.app{overflow:visible;}
+  .app-shell{position:static; display:block;}
+  .topbar, .navrail, .tabbar, .btn-icon, .detalle-tabs, .detalle-nav, #topbar-search, .torre-filtros, table.sortable th::after{display:none!important;}
+  #app-main{overflow:visible; padding:0; height:auto;}
+  .screen[hidden]{display:block!important;}
+  #casos-grid, #caso-detalle{display:block!important;}
+  .caso-card{break-inside:avoid; margin-bottom:.6rem;}
+}
+"""
+
+
+JS_APP = """
+(function(){
+  'use strict';
+  var dataEl = document.getElementById('app-data');
+  var DATA = JSON.parse(dataEl.textContent);
+
+  var SCREENS = [
+    {id:'inicio', label:'Inicio'},
+    {id:'casos', label:'Casos'},
+    {id:'torre-control', label:'Torre'},
+    {id:'roadmap', label:'Roadmap'},
+    {id:'datos-limites', label:'Datos'},
+    {id:'anexo', label:'Anexo'},
+    {id:'glosario', label:'Glosario'}
+  ];
+
+  var state = {screen:'inicio', caseSlug:null, tab:'problema', areaFilter:null, search:''};
+
+  function lsGet(key, fallback){
+    try { var v = localStorage.getItem(key); return v === null ? fallback : v; }
+    catch(e){ return fallback; }
+  }
+  function lsSet(key, val){ try { localStorage.setItem(key, val); } catch(e){} }
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function caseSlug(c){
+    if (c.numero && c.numero !== '—') return c.numero;
+    return c.id === 'planilla' ? 'planilla' : 'correccion-01';
+  }
+  function findCase(slug){
+    for (var i=0;i<DATA.casos.length;i++){ if (caseSlug(DATA.casos[i]) === slug) return DATA.casos[i]; }
+    return null;
+  }
+
+  function parseHash(){
+    var h = location.hash.replace(/^#\/?/, '');
+    var parts = h.split('/').filter(function(x){return x.length>0;});
+    if (!parts.length) return null;
+    var out = {screen:parts[0], caseSlug:null, tab:'problema'};
+    if (out.screen === 'casos' && parts[1]){
+      out.caseSlug = decodeURIComponent(parts[1]);
+      if (parts[2]) out.tab = parts[2];
+    }
+    return out;
+  }
+
+  function setHash(screen, slug, tab){
+    var h = '#/' + screen;
+    if (slug) h += '/' + encodeURIComponent(slug);
+    if (slug && tab) h += '/' + tab;
+    if (location.hash !== h) location.hash = h; else { syncFromHash(); render(); }
+  }
+
+  function syncFromHash(){
+    var parsed = parseHash();
+    if (!parsed){
+      var last = lsGet('cuprum_screen', 'inicio');
+      state.screen = last; state.caseSlug = null; state.tab = 'problema';
+      history.replaceState(null, '', '#/' + last);
+      return;
+    }
+    state.screen = parsed.screen;
+    state.caseSlug = parsed.caseSlug;
+    state.tab = parsed.tab || 'problema';
+  }
+
+  function chipClass(nivel){
+    if (nivel === 'ok') return 'chip-ok';
+    if (nivel === 'reserva') return 'chip-warn';
+    if (nivel === 'critico') return 'chip-critical';
+    return 'chip-info';
+  }
+  function chipHtml(text, nivel){
+    return '<span class="chip ' + chipClass(nivel) + '"><span class="chip-dot" aria-hidden="true"></span>' + esc(text) + '</span>';
+  }
+  function sevLabel(sev){ return sev === 'critical' ? 'crítico' : (sev === 'warn' ? 'atención' : 'ok'); }
+  function stripeHtml(sev){
+    var cls = sev === 'critical' ? 'stripe-critical' : (sev === 'warn' ? 'stripe-warn' : 'stripe-ok');
+    return '<span class="stripe ' + cls + '" aria-hidden="true"></span>';
+  }
+  function sevChip(sev){
+    var cls = sev === 'critical' ? 'chip-critical' : (sev === 'warn' ? 'chip-warn' : 'chip-ok');
+    return '<span class="chip ' + cls + '"><span class="chip-dot" aria-hidden="true"></span>' + sevLabel(sev) + '</span>';
+  }
+
+  function renderInicio(){
+    var el = document.getElementById('screen-inicio');
+    var kpisHtml = DATA.kpis.map(function(k){
+      return '<div class="kpi-card"><div class="kpi-num">' + k.valor + '</div>' +
+        '<div class="kpi-spark">' + (k.spark || '') + '</div>' +
+        '<div class="kpi-label">' + esc(k.label) + '</div>' +
+        (k.sub ? '<div class="kpi-sub">' + esc(k.sub) + '</div>' : '') + '</div>';
+    }).join('');
+    var msgHtml = DATA.mensajes.map(function(m){ return '<li>' + m + '</li>'; }).join('');
+    var capHtml = DATA.capacidades.map(function(c){
+      return '<div class="cap-card"><h4>' + esc(c.titulo) + '</h4><p class="cap-sub">' + esc(c.sub) +
+        '</p><p class="cap-desc">' + c.desc + '</p></div>';
+    }).join('');
+    var porArea = {};
+    DATA.casos.forEach(function(c){ if (!porArea[c.area]) porArea[c.area] = c; });
+    var accesos = DATA.areas.map(function(a){
+      var c = porArea[a];
+      if (!c) return '';
+      return '<a class="acceso-card" href="#/casos/' + caseSlug(c) + '">' +
+        '<span class="acceso-area">' + esc(a) + '</span>' +
+        '<span class="acceso-titulo">' + esc(c.titulo) + '</span>' +
+        '<span class="acceso-metrica mono">' + esc(c.metrica_principal) + '</span></a>';
+    }).join('');
+    el.innerHTML =
+      '<h1>Qué ofrece Data Analytics a AFP Cuprum</h1>' +
+      '<p class="medida">Portafolio navegable por pantallas: mismo contenido y las mismas cifras que el informe completo.</p>' +
+      '<h2>Cinco números</h2><div class="kpi-grid cinco">' + kpisHtml + '</div>' +
+      '<h2>Cinco mensajes</h2><ul class="mensajes medida">' + msgHtml + '</ul>' +
+      '<h2>Accesos directos por área</h2><div class="accesos-grid">' + accesos + '</div>' +
+      '<h2>Qué ofrece el equipo</h2><div class="grid-cap">' + capHtml + '</div>' +
+      '<div class="chart-wrap"><figure>' + DATA.construccion.chart_densidad +
+      '<figcaption>' + esc(DATA.construccion.chart_caption) + '</figcaption></figure></div>';
+  }
+
+  function matchesFilter(c){
+    if (state.areaFilter && c.area !== state.areaFilter) return false;
+    if (state.search){
+      var q = state.search.toLowerCase();
+      var hay = (c.titulo + ' ' + c.nombre + ' ' + c.numero + ' ' + c.area).toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  }
+  function renderCasosGrid(){
+    var grid = document.getElementById('casos-grid');
+    if (!grid) return;
+    var list = DATA.casos.filter(matchesFilter);
+    var html = list.map(function(c){
+      return '<a class="caso-card" href="#/casos/' + caseSlug(c) + '">' +
+        '<div class="caso-card-head"><span class="badge badge-accent">' + esc(c.numero) + '</span>' +
+        chipHtml(c.estado_texto, c.estado_nivel) + '</div>' +
+        '<h3>' + esc(c.titulo) + '</h3>' +
+        '<p class="caso-card-area">' + esc(c.area) + ' &middot; ' + esc(c.nombre) + '</p>' +
+        '<p class="caso-card-metrica mono">' + esc(c.metrica_principal) + '</p>' +
+        '<p class="caso-card-reserva">' + esc(c.reserva_corta) + '</p></a>';
+    }).join('');
+    grid.innerHTML = html || '<p class="medida">Ningún caso coincide con el filtro.</p>';
+  }
+  var TABS = [
+    {id:'problema', label:'Problema'}, {id:'resultado', label:'Resultado'},
+    {id:'dashboard', label:'Dashboard'}, {id:'produccion', label:'Producción'},
+    {id:'reserva', label:'Reserva'}, {id:'fuente', label:'Fuente'}
+  ];
+  function tabContent(c, tab){
+    if (tab === 'problema') return '<div class="medida">' + c.problema_html + '</div>';
+    if (tab === 'resultado') return '<div class="medida">' + c.resultado_html + '<h4>Cómo lo usaría el área</h4>' + c.uso_html + '</div>';
+    if (tab === 'dashboard') return c.dashboard_html;
+    if (tab === 'produccion') return '<div class="medida">' + c.produccion_html + '</div>';
+    if (tab === 'reserva') return c.reserva_html;
+    if (tab === 'fuente') return '<p class="fuente-cita">Fuente: ' + esc(c.fuente_texto) + '</p>';
+    return '';
+  }
+  function renderDetalle(){
+    var det = document.getElementById('caso-detalle');
+    var grid = document.getElementById('casos-grid');
+    if (!det || !grid) return;
+    var c = findCase(state.caseSlug);
+    if (!c){ det.hidden = true; grid.hidden = false; det.innerHTML=''; return; }
+    grid.hidden = true; det.hidden = false;
+    var idx = DATA.casos.indexOf(c);
+    var prev = DATA.casos[(idx - 1 + DATA.casos.length) % DATA.casos.length];
+    var next = DATA.casos[(idx + 1) % DATA.casos.length];
+    var tabsHtml = TABS.map(function(t){
+      var sel = (t.id === state.tab);
+      return '<button class="detalle-tab" role="tab" aria-selected="' + sel + '" data-tab="' + t.id +
+        '" id="tab-' + t.id + '">' + t.label + '</button>';
+    }).join('');
+    det.innerHTML =
+      '<div class="detalle-head"><button class="btn-icon" id="btn-cerrar-detalle" aria-label="Cerrar y volver a la grilla">&times;</button>' +
+      '<span class="badge badge-accent">' + esc(c.numero) + '</span><h3>' + esc(c.titulo) + '</h3>' +
+      '<span class="badge">' + esc(c.nombre) + '</span>' + chipHtml(c.estado_texto, c.estado_nivel) + '</div>' +
+      '<div class="detalle-tabs" role="tablist">' + tabsHtml + '</div>' +
+      '<div class="detalle-body" id="detalle-body" role="tabpanel">' + tabContent(c, state.tab) + '</div>' +
+      '<div class="detalle-nav"><a href="#/casos/' + caseSlug(prev) + '/' + state.tab + '" class="btn-nav">&larr; ' +
+      esc(prev.numero) + ' ' + esc(prev.nombre) + '</a><a href="#/casos/' + caseSlug(next) + '/' + state.tab +
+      '" class="btn-nav">' + esc(next.numero) + ' ' + esc(next.nombre) + ' &rarr;</a></div>';
+    var tabButtons = det.querySelectorAll('.detalle-tab');
+    for (var i=0;i<tabButtons.length;i++){
+      tabButtons[i].addEventListener('click', (function(btn){
+        return function(){ setHash('casos', state.caseSlug, btn.getAttribute('data-tab')); };
+      })(tabButtons[i]));
+    }
+    var closeBtn = document.getElementById('btn-cerrar-detalle');
+    if (closeBtn) closeBtn.addEventListener('click', function(){ setHash('casos', null, null); });
+    var focusTarget = document.getElementById('tab-' + state.tab);
+    if (focusTarget) focusTarget.focus({preventScroll:true});
+  }
+  function renderCasos(){ renderCasosGrid(); renderDetalle(); }
+
+  var torreState = {area:null, sev:null};
+  function renderTorre(){
+    var el = document.getElementById('screen-torre-control');
+    var t = DATA.torre_control;
+    var kpisHtml = t.kpis.map(function(k){
+      return '<div class="md-kpi"><div class="md-kpi-num">' + k[0] + '</div><div class="md-kpi-label">' + esc(k[1]) + '</div></div>';
+    }).join('');
+    var areasChips = DATA.areas.map(function(a){
+      return '<button class="chip-filter" data-area="' + esc(a) + '" aria-pressed="' + (torreState.area===a) + '">' + esc(a) + '</button>';
+    }).join('');
+    el.innerHTML =
+      '<h2>Torre de control: los casos en un solo tablero</h2>' +
+      '<p class="medida">Vista integrada de las capacidades de priorización, con alertas filtrables por área y severidad.</p>' +
+      '<div class="mockup"><div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span>' +
+      '<span class="mockup-dot"></span><span class="mockup-title">Torre de control &middot; portafolio Cuprum</span></div>' +
+      '<div class="mockup-body"><div class="md-kpis">' + kpisHtml + '</div>' +
+      '<div class="torre-filtros"><span class="filtro-label">Área</span>' +
+      '<button class="chip-filter" data-area="" aria-pressed="' + (torreState.area===null) + '">Todas</button>' + areasChips +
+      '<span class="filtro-label">Severidad</span><select id="torre-sev">' +
+      '<option value="">Todas</option><option value="critical">Crítico</option><option value="warn">Atención</option>' +
+      '<option value="ok">Ok</option></select></div>' +
+      '<div class="md-table-wrap"><table class="md-table"><thead><tr><th>Área</th><th>Alerta</th><th>Detalle</th>' +
+      '<th>Valor</th><th>Estado</th></tr></thead><tbody id="torre-tbody"></tbody></table></div>' +
+      '<div class="md-chart"><figure>' + t.chart_svg + '<figcaption>' + esc(t.chart_caption) + '</figcaption></figure></div>' +
+      '</div></div>';
+    var chipButtons = el.querySelectorAll('.chip-filter');
+    for (var i=0;i<chipButtons.length;i++){
+      chipButtons[i].addEventListener('click', (function(b){
+        return function(){
+          torreState.area = b.getAttribute('data-area') || null;
+          for (var j=0;j<chipButtons.length;j++){ chipButtons[j].setAttribute('aria-pressed', String(chipButtons[j]===b)); }
+          renderTorreTable();
+        };
+      })(chipButtons[i]));
+    }
+    var sevSel = document.getElementById('torre-sev');
+    if (sevSel) sevSel.addEventListener('change', function(e){ torreState.sev = e.target.value || null; renderTorreTable(); });
+    renderTorreTable();
+  }
+  function renderTorreTable(){
+    var t = DATA.torre_control;
+    var rows = t.filas.filter(function(f){
+      if (torreState.area && f.area !== torreState.area) return false;
+      if (torreState.sev && f.severidad !== torreState.sev) return false;
+      return true;
+    });
+    var body = document.getElementById('torre-tbody');
+    if (!body) return;
+    var html = rows.map(function(f){
+      return '<tr class="sev-' + f.severidad + '"><td>' + esc(f.area) + '</td><td>' + stripeHtml(f.severidad) +
+        esc(f.alerta) + '</td><td>' + esc(f.detalle) + '</td><td class="num">' + esc(f.valor) + '</td><td>' +
+        sevChip(f.severidad) + '</td></tr>';
+    }).join('');
+    body.innerHTML = html || '<tr><td colspan="5">Sin alertas para este filtro.</td></tr>';
+  }
+
+  function renderRoadmap(){
+    var el = document.getElementById('screen-roadmap');
+    var items = DATA.roadmap.map(function(p){
+      return '<li><h4>' + esc(p.titulo) + '</h4><p>' + p.desc + '</p><p class="roadmap-pide"><strong>Se pide al negocio:</strong> ' + p.pide + '</p></li>';
+    }).join('');
+    el.innerHTML = '<h2>Roadmap</h2><p class="medida">En este orden porque cada paso reduce el riesgo del siguiente. ' +
+      'Es la única pantalla con pasos numerados.</p><ol class="roadmap medida">' + items + '</ol>';
+  }
+
+  function renderDatos(){
+    var el = document.getElementById('screen-datos-limites');
+    var s = DATA.supuestos;
+    var datosHtml = s.datos.map(function(x){ return '<li>' + x + '</li>'; }).join('');
+    var modelosHtml = s.modelos.map(function(x){ return '<li>' + x + '</li>'; }).join('');
+    el.innerHTML = '<h2>Supuestos, reservas y límites</h2><p class="medida">' + s.intro + '</p>' +
+      '<h3>Sobre los datos</h3><ul class="medida">' + datosHtml + '</ul>' +
+      '<h3>Sobre los modelos</h3><ul class="medida">' + modelosHtml + '</ul>';
+  }
+
+  var anexoSort = {col:null, dir:1};
+  var ANEXO_COLS = ['proyecto','datos','modelo','metrica','tests','runtime','revision'];
+  var ANEXO_LABELS = {proyecto:'Proyecto', datos:'Datos', modelo:'Modelo', metrica:'Métrica principal', tests:'Tests', runtime:'Runtime', revision:'Revisión'};
+  function renderAnexo(){
+    var el = document.getElementById('screen-anexo');
+    var head = ANEXO_COLS.map(function(c){
+      var sortDir = anexoSort.col===c ? (anexoSort.dir>0 ? 'ascending' : 'descending') : 'none';
+      return '<th data-col="' + c + '" aria-sort="' + sortDir + '" tabindex="0" role="button">' + ANEXO_LABELS[c] + '</th>';
+    }).join('');
+    el.innerHTML = '<h2>Anexo técnico</h2><p class="medida">Una fila por proyecto. Pulsa un encabezado (o Enter) para ordenar.</p>' +
+      '<div class="tabla-wrap"><table class="tabla sortable"><thead><tr>' + head + '</tr></thead><tbody id="anexo-tbody"></tbody></table></div>';
+    var ths = el.querySelectorAll('th');
+    for (var i=0;i<ths.length;i++){
+      (function(th){
+        function toggle(){
+          var col = th.getAttribute('data-col');
+          if (anexoSort.col === col) anexoSort.dir *= -1; else { anexoSort.col = col; anexoSort.dir = 1; }
+          renderAnexo();
+        }
+        th.addEventListener('click', toggle);
+        th.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); } });
+      })(ths[i]);
+    }
+    renderAnexoRows();
+  }
+  function renderAnexoRows(){
+    var rows = DATA.anexo.slice();
+    if (anexoSort.col){
+      rows.sort(function(a,b){
+        var av = a[anexoSort.col], bv = b[anexoSort.col];
+        return (av > bv ? 1 : (av < bv ? -1 : 0)) * anexoSort.dir;
+      });
+    }
+    var body = document.getElementById('anexo-tbody');
+    if (!body) return;
+    body.innerHTML = rows.map(function(r){
+      return '<tr><td>' + esc(r.proyecto) + '</td><td>' + esc(r.datos) + '</td><td>' + esc(r.modelo) + '</td>' +
+        '<td class="num">' + esc(r.metrica) + '</td><td class="num">' + esc(r.tests) + '</td><td class="num">' +
+        esc(r.runtime) + '</td><td>' + esc(r.revision) + '</td></tr>';
+    }).join('');
+  }
+
+  function renderGlosario(){
+    var el = document.getElementById('screen-glosario');
+    el.innerHTML = '<h2>Glosario</h2>' +
+      '<input type="search" id="glosario-buscador" class="buscador" placeholder="Buscar termino" aria-label="Buscar en el glosario">' +
+      '<dl class="glosario medida" id="glosario-lista"></dl>';
+    var input = document.getElementById('glosario-buscador');
+    input.addEventListener('input', function(e){ renderGlosarioLista(e.target.value); });
+    renderGlosarioLista('');
+  }
+  function renderGlosarioLista(q){
+    q = (q || '').toLowerCase();
+    var items = DATA.glosario.filter(function(g){
+      return !q || g.termino.toLowerCase().indexOf(q) > -1 || g.definicion.toLowerCase().indexOf(q) > -1;
+    });
+    var el = document.getElementById('glosario-lista');
+    if (!el) return;
+    el.innerHTML = items.map(function(g){ return '<dt>' + esc(g.termino) + '</dt><dd>' + esc(g.definicion) + '</dd>'; }).join('') ||
+      '<p class="medida">Sin coincidencias.</p>';
+  }
+
+  function renderChromeState(){
+    var navLinks = document.querySelectorAll('[data-nav-screen]');
+    for (var i=0;i<navLinks.length;i++){
+      var active = navLinks[i].getAttribute('data-nav-screen') === state.screen;
+      navLinks[i].setAttribute('aria-current', active ? 'page' : 'false');
+    }
+    var chips = document.querySelectorAll('.topbar-chip');
+    for (var j=0;j<chips.length;j++){
+      var area = chips[j].getAttribute('data-area') || null;
+      chips[j].setAttribute('aria-pressed', String(area === state.areaFilter));
+    }
+  }
+
+  var RENDERERS = {
+    'inicio':renderInicio, 'casos':renderCasos, 'torre-control':renderTorre,
+    'roadmap':renderRoadmap, 'datos-limites':renderDatos, 'anexo':renderAnexo, 'glosario':renderGlosario
+  };
+  function render(){
+    var screen = RENDERERS[state.screen] ? state.screen : 'inicio';
+    for (var i=0;i<SCREENS.length;i++){
+      var el = document.getElementById('screen-' + SCREENS[i].id);
+      if (el) el.hidden = (SCREENS[i].id !== screen);
+    }
+    RENDERERS[screen]();
+    renderChromeState();
+    lsSet('cuprum_screen', screen);
+    lsSet('cuprum_area', state.areaFilter || '');
+  }
+
+  window.addEventListener('hashchange', function(){ syncFromHash(); render(); });
+
+  document.addEventListener('click', function(e){
+    var chip = e.target.closest ? e.target.closest('.topbar-chip') : null;
+    if (chip){
+      var area = chip.getAttribute('data-area') || null;
+      state.areaFilter = (state.areaFilter === area) ? null : area;
+      renderChromeState();
+      if (state.screen === 'casos') renderCasosGrid();
+      if (state.screen === 'inicio') renderInicio();
+    }
+  });
+
+  var searchEl = document.getElementById('topbar-search');
+  if (searchEl){
+    searchEl.addEventListener('input', function(e){
+      state.search = e.target.value;
+      if (state.screen === 'casos') renderCasosGrid();
+    });
+  }
+
+  document.addEventListener('keydown', function(e){
+    if (state.screen === 'casos' && state.caseSlug){
+      if (e.key === 'Escape'){ e.preventDefault(); setHash('casos', null, null); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft'){
+        var c = findCase(state.caseSlug);
+        if (!c) return;
+        var idx = DATA.casos.indexOf(c);
+        var dir = (e.key === 'ArrowRight') ? 1 : -1;
+        var nextC = DATA.casos[(idx + dir + DATA.casos.length) % DATA.casos.length];
+        e.preventDefault();
+        setHash('casos', caseSlug(nextC), state.tab);
+      }
+    }
+  });
+
+  syncFromHash();
+  state.areaFilter = lsGet('cuprum_area', '') || null;
+  render();
+})();
+"""
+
+
+def _screen_ids():
+    return [
+        ("inicio", "Inicio"),
+        ("casos", "Casos"),
+        ("torre-control", "Torre"),
+        ("roadmap", "Roadmap"),
+        ("datos-limites", "Datos"),
+        ("anexo", "Anexo"),
+        ("glosario", "Glosario"),
+    ]
+
+
+def build_app_html():
+    data = build_app_data()
+    data_json = json.dumps(data, ensure_ascii=False)
+    nav_items = "".join(
+        f'<a href="#/{sid}" data-nav-screen="{sid}"><span class="nav-dot" aria-hidden="true"></span>{esc(label)}</a>'
+        for sid, label in _screen_ids()
+    )
+    area_chips = "".join(
+        f'<button class="topbar-chip" data-area="{esc(a)}" aria-pressed="false">{esc(a)}</button>'
+        for a in data["areas"]
+    )
+    screens_html = "".join(
+        f'<section class="screen" id="screen-{sid}" hidden></section>'
+        for sid in ["inicio", "torre-control", "roadmap", "datos-limites", "anexo", "glosario"]
+    )
+    casos_screen = (
+        '<section class="screen" id="screen-casos" hidden>'
+        '<div id="casos-toolbar"><h2 style="margin:0;">Casos de uso</h2></div>'
+        '<div class="grid-casos" id="casos-grid"></div>'
+        '<div id="caso-detalle" hidden></div>'
+        "</section>"
+    )
+    fonts_link = (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+        "family=Bricolage+Grotesque:wght@500;700&"
+        "family=Source+Sans+3:wght@400;600;700&"
+        'family=IBM+Plex+Mono:wght@400;500;600&display=swap">'
+    )
+    html_doc = (
+        "<!doctype html>\n"
+        '<html lang="es">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        "<title>Portafolio Analítico Cuprum</title>\n"
+        '<meta name="description" content="Portafolio de Data Analytics de AFP Cuprum, navegable por '
+        'pantallas: casos de uso, torre de control, roadmap y anexo.">\n'
+        f"{fonts_link}\n"
+        f"<style>{CSS}{CSS_APP}</style>\n"
+        "</head>\n"
+        '<body class="app">\n'
+        '<div class="app-shell">\n'
+        '  <header class="topbar">\n'
+        '    <span class="topbar-title">Portafolio Analítico Cuprum</span>\n'
+        f'    <div class="topbar-chips" role="group" aria-label="Filtrar por área">{area_chips}</div>\n'
+        '    <div class="topbar-search"><input type="search" id="topbar-search" placeholder="Buscar caso"'
+        ' aria-label="Buscar caso"></div>\n'
+        "  </header>\n"
+        '  <div class="app-body">\n'
+        f'    <nav class="navrail" aria-label="Navegación principal">{nav_items}</nav>\n'
+        f'    <main id="app-main">{screens_html}{casos_screen}</main>\n'
+        "  </div>\n"
+        f'  <nav class="tabbar" aria-label="Navegación principal (móvil)">{nav_items}</nav>\n'
+        "</div>\n"
+        f'<script type="application/json" id="app-data">{data_json}</script>\n'
+        f"<script>{JS_APP}</script>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+    return html_doc
+
 
 def build_document():
     body = "".join([
@@ -1691,8 +2488,8 @@ def check_balanced_tags(html_text):
     return checker.errors
 
 
-def main():
-    doc = build_document()
+def _verificar_y_escribir(doc, out_path, etiqueta):
+    print(f"--- {etiqueta} ---")
     errors = check_balanced_tags(doc)
     if errors:
         print("ADVERTENCIA: posibles etiquetas HTML desbalanceadas:")
@@ -1706,17 +2503,29 @@ def main():
     if size_bytes > 1_500_000:
         print("ADVERTENCIA: el HTML supera 1,5 MB.")
 
+    with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(doc)
+    print(f"Escrito: {out_path}")
+
+
+def main():
+    import sys
+    modo_documento = "--documento" in sys.argv
+
+    if modo_documento:
+        doc = build_document()
+        _verificar_y_escribir(doc, DOC_OUT_PATH, "Documento (una pantalla, para imprimir)")
+    else:
+        app = build_app_html()
+        _verificar_y_escribir(app, OUT_PATH, "App (SPA, navegable por pantallas)")
+
     unused = sorted(set(D.keys()) - USED)
     if unused:
-        print(f"Datos definidos en reporte_datos.json y NO usados en el HTML ({len(unused)}):")
+        print(f"Datos definidos en reporte_datos.json y NO usados en esta generación ({len(unused)}):")
         for k in unused:
             print(" -", k)
     else:
-        print("Todas las entradas de reporte_datos.json se usaron en el HTML.")
-
-    with open(OUT_PATH, "w", encoding="utf-8") as fh:
-        fh.write(doc)
-    print(f"Escrito: {OUT_PATH}")
+        print("Todas las entradas de reporte_datos.json se usaron en esta generación.")
 
 
 if __name__ == "__main__":

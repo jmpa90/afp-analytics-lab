@@ -38,6 +38,10 @@ FEATURES_NUMERICAS = (
        "emp_n_trabajadores", "emp_crecimiento_12", "emp_rim_mediana", "emp_tasa_oportuno",
        "emp_frac_declarado_corte", "emp_frac_declarado_h1", "emp_ratio_recibido_h1", "emp_tiene_recibido_h1",
        "sin_declaracion_con_emp_activo", "rim_propia_conocida_h1", "flag_propia_conocida_h1",
+       "dias_trabajados_l1", "mov_termino_l1", "mov_termino_l2", "mov_subsidio_l1", "mov_subsidio_l2",
+       "n_mov_termino_3", "n_mov_termino_6", "n_mov_termino_12",
+       "n_mov_subsidio_3", "n_mov_subsidio_6", "n_mov_subsidio_12",
+       "n_mov_otros_3", "n_mov_otros_6", "n_mov_otros_12",
        "edad", "meses_desde_afiliacion", "region",
        "horizonte", "mes_target", "es_enero", "es_marzo", "es_abril", "es_julio", "es_sept", "es_dic",
        "imm_target", "tope_target", "ratio_imm_target_corte", "ipc_12m_corte", "desempleo_corte"]
@@ -198,6 +202,63 @@ def _features_eventos(afc: DataFrame, licencias: DataFrame, periodo_corte: int, 
     return afc_k, lic_k
 
 
+def _features_movimiento(serie: DataFrame, cotizaciones: DataFrame, periodo_corte: int,
+                         hasta_recepcion: int) -> DataFrame:
+    """Features del codigo de movimiento de personal (Tabla N 7, ver `synthetic.generar_movimiento_personal`
+    y `common.tablas_equivalencia.MOVIMIENTO_PERSONAL`) del vinculo PRINCIPAL, con el MISMO desfase
+    de recepcion que la RIM (`cotizaciones.periodo_recepcion <= hasta_recepcion`; una RECTIFICACION
+    posterior reemplaza el codigo vigente, igual que `snapshot.rim_conocida`). A diferencia de
+    `afc_termino_l1`/`dias_licencia_l1` (que llegan por un feed mas rapido, m+1), esta senal viaje
+    en la propia planilla y puede demorar lo mismo que la RIM (oportuno, tardio, rezago o DNP), asi
+    que es complementaria, no redundante, con `_features_eventos`.
+
+    Se identifica el empleador PRINCIPAL con `serie.empleador_principal` (ya calculado por
+    `snapshot.rim_conocida`) para no mezclar el codigo del segundo empleador (multiempleo, que
+    `synthetic.py` deja en 0 = "sin movimiento") con el del vinculo que manda en la referencia de
+    RIM."""
+    corte_idx = periodo_to_idx(periodo_corte)
+    principal = (serie.filter(F.col("empleador_principal").isNotNull())
+                 .select("afiliado_id", "periodo", "periodo_idx",
+                         F.col("empleador_principal").alias("empleador_id")))
+    mov = (cotizaciones
+           .filter((F.col("entidad_pagadora") == "EMPLEADOR") & F.col("cod_movimiento").isNotNull()
+                   & F.col("tipo_movimiento").isin("DECLARACION", "RECTIFICACION")
+                   & (F.col("periodo_recepcion") <= hasta_recepcion)))
+    w = W.partitionBy("afiliado_id", "periodo", "empleador_id").orderBy(
+        F.col("periodo_recepcion").desc(), F.col("movimiento_id").desc())
+    vigente = (mov.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1")
+               .select("afiliado_id", "periodo", "empleador_id", "cod_movimiento", "dias_trabajados"))
+    conocido = (principal.join(vigente, ["afiliado_id", "periodo", "empleador_id"], "left")
+                .filter(F.col("periodo_idx") >= corte_idx - 11))
+
+    def _cuenta(codigos: list[int], meses: int):
+        return F.sum(F.when(F.col("cod_movimiento").isin(*codigos)
+                            & (F.col("periodo_idx") >= corte_idx - meses + 1), 1).otherwise(0))
+
+    # boundary de plan (igual razon que `serie`/`abiertas` en construir_features): sin esto, el
+    # join+ventana+groupBy de esta funcion se suma al plan ya enorme de construir_features (~100
+    # columnas encadenadas) y el analizador de Catalyst puede tardar minutos en vez de segundos en
+    # los callers que no materializan (tests con materializar=False); `.cache()` corta el linaje
+    # para el resto del pipeline igual que un checkpoint, sin escribir a disco.
+    return conocido.groupBy("afiliado_id").agg(
+        _cuenta([2], 3).alias("n_mov_termino_3"), _cuenta([2], 6).alias("n_mov_termino_6"),
+        _cuenta([2], 12).alias("n_mov_termino_12"),
+        _cuenta([3], 3).alias("n_mov_subsidio_3"), _cuenta([3], 6).alias("n_mov_subsidio_6"),
+        _cuenta([3], 12).alias("n_mov_subsidio_12"),
+        _cuenta([4, 11], 3).alias("n_mov_otros_3"), _cuenta([4, 11], 6).alias("n_mov_otros_6"),
+        _cuenta([4, 11], 12).alias("n_mov_otros_12"),
+        F.max(F.when(F.col("periodo_idx") == corte_idx, F.col("dias_trabajados"))).alias("dias_trabajados_l1"),
+        F.max(F.when((F.col("periodo_idx") == corte_idx) & (F.col("cod_movimiento") == 2), 1)
+              .otherwise(0)).alias("mov_termino_l1"),
+        F.max(F.when((F.col("periodo_idx") == corte_idx - 1) & (F.col("cod_movimiento") == 2), 1)
+              .otherwise(0)).alias("mov_termino_l2"),
+        F.max(F.when((F.col("periodo_idx") == corte_idx) & (F.col("cod_movimiento") == 3), 1)
+              .otherwise(0)).alias("mov_subsidio_l1"),
+        F.max(F.when((F.col("periodo_idx") == corte_idx - 1) & (F.col("cod_movimiento") == 3), 1)
+              .otherwise(0)).alias("mov_subsidio_l2"),
+    ).cache()
+
+
 def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataFrame],
                        periodo_snapshot: int, materializar: bool = True) -> DataFrame:
     """Dataset de features para un snapshot: una fila por (afiliado, horizonte).
@@ -216,6 +277,7 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
     f_serie = _features_serie(serie, corte)
     f_emp = _features_empleador(serie, cotizaciones, abiertas, corte, hasta)
     f_afc, f_lic = _features_eventos(tablas["afc_eventos"], tablas["licencias"], corte, hasta)
+    f_mov = _features_movimiento(serie, cotizaciones, corte, hasta)
 
     macro_p = macro.toPandas().set_index("periodo")
     m_corte = macro_p.loc[corte]
@@ -228,6 +290,7 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
             .join(f_serie, "afiliado_id", "left")
             .join(f_afc, "afiliado_id", "left")
             .join(f_lic, "afiliado_id", "left")
+            .join(f_mov, "afiliado_id", "left")
             # sin cotizacion conocida pero con aviso AFC de inicio: se usa ese empleador como referencia
             .withColumn("empleador_ref", F.coalesce(F.col("empleador_ref"), F.col("afc_empleador_inicio")))
             .join(f_emp, "empleador_ref", "left")
@@ -320,7 +383,14 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
                                     "afc_termino_l1", "afc_termino_l2", "afc_inicio_l1", "afc_inicio_l2",
                                     "emp_n_trabajadores", "n_pagadores_ya_conocidos", "racha_cotiza",
                                     "n_cambios_12", "sueldo_fijo", "al_tope_l1", "en_imm_l1",
-                                    "emp_tiene_recibido_h1", "rim_propia_conocida_h1", "flag_propia_conocida_h1"]})
+                                    "emp_tiene_recibido_h1", "rim_propia_conocida_h1", "flag_propia_conocida_h1",
+                                    "mov_termino_l1", "mov_termino_l2", "mov_subsidio_l1", "mov_subsidio_l2",
+                                    "n_mov_termino_3", "n_mov_termino_6", "n_mov_termino_12",
+                                    "n_mov_subsidio_3", "n_mov_subsidio_6", "n_mov_subsidio_12",
+                                    "n_mov_otros_3", "n_mov_otros_6", "n_mov_otros_12"]})
+    # sin declaracion conocida del vinculo principal: se asume mes completo (30 dias), igual que
+    # el valor por defecto de `synthetic.generar_movimiento_personal` cuando cod_movimiento = 0
+    rellenos.update({"dias_trabajados_l1": 30.0})
     rellenos.update({"meses_desde_ult_cotiza": 99, "meses_desde_cambio": 99, "meses_desde_afc_termino": 99,
                      "meses_desde_afc_inicio": 99, "rim_ref": 0.0, "emp_ratio_recibido_h1": 1.0,
                      "rubro": "SIN_EMPLEADOR", "tamano_empleador": "SIN_EMPLEADOR"})
@@ -333,6 +403,7 @@ def construir_features(spark: SparkSession, cfg: Config, tablas: dict[str, DataF
         df = df.localCheckpoint(eager=True)
         serie.unpersist()
         abiertas.unpersist()
+        f_mov.unpersist()
     return df
 
 

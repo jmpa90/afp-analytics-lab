@@ -18,7 +18,12 @@ from afp_lab.rim_nowcasting.synthetic import generar_todo
 
 @pytest.fixture(scope="session")
 def spark():
-    s = get_spark("tests", shuffle_partitions=4, master="local[2]", driver_memory="3g")
+    # driver_memory subido de 3g a 6g en ronda 3: las features nuevas de codigo de movimiento
+    # (_features_movimiento) suman otro join/groupBy al plan ya ancho de construir_features, y los
+    # tests que llaman con materializar=False (sin el localCheckpoint que corta el linaje en
+    # produccion) canonicalizan el plan completo varias veces por test; con 3g el ultimo test del
+    # archivo (el que mas veces reconstruye features) llegaba a OutOfMemoryError en Catalyst.
+    s = get_spark("tests", shuffle_partitions=4, master="local[2]", driver_memory="6g")
     yield s
     s.stop()
 
@@ -125,14 +130,134 @@ def test_features_sin_leakage(spark, cfg, tablas):
     futuro = (tablas["cotizaciones"].limit(200)
               .withColumn("rim", F.lit(3_000_000.0))
               .withColumn("periodo_recepcion", F.lit(s))
+              .withColumn("cod_movimiento", F.lit(2))
               .withColumn("movimiento_id", F.col("movimiento_id") + 10_000_000))
     t2 = dict(tablas)
     t2["cotizaciones"] = tablas["cotizaciones"].unionByName(futuro)
     alt = construir_features(spark, cfg, t2, s, materializar=False)
-    cols = ["afiliado_id", "horizonte", "rim_l1", "media_12", "rim_ref", "emp_frac_declarado_h1", "target_ya_conocido"]
+    cols = ["afiliado_id", "horizonte", "rim_l1", "media_12", "rim_ref", "emp_frac_declarado_h1", "target_ya_conocido",
+            "dias_trabajados_l1", "mov_termino_l1", "mov_subsidio_l1", "n_mov_termino_12", "n_mov_subsidio_12",
+            "n_mov_otros_12"]
     a = base.select(*cols).toPandas().sort_values(["afiliado_id", "horizonte"]).reset_index(drop=True)
     b = alt.select(*cols).toPandas().sort_values(["afiliado_id", "horizonte"]).reset_index(drop=True)
     pd.testing.assert_frame_equal(a, b)
+
+
+# ------------------------------------------------ codigo de movimiento (Tabla N 7, ronda 3)
+def test_cod_movimiento_valores_validos(spark, tablas):
+    """Solo se generan los codigos declarados (0,1,2,3,4,7,11,12); 5,6,8,13 documentados como no
+    generados (ver `synthetic.generar_movimiento_personal` y `tablas_equivalencia.CODIGOS_NO_GENERADOS`,
+    mas el 8 que tampoco se genera en este proyecto)."""
+    cot = tablas["cotizaciones"]
+    vals = {r[0] for r in cot.filter(F.col("cod_movimiento").isNotNull())
+            .select("cod_movimiento").distinct().collect()}
+    assert vals, "el generador debe producir codigos de movimiento"
+    assert vals <= {0, 1, 2, 3, 4, 7, 11, 12}
+    assert vals - {0} , "debe haber codigos distintos de 'sin movimiento'"
+
+
+def test_cod_movimiento_solo_previred(spark, tablas):
+    """SII (independientes) y AFILIADO (voluntarios) no declaran planilla Previred: sin codigo."""
+    cot = tablas["cotizaciones"]
+    assert cot.filter(F.col("entidad_pagadora").isin("SII", "AFILIADO")
+                      & F.col("cod_movimiento").isNotNull()).count() == 0
+    assert cot.filter(F.col("entidad_pagadora").isin("EMPLEADOR", "SUBSIDIO")
+                      & F.col("cod_movimiento").isNull()).count() == 0
+
+
+def test_cod_movimiento_coincide_con_evento_afc(spark, tablas):
+    """Un INICIO/TERMINO del panel de verdad para un vinculo con planilla se refleja (1/7 al
+    iniciar segun tipo de contrato, 2 al terminar) en la DECLARACION de ese (afiliado, periodo,
+    empleador), cuando esa declaracion existe. Dos motivos por los que puede no existir, ambos
+    ajenos al codigo de movimiento y anteriores a esta ronda:
+    (a) si coincide con una licencia de mes completo (`dias_licencia == 30`) la RIM de la linea
+        `EMPLEADOR` se redondea a 0 (`rim_emp1 * (30 - dias_licencia) / 30`) y `generar_cotizaciones`
+        la descarta (`filter(rim > 0)`) — se excluye filtrando `dias_licencia < 30`;
+    (b) el mismo (afiliado, periodo, empleador_id) puede coincidir por azar con la linea, sin
+        movimiento propio, del segundo empleador (multiempleo, codigo 0 siempre) — de ahi que se
+        use 'existe' (left_anti) y no 'todas'."""
+    cot = tablas["cotizaciones"]
+    verdad = tablas["verdad_mensual"]
+    decl = cot.filter((F.col("entidad_pagadora") == "EMPLEADOR") & (F.col("tipo_movimiento") == "DECLARACION"))
+    clave = ["afiliado_id", "periodo", "empleador_id"]
+
+    con_declaracion_real = (F.col("empleador_id").isNotNull() & (F.col("rim_emp1") > 0)
+                            & (F.col("dias_licencia") < 30))
+    terminos = (verdad.filter((F.col("evento_afc") == "TERMINO") & con_declaracion_real).select(*clave))
+    assert terminos.count() > 0
+    match2 = decl.filter(F.col("cod_movimiento") == 2).select(*clave)
+    assert terminos.join(match2, clave, "left_anti").count() == 0
+
+    inicios = (verdad.filter((F.col("evento_afc") == "INICIO") & con_declaracion_real)
+               .select(*clave, F.col("tipo_contrato").alias("_tipo_contrato")))
+    assert inicios.count() > 0
+    match1 = decl.filter(F.col("cod_movimiento") == 1).select(*clave)
+    match7 = decl.filter(F.col("cod_movimiento") == 7).select(*clave)
+    assert inicios.filter(F.col("_tipo_contrato") == "INDEFINIDO").join(match1, clave, "left_anti").count() == 0
+    assert inicios.filter(F.col("_tipo_contrato") == "PLAZO_FIJO").join(match7, clave, "left_anti").count() == 0
+
+
+def test_dias_trabajados_coherente_con_codigo(spark, tablas):
+    """dias_trabajados esta en [0,30] y se reduce exactamente en los codigos de movimiento (1,2,3,4,7,11);
+    en 0 (sin movimiento) queda en 30."""
+    cot = tablas["cotizaciones"].filter(F.col("cod_movimiento").isNotNull())
+    assert cot.filter((F.col("dias_trabajados") < 0) | (F.col("dias_trabajados") > 30)).count() == 0
+    assert cot.filter((F.col("cod_movimiento") == 0) & (F.col("dias_trabajados") != 30)).count() == 0
+    assert cot.filter(F.col("cod_movimiento").isin(1, 2, 3, 4, 7, 11) & (F.col("dias_trabajados") == 30)).count() == 0
+
+
+def test_fecha_desde_hasta_cubren_el_periodo(spark, tablas):
+    cot = tablas["cotizaciones"].filter(F.col("cod_movimiento").isNotNull()).limit(500).toPandas()
+    assert len(cot) > 0
+    anio = cot["periodo"] // 100
+    mes = cot["periodo"] % 100
+    esperado_desde = pd.to_datetime(pd.DataFrame({"year": anio, "month": mes, "day": 1})).dt.date
+    assert (cot["fecha_desde"] == esperado_desde).all()
+    assert (pd.to_datetime(cot["fecha_hasta"]).dt.month == mes.to_numpy()).all()
+    assert (cot["fecha_hasta"] >= cot["fecha_desde"]).all()
+
+
+def test_cod_movimiento_respeta_recepcion(spark, cfg, tablas):
+    """Agregar una declaracion EMPLEADOR con `periodo_recepcion` futuro (fuera de `hasta_recepcion`)
+    no debe cambiar ninguna feature derivada de `cod_movimiento` (misma regla as-of que
+    `snapshot.rim_conocida`)."""
+    from afp_lab.rim_nowcasting.features import _features_movimiento
+    from afp_lab.rim_nowcasting.snapshot import serie_conocida
+
+    corte = 202412
+    hasta = corte
+    cot = tablas["cotizaciones"]
+    serie = serie_conocida(tablas["afiliados"], cot, tablas["macro"], cfg.periodo_inicio, corte, hasta).cache()
+    base = _features_movimiento(serie, cot, corte, hasta).toPandas()
+
+    futuro = (cot.filter((F.col("entidad_pagadora") == "EMPLEADOR") & (F.col("periodo") == corte))
+              .limit(50)
+              .withColumn("cod_movimiento", F.lit(2))
+              .withColumn("tipo_movimiento", F.lit("DECLARACION"))
+              .withColumn("periodo_recepcion", F.lit(add_months(hasta, 1)))
+              .withColumn("movimiento_id", F.col("movimiento_id") + 20_000_000))
+    assert futuro.count() > 0, "hace falta al menos una declaracion EMPLEADOR en el mes de corte para la prueba"
+    alt = _features_movimiento(serie, cot.unionByName(futuro), corte, hasta).toPandas()
+
+    a = base.sort_values("afiliado_id").reset_index(drop=True)
+    b = alt.sort_values("afiliado_id").reset_index(drop=True)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_features_movimiento_rango_y_consistencia(spark, cfg, tablas):
+    f = construir_features(spark, cfg, tablas, 202504, materializar=False)
+    pdf = f.select("dias_trabajados_l1", "mov_termino_l1", "mov_termino_l2", "mov_subsidio_l1",
+                  "mov_subsidio_l2", "n_mov_termino_3", "n_mov_termino_6", "n_mov_termino_12",
+                  "n_mov_subsidio_3", "n_mov_subsidio_6", "n_mov_subsidio_12").toPandas()
+    assert pdf["dias_trabajados_l1"].between(0, 30).all()
+    for c in ("mov_termino_l1", "mov_termino_l2", "mov_subsidio_l1", "mov_subsidio_l2"):
+        assert set(pdf[c].unique()) <= {0.0, 1.0}
+    # las ventanas mas largas nunca cuentan menos que las cortas (son acumulativas)
+    assert (pdf["n_mov_termino_12"] >= pdf["n_mov_termino_6"]).all()
+    assert (pdf["n_mov_termino_6"] >= pdf["n_mov_termino_3"]).all()
+    assert (pdf["n_mov_subsidio_12"] >= pdf["n_mov_subsidio_6"]).all()
+    # el flag l1 no puede estar prendido sin que el conteo de 3 meses lo cuente
+    assert (pdf.loc[pdf["mov_termino_l1"] == 1, "n_mov_termino_3"] >= 1).all()
 
 
 def test_features_una_fila_por_afiliado_horizonte(spark, cfg, tablas):

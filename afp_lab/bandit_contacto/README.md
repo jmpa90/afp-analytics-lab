@@ -395,16 +395,16 @@ y/o con mas volumen antes de decidir.
 ## 9. Como correr y tiempos
 
 ```bash
-cd /home/user/wt/empleador
-PYTHONPATH=/home/user/wt/empleador python3 -m afp_lab.bandit_contacto.run \
+cd <raíz del repo>
+PYTHONPATH=. python3 -m afp_lab.bandit_contacto.run \
     --n-afiliados 10000 --seeds 42,7,123,2024,99 --salida salidas/bandit_contacto
 
 # barrido de sensibilidad a la senal contextual (§6.5), ~15 s adicionales:
-PYTHONPATH=/home/user/wt/empleador python3 -m afp_lab.bandit_contacto.run \
+PYTHONPATH=. python3 -m afp_lab.bandit_contacto.run \
     --n-afiliados 10000 --seeds 42,7,123,2024,99 \
     --barrido-fuerza-senal "0,1,2,4" --salida salidas/bandit_contacto
 
-PYTHONPATH=/home/user/wt/empleador python3 -m pytest afp_lab/bandit_contacto/tests -q
+PYTHONPATH=. python3 -m pytest afp_lab/bandit_contacto/tests -q
 ```
 
 Tiempos medidos en esta maquina (4 vCPU compartidas, `n_jobs=2` en LightGBM):

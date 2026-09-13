@@ -38,10 +38,29 @@ ultima recompensa, con margen).
 * **`preferencias_contacto`** (OBSERVABLE, no latente): afiliados que pidieron no ser contactados.
   `P_OPT_OUT = 0,03` (supuesto: 3% de la cartera). Persistente en el tiempo (simplificacion: en la
   realidad estas solicitudes llegan de a poco; aqui alcanza con un flag fijo por afiliado).
-* **`respuesta_latente_tipo`** (LATENTE, columna `lat_tipo_respuesta`): tipo de respuesta al
-  contacto, fijo por afiliado, mezcla `P_TIPO_RESPUESTA = (0,30 PERSUADIBLE; 0,45 INDIFERENTE;
-  0,25 SLEEPING_DOG)` -- coherente con la heterogeneidad del brief de uplift de la ronda 4
-  (generador propio, mismos tres arquetipos).
+* **`generar_tipo_respuesta(contexto, seed)`** (funcion LATENTE, columna `lat_tipo_respuesta`; NO es
+  una tabla pre-calculada dentro de `generar_tablas_bandit` porque necesita el contexto as-of, que
+  todavia no existe en ese punto -- se calcula en `model.preparar_entorno`): tipo de respuesta al
+  contacto -- PERSUADIBLE, INDIFERENTE o SLEEPING_DOG -- **por FILA (afiliado_id, periodo_corte)**,
+  como una funcion logit (softmax de 3 clases, INDIFERENTE de referencia) de variables as-of
+  **que varian por afiliado** mas dos componentes de ruido (uno persistente por afiliado --
+  "personalidad", fijo en el tiempo -- y uno transitorio por fila), calibrada para que la mezcla
+  global quede cerca de `P_TIPO_RESPUESTA = (0,30 PERSUADIBLE; 0,45 INDIFERENTE; 0,25 SLEEPING_DOG)`.
+  **Correccion de revision** (ver §8): la primera version de esta ronda sorteaba el tipo
+  independiente del contexto (solo ruido) -- el gerente la observo como incoherente con el brief
+  ("heterogénea por contexto") porque ningun bandit contextual puede aprender algo que no depende
+  del contexto por construccion. `TIPO_RESPUESTA_COEF` (`__init__.py`):
+
+  | tipo | sube con | baja con |
+  |---|---|---|
+  | PERSUADIBLE | uso digital (`logins_3m`), cambios de fondo recientes (`cambios_fondo_3m`), saldo (`log_saldo`) | edad |
+  | SLEEPING_DOG | reclamos recientes (`reclamos_6m`), edad | rentabilidad del FONDO PROPIO vs el sistema (`brecha_rentabilidad_pp`) |
+
+  Se descarto `brecha_comision_rel` como driver del tipo (aunque si es parte del riesgo base, ver
+  abajo): es una comision de MERCADO, identica para todos los clientes de la AFP en un mes dado, asi
+  que no aporta heterogeneidad ENTRE personas -- se reemplazo por `brecha_rentabilidad_pp`, que si
+  varia por afiliado (depende de en que FONDO A-E esta cada uno) y sirve de proxy de "ya
+  insatisfecho con el desempeno de mi propio fondo".
 * **`calcular_respuesta_latente`** (funcion LATENTE, no una tabla persistida en `salidas/`: se
   recalcula desde `synthetic.py` para mantener el generador determinista y liviano): probabilidad
   VERDADERA de traspaso a 6 meses por brazo, `lat_p_churn_<BRAZO>`. Riesgo base logistico:
@@ -133,101 +152,150 @@ exploracion/observacion de cada politica, no el universo.
 *Corrida de referencia: 10.000 afiliados, perfil `cuprum`, 24 meses (2024-07 a 2026-06), 5 semillas
 (42, 7, 123, 2024, 99), presupuesto 400 contactos/mes → 9.600 decisiones logueadas.*
 
+### 6.0 Ablacion: tipo aleatorio (version original) vs tipo dependiente del contexto (version corregida)
+
+La primera entrega de esta ronda sorteaba `lat_tipo_respuesta` independiente del contexto (solo
+ruido). El gerente la devolvio: eso contradice "heterogenea por contexto" del brief y hace que la
+comparacion contextual-vs-no-contextual no tenga sentido (nada es aprendible). Se corrigio
+`generar_tipo_respuesta` (§2.2) y se re-corrio la misma referencia (10.000 afiliados, 5 semillas). La
+version aleatoria queda documentada como **ablacion sin senal contextual**:
+
+| politica | reward neto -- ablacion (tipo aleatorio) | reward neto -- version corregida (tipo por contexto) | contactos a sleeping dogs -- ablacion | contactos a sleeping dogs -- corregida |
+|---|---|---|---|---|
+| THOMPSON_LINEAL | 2.153 mil M | 2.138 mil M | 1.860 | 2.230 |
+| EPSILON_GREEDY | 2.130 mil M | 2.130 mil M | 1.860 | 2.266 |
+| HEURISTICA_LOGGING | 2.126 mil M | 2.116 mil M | 2.388 | 2.927 |
+| THOMPSON_BOOTSTRAP_LGBM | 2.124 mil M | 2.109 mil M | 1.422 | 1.680 |
+| LINUCB | 2.063 mil M | 2.063 mil M | 137 | 230 |
+| SIN_CONTACTO | 2.035 mil M | 2.035 mil M | 0 | 0 |
+| TOPK_RIESGO_VISITA | 2.018 mil M | 2.012 mil M | 2.432 | 2.992 |
+
+Notar que **suben los contactos a sleeping dogs en la version corregida para TODAS las politicas,
+incluidas las que no discriminan** (heuristica, top-k): es real, no un error -- `reclamos_6m` ahora
+empuja a la vez el `score_riesgo` (que arma el pool "en riesgo") Y la probabilidad de SLEEPING_DOG,
+asi que el pool de mayor riesgo queda con MAS sleeping dogs que la poblacion general (31% del pool
+vs 24,8% poblacional, seed 42) -- una AFP que persigue "riesgo" sin mas termina, con este generador,
+sobre-representando justamente al segmento en el que el contacto puede ser contraproducente. Esa es
+la heterogeneidad que un bandit contextual **si puede**, en principio, aprender a explotar (a
+diferencia de la ablacion). Sigue abajo el detalle de la version corregida (la vigente).
+
 ### 6.1 Recompensa neta acumulada y regret a 24 meses (media ± IC95% entre 5 semillas)
 
 | politica | reward neto (CLP) | regret vs oraculo | costo total | tasa traspaso | contactos a sleeping dogs |
 |---|---|---|---|---|---|
-| **THOMPSON_LINEAL** | **2.153 ± 0.018 mil M** | 91,0 ± 4,2 M | 43,2 M | 30,1% | 1.860 |
-| EPSILON_GREEDY | 2.130 ± 0.015 mil M | 87,2 ± 9,0 M | 39,7 M | 30,5% | 1.860 |
-| HEURISTICA_LOGGING (politica actual) | 2.126 ± 0.018 mil M | 110,1 ± 0,7 M | 55,2 M | 30,1% | 2.388 |
-| THOMPSON_BOOTSTRAP_LGBM | 2.124 ± 0.016 mil M | 90,3 ± 4,7 M | 41,5 M | 30,6% | 1.422 |
-| LINUCB | 2.063 ± 0.029 mil M | 91,8 ± 1,0 M | 1,8 M | 33,7% | 137 |
-| SIN_CONTACTO | 2.035 ± 0.013 mil M | 88,7 ± 0 M | 0 | 33,6% | 0 |
-| TOPK_RIESGO_VISITA | 2.018 ± 0.013 mil M | 197,3 ± 0 M | 144,0 M | 30,4% | 2.432 |
+| **THOMPSON_LINEAL** | **2.138 ± 0.029 mil M** | 95,2 ± 11,0 M | 42,3 M | 30,3% | 2.230 |
+| EPSILON_GREEDY | 2.130 ± 0.026 mil M | 91,6 ± 15,4 M | 35,1 M | 30,8% | 2.266 |
+| HEURISTICA_LOGGING (politica actual) | 2.116 ± 0.022 mil M | 116,4 ± 0,3 M | 55,2 M | 30,6% | 2.927 |
+| THOMPSON_BOOTSTRAP_LGBM | 2.109 ± 0.030 mil M | 94,5 ± 4,9 M | 40,1 M | 31,0% | 1.680 |
+| LINUCB | 2.063 ± 0.029 mil M | 92,7 ± 1,4 M | 1,8 M | 33,7% | 230 |
+| SIN_CONTACTO | 2.035 ± 0.013 mil M | 89,2 ± 0 M | 0 | 33,6% | 0 |
+| TOPK_RIESGO_VISITA | 2.012 ± 0.013 mil M | 212,9 ± 0 M | 144,0 M | 31,2% | 2.992 |
 
 (tabla completa: `salidas/bandit_contacto/resumen_online.csv`; regret = esperanza bajo la
 probabilidad latente, no la recompensa sorteada, para que sea comparable entre semillas sin ruido
 extra de muestreo -- ver `model.simular_politica_online`)
 
 **Aceptacion del brief** ("Thompson o LinUCB superan a eps-greedy y a top-k-por-riesgo en reward
-neto a 24 meses en >= 4 de 5 semillas"): **se cumple con THOMPSON_LINEAL** (gana a eps-greedy en
-4/5 semillas y a top-k en 5/5). LINUCB **no** la cumple (gana a top-k en 5/5 pero nunca a
-eps-greedy: se vuelve demasiado conservador, ver §8). THOMPSON_BOOTSTRAP_LGBM tampoco (2/5 contra
-eps-greedy).
+neto a 24 meses en >= 4 de 5 semillas"): **NO se cumple con la version corregida** (a diferencia de
+la ablacion, donde si se cumplia). THOMPSON_LINEAL gana a top-k en 5/5 semillas pero solo a
+eps-greedy en **3/5**; LINUCB gana a top-k en 5/5 pero nunca a eps-greedy (0/5, sigue demasiado
+conservador, ver §8); THOMPSON_BOOTSTRAP_LGBM gana a eps-greedy en 1/5. Con senal contextual real
+pero debil (§6.2), 24 meses y recompensa rezagada 6 meses no alcanzan para que el aprendizaje
+contextual saque una ventaja consistente sobre el mejor brazo global (que aprende eps-greedy) en la
+mayoria de las semillas -- resultado honesto, no el buscado, y se reporta igual.
 
 ### 6.2 Composicion del contacto por tipo de respuesta latente (diagnostico, seed 42; nunca visto por las politicas)
 
-Poblacion base del pool: ~29,9% PERSUADIBLE, ~44,8% INDIFERENTE, ~25,3% SLEEPING_DOG.
+Poblacion base (todas las filas de contexto): ~29,9% PERSUADIBLE, ~45,2% INDIFERENTE, ~24,8%
+SLEEPING_DOG. Poblacion del POOL "en riesgo" (top-score, antes de elegir brazo): ~27,9%/41,0%/31,2%
+-- el pool ya sobre-representa sleeping dogs frente a la poblacion general (§6.0).
 
 | politica | % contactos a PERSUADIBLE | % a SLEEPING_DOG | contactos totales |
 |---|---|---|---|
-| TOPK_RIESGO_VISITA | 29,7% | 25,3% | 9.600 |
-| HEURISTICA_LOGGING | 29,6% | 25,4% | 9.417 |
-| EPSILON_GREEDY | 29,3% | 25,7% | 7.260 |
-| THOMPSON_LINEAL | 29,8% | 25,1% | 7.013 |
-| THOMPSON_BOOTSTRAP_LGBM | 29,6% | 24,7% | 6.050 |
-| LINUCB | 28,1% | 25,4% | 523 |
+| TOPK_RIESGO_VISITA | 27,9% | 31,2% | 9.600 |
+| HEURISTICA_LOGGING | 27,6% | 31,0% | 9.417 |
+| EPSILON_GREEDY | 27,4% | 31,6% | 7.260 |
+| THOMPSON_LINEAL | 27,3% | 31,3% | 7.219 |
+| **THOMPSON_BOOTSTRAP_LGBM** | **28,8%** | **30,1%** | 5.921 |
+| LINUCB | 24,1% | 42,8% | 523 |
 
-**Ninguna politica desvia su mezcla de contactos lejos de la proporcion poblacional**: el tipo
-latente es independiente del contexto por diseno (§8), asi que ningun algoritmo puede aprender a
-"identificar" sleeping dogs via features -- solo puede aprender el valor **promedio** por brazo (lo
-que si logran Thompson/eps-greedy) y **cuando** vale la pena contactar segun el valor en juego
-(RIM/comision), no **a quien especificamente**. Ver limitaciones (§8).
+**Thompson-LGBM es la unica que discrimina en la direccion correcta**: mas persuadibles (28,8% vs
+27,6-27,9% de heuristica/top-k) y menos sleeping dogs (30,1% vs 31,0-31,2%) que las politicas que no
+usan contexto para elegir brazo -- y, en contactos TOTALES, contacta 1.680 sleeping dogs contra
+2.927-2.992 de heuristica/top-k (43% menos), aunque una parte de esa caida es simplemente que
+contacta menos en total (5.921 vs 9.417-9.600). **LinUCB va en la direccion CONTRARIA** (42,8% de
+sus pocos contactos son sleeping dogs, mas que el pool completo): con solo 523 contactos en 24
+meses la composicion es ruidosa, no evidencia de que "identifique" bien a quien evitar. Eps-greedy y
+Thompson lineal (no usan las variables one-by-one para discriminar tipo, ver §8) quedan muy cerca de
+la composicion del pool.
 
 ### 6.3 Evaluacion off-policy: valor verdadero vs IPS/SNIPS/DR
 
 | politica | valor verdadero (CLP/decision) | IPS | SNIPS | DR | err. IPS | err. SNIPS | err. DR |
 |---|---|---|---|---|---|---|---|
-| EPSILON_GREEDY | 213.279 | 228.014 | 221.360 | 224.448 | 6,9% | 3,8% | 5,2% |
-| LINUCB | 223.938 | 231.792 | 237.098 | 244.240 | 3,5% | 5,9% | 9,1% |
-| THOMPSON_LINEAL | 223.644 | 220.563 | 228.046 | 229.581 | 1,4% | 2,0% | 2,7% |
-| THOMPSON_BOOTSTRAP_LGBM | 223.586 | 208.056 | 223.336 | 227.028 | 6,9% | 0,1% | 1,5% |
-| SIN_CONTACTO | 224.189 | 226.801 | 237.828 | 243.042 | 1,2% | 6,1% | 8,4% |
-| TOPK_RIESGO_VISITA | 212.768 | 228.353 | 220.894 | 224.121 | 7,3% | 3,8% | 5,3% |
-| HEURISTICA_LOGGING (sanity, pi_e=pi_0) | 221.413 | 220.493 | 220.493 | 220.446 | 0,4% | 0,4% | 0,4% |
+| EPSILON_GREEDY | 224.189 | 204.950 | 227.251 | 224.447 | 8,6% | 1,4% | **0,1%** |
+| LINUCB | 223.879 | 231.846 | 237.153 | 244.763 | 3,6% | 5,9% | 9,3% |
+| THOMPSON_LINEAL | 223.988 | 234.905 | 251.808 | 234.414 | 4,9% | 12,4% | 4,7% |
+| THOMPSON_BOOTSTRAP_LGBM | 224.988 | 230.333 | 232.157 | 237.447 | **2,4%** | 3,2% | 5,5% |
+| SIN_CONTACTO | 224.158 | 226.776 | 237.802 | 243.512 | 1,2% | 6,1% | 8,6% |
+| TOPK_RIESGO_VISITA | 211.306 | 225.458 | 218.093 | 221.583 | 6,7% | 3,2% | 4,9% |
+| HEURISTICA_LOGGING (sanity, pi_e=pi_0) | 220.799 | 218.726 | 218.726 | 218.667 | 0,9% | 0,9% | 1,0% |
 
 (`salidas/bandit_contacto/ope.csv`; sanity check: cuando se evalua la propia politica de logging
-IPS=SNIPS por construccion y el error es solo ruido de muestreo -- 0,4%, confirma que el pipeline de
+IPS=SNIPS por construccion y el error es solo ruido de muestreo -- 0,9%, confirma que el pipeline de
 importance sampling esta bien implementado)
 
-**Aceptacion del brief** ("DR < 15% del valor verdadero en las candidatas"): **se cumple** (2,7% a
-9,1% en las 4 candidatas). ("DR tiene el menor error"): **NO se observa aqui** -- IPS o SNIPS son
-mas precisos que DR en 3 de 4 candidatas. Con propensiones bien comportadas (pool acotado, sin pesos
-extremos) y un `Q_hat` (LightGBM chico sobre 9.600 filas) que aporta su propio sesgo de
-aproximacion, la reduccion de varianza de DR no alcanza a compensar ese sesgo en esta corrida:
-resultado honesto, no el esperado por el brief, y se reporta igual.
+**Aceptacion del brief** ("DR < 15% del valor verdadero en las candidatas"): **se cumple** (4,7% a
+9,3% en las 4 candidatas). ("DR tiene el menor error"): **parcial** -- es el mejor para
+EPSILON_GREEDY (0,1%, el mas preciso de los 21 pares politica x estimador) pero NO para LinUCB (el
+peor de sus tres) ni para Thompson-LGBM (el peor de sus tres); para Thompson lineal es mejor que
+SNIPS pero peor que IPS. Con propensiones bien comportadas (pool acotado, sin pesos extremos) y un
+`Q_hat` (LightGBM chico sobre 9.600 filas) que aporta su propio sesgo de aproximacion, la reduccion
+de varianza de DR no alcanza a compensar ese sesgo de forma consistente en esta corrida: resultado
+honesto, no el esperado por el brief, y se reporta igual.
 
 ### 6.4 Interpretabilidad
 
 * **Thompson lineal** (pesos de la media posterior, top 4 |peso| por brazo): en los 5 brazos domina
   `bias` y `rim_media_12`/`rim_l1` (positivo: mas RIM, mas comision en juego, mayor reward), seguido
-  de `densidad_12` (negativo: cotizante estable, menos que ganar reteniendolo) y
-  `brecha_comision_rel` (negativo en TODOS los brazos, incluido `SIN_CONTACTO`: mayor brecha de
-  comision predice menor reward independientemente del brazo, no es una senal que distinga QUE
-  brazo conviene, sino que tan probable es el traspaso en general).
-* **Thompson-LGBM** (gain del ultimo refit): `rim_l1` domina con ~20x el gain de la siguiente
-  variable; `brazo_idx` aporta gain moderado (4,1e12, por debajo de `logins_3m` o `edad`) -- de
-  nuevo, el modelo distingue mejor "cuanto hay en juego" que "que brazo conviene".
+  de `densidad_12` (negativo: cotizante estable, menos que ganar reteniendolo). Ninguna de las 4
+  variables mas pesadas por brazo es una que distinga TIPO (serian `logins_3m`, `reclamos_6m`,
+  `cambios_fondo_3m`, `brecha_rentabilidad_pp`): el modelo lineal esta usando el contexto sobre todo
+  para estimar "cuanto hay en juego", no "que tipo de persona es", lo que es coherente con que gane
+  a eps-greedy solo en 3/5 semillas (§6.1).
+* **Thompson-LGBM** (gain del ultimo refit, ya en la version corregida): `rim_l1` sigue dominando
+  (2,7e14) pero ahora **`brecha_rentabilidad_pp` (1,8e13) y `logins_3m` (1,5e13) entran entre las 8
+  variables de mayor gain** -- dos de los tres drivers nuevos del tipo latente -- consistente con que
+  sea la UNICA politica que discrimina en la direccion correcta en §6.2.
 * **Ejemplos individuales** (`salidas/bandit_contacto/ejemplos_individuales.csv`, 5 filas al azar de
-  la politica de logging): incluyen un caso VISITA a un SLEEPING_DOG con reward positivo (no
-  traspaso esta vez, ruido a favor) y un caso LLAMADA con traspaso realizado (reward = -2.000,
-  exactamente el costo del brazo, cero comision: confirma la formula de recompensa).
+  la politica de logging): incluyen un caso APV a un SLEEPING_DOG con reward positivo (no traspaso
+  esta vez, ruido a favor -- exactamente el tipo de contacto que, en promedio, empeora las cosas) y
+  un caso LLAMADA con traspaso realizado (reward = -2.000, exactamente el costo del brazo, cero
+  comision: confirma la formula de recompensa).
 
 ## 7. Lectura de negocio
 
-* La politica **actual** (heuristica top-riesgo + visita/llamada/email por tercil) ya genera
-  retencion neta positiva frente a no hacer nada (+90 M CLP sobre `SIN_CONTACTO` en 24 meses a esta
-  escala), pero **gasta 55 M CLP** en el proceso -- 26% mas que Thompson lineal, que logra **mas**
-  reward neto con **menos** gasto (43 M CLP) porque aprende a **evitar el brazo mas caro (VISITA)
-  cuando el RIM en juego es bajo**, no porque identifique sleeping dogs (§6.2).
-* **LinUCB "se apaga"**: converge a contactar casi a nadie (523 de 9.600 decisiones posibles). Es
-  una politica *segura* (evita perder plata en promedio) pero deja sobre la mesa la retencion que
-  si captura Thompson lineal -- una AFP que la usara sin mas exploracion forzada estaria
-  subinvirtiendo en retencion.
-* **Antes de desplegar cualquier candidata**: la variable que mas mueve el reward es el RIM/comision
-  en juego, no el tipo de respuesta -- la recomendacion practica es **usar el RIM como filtro de
-  "vale la pena" y una politica adaptativa (Thompson) para decidir el brazo**, no reemplazar
-  completamente la heuristica actual de un dia para otro.
+* La politica **actual** (heuristica top-riesgo + visita/llamada/email por tercil) sigue generando
+  retencion neta positiva frente a no hacer nada (+80 M CLP sobre `SIN_CONTACTO` en 24 meses a esta
+  escala), pero **gasta 55 M CLP** y es la que MAS sleeping dogs contacta en absoluto (2.927): al no
+  usar contexto para elegir brazo, hereda tal cual la composicion del pool "en riesgo", que ya viene
+  sesgada hacia el segmento donde el contacto puede ser contraproducente (§6.0/§6.2).
+* **Thompson-LGBM es, de las 4 candidatas, la unica que aprendio a leer la heterogeneidad**: contacta
+  proporcionalmente mas persuadibles y menos sleeping dogs que la heuristica o top-k (§6.2) -- pero
+  esa mejora en composicion **no le alcanza** para superar a eps-greedy en reward neto (solo en 1/5
+  semillas): con 24 meses, presupuesto acotado y recompensa rezagada 6 meses, la senal (débil por
+  diseno, con harto ruido) no da para que la ganancia de precision compense un aprendizaje mas lento
+  que el de un promedio simple por brazo.
+* **LinUCB sigue "apagandose"**: contacta a casi nadie (523 de 9.600 decisiones posibles) y, cuando
+  contacta, lo hace peor que al azar en composicion (42,8% sleeping dogs). Una AFP que la desplegara
+  sin forzar mas exploracion estaria subinvirtiendo en retencion Y sin garantia de estar evitando a
+  quien corresponde.
+* **Recomendacion practica**: no reemplazar la heuristica actual por un solo algoritmo todavia. El
+  candidato mas prometedor para una prueba piloto acotada es **Thompson-LGBM** (unico que muestra
+  discriminacion real, aunque su reward neto no le gane aun a la heuristica ni a eps-greedy) --
+  correrlo en paralelo (sin desplazar la politica vigente) por mas de 24 meses, con el pool completo
+  de afiliados en riesgo (no solo 400/mes) para acumular mas señal, y volver a auditar con OPE antes
+  de subir su participacion del presupuesto.
 
 ## 8. Decisiones tomadas, supuestos y limitaciones
 
@@ -256,23 +324,31 @@ resultado honesto, no el esperado por el brief, y se reporta igual.
 
 **Limitaciones**:
 
-* El **tipo de respuesta latente es independiente del contexto observable** (asignado al azar por
-  afiliado). Es una simplificacion fuerte: ningun algoritmo, por bueno que sea, puede aprender a
-  **discriminar** personas via contexto en este mundo -- solo puede aprender el efecto **promedio**
-  por brazo y usar el contexto para decidir **cuando** vale la pena (RIM en juego), no **a quien**.
-  Si se quiere una prueba mas exigente de bandits contextuales (que si puedan "targetear"
-  persuadibles), habria que correlacionar el tipo con alguna variable observable (p. ej., mayor
-  `brecha_comision_rel` -> mas probable persuadible) -- propuesta para una proxima ronda.
-* **DR no fue el estimador de menor error** en esta corrida, al reves de lo que anticipaba el brief;
-  se documenta como hallazgo, no se fuerza el resultado.
+* **La senal contextual del tipo de respuesta es real pero debil** (§6.0/§6.2/§6.4): los pesos de
+  `TIPO_RESPUESTA_COEF` se eligieron a mano, sin calibrar cuanta heterogeneidad "deberia" ser
+  aprendible en 24 meses -- solo se verifico que la asociacion es estadisticamente significativa
+  (test `test_tipo_respuesta_correlaciona_con_el_contexto`) y que las proporciones globales quedan
+  parecidas a las declaradas. Que solo Thompson-LGBM (no lineal, no LinUCB) la aproveche sugiere que
+  la relacion contexto -> tipo no es lineal en las variables usadas, o que el ruido (persistente +
+  transitorio) es demasiado grande relativo a las 6-9 observaciones por afiliado disponibles en la
+  ventana simulada.
+* **`brecha_comision_rel` se descarto como driver del TIPO** (§2.2) por ser una variable de mercado
+  identica para todos los clientes de la AFP en un mes dado (no aporta heterogeneidad entre
+  personas); se sigue usando para el riesgo BASE (`calcular_respuesta_latente`), donde si tiene
+  sentido (afecta a todos por igual en un momento dado, pero legitimamente mueve la propension
+  agregada de traspaso en el tiempo).
+* **DR no fue uniformemente el estimador de menor error** en esta corrida (solo lo es para
+  EPSILON_GREEDY), al reves de lo que anticipaba el brief; se documenta como hallazgo, no se fuerza
+  el resultado.
 * **`LGBM_PARAMS` y el calendario de refit (cada 6 meses) no se afinaron por validacion** (no hay un
   split valid/test para un bandit online): son valores razonables elegidos a mano por velocidad.
 * El **alpha de LinUCB (1,0) y la varianza de Thompson (v=1,0) tampoco se afinaron**: un experimento
   rapido variando alpha (0,1 a 2,0) no cambio el resultado cualitativo (LinUCB sigue siendo
   conservador), asi que no parece ser solo un problema de calibracion del hiperparametro sino del
   diseno (varianza del reward dominada por el RIM, ver interpretabilidad §6.4).
-* Se usaron **3 semillas de universo comparten un unico `seed_mundo`** (fijo en 42): el universo y
-  la respuesta latente NO varian entre las 5 semillas de la simulacion online (ver "decisiones").
+* **El universo (contexto + respuesta latente) comparte un unico `seed_mundo`** (fijo en 42): NO
+  varia entre las 5 semillas de la simulacion online, que solo aportan azar de exploracion/observacion
+  (ver "decisiones de diseno").
 * El dataset logueado para OPE proviene de la **primera semilla** (42) unicamente: no se promedia
   sobre semillas (asi funcionaria en produccion: se audita un lote ya guardado, no un promedio de
   corridas paralelas).
@@ -291,12 +367,12 @@ Tiempos medidos en esta maquina (4 vCPU compartidas, `n_jobs=2` en LightGBM):
 
 | Etapa | Tiempo |
 |---|---|
-| Tablas sinteticas (10.000 afiliados, 60 meses) | ~2,4 s |
-| Contexto as-of + respuesta latente (161.028 filas) | ~1,9 s |
-| Simulacion online (5 semillas x 7 politicas x 24 meses) | ~2,5 s |
-| Evaluacion off-policy (IPS/SNIPS/DR + interpretabilidad) | ~0,2 s |
-| **Total `run.py`** | **~7-8 s** (limite: 4 min) |
-| Tests (`pytest`, 16 casos) | ~2,1 s (limite: 60 s) |
+| Tablas sinteticas (10.000 afiliados, 60 meses) | ~2,5 s |
+| Contexto as-of + respuesta latente (161.028 filas) | ~2,1 s |
+| Simulacion online (5 semillas x 7 politicas x 24 meses) | ~3,1 s |
+| Evaluacion off-policy (IPS/SNIPS/DR + interpretabilidad) | ~0,3 s |
+| **Total `run.py`** | **~8-9 s** (limite: 4 min) |
+| Tests (`pytest`, 18 casos) | ~2,5 s (limite: 60 s) |
 
 Muy por debajo de los limites de la ronda: **se corrio con las 5 semillas pedidas**, sin necesidad
 de bajar a 3.
@@ -330,9 +406,11 @@ de bajar a 3.
   propensiones) parametrizado por `(logueado, propension_objetivo, recompensa)`: hoy vive en
   `evaluate.py` de este proyecto pero el patron es identico al que necesitaria cualquier bandit del
   laboratorio (p. ej. ofertas de fondos, campanas de digitalizacion).
-* Proximos pasos: (a) correlacionar el tipo de respuesta latente con variables observables para una
-  prueba mas exigente de targeting contextual (§8); (b) probar LinUCB/Thompson con un piso de
-  exploracion explicito ademas de su mecanismo propio; (c) sumar el segmento de 06
-  (`segmentacion_afiliados`) al contexto si aporta separacion mas alla de lo que ya capturan las
-  features de 02 (no se hizo en esta ronda por tiempo, brief lo marcaba como opcional -- "si
-  aporta").
+* Proximos pasos: (a) que solo Thompson-LGBM (no lineal) explote la heterogeneidad del tipo (§6.2,
+  §6.4) sugiere revisar si la relacion contexto->tipo necesita interacciones/no-linealidades mas
+  fuertes, o si simplemente hacen falta mas de 24 meses / mas presupuesto mensual para que el
+  aprendizaje contextual lineal alcance a distinguirse del promedio global (eps-greedy); (b) probar
+  LinUCB/Thompson con un piso de exploracion explicito ademas de su mecanismo propio, para que dejen
+  de "apagarse"; (c) sumar el segmento de 06 (`segmentacion_afiliados`) al contexto si aporta
+  separacion mas alla de lo que ya capturan las features de 02 (no se hizo en esta ronda por tiempo,
+  brief lo marcaba como opcional -- "si aporta").

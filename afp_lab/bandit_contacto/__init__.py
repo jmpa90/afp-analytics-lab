@@ -57,7 +57,30 @@ P_OPT_OUT = 0.03           # SUPUESTO: fraccion de afiliados que pidio no ser co
 
 # --------------------------------------------------------------------- respuesta latente
 TIPOS_RESPUESTA = ("PERSUADIBLE", "INDIFERENTE", "SLEEPING_DOG")
-P_TIPO_RESPUESTA = (0.30, 0.45, 0.25)  # SUPUESTO: mezcla de heterogeneidad al contacto (coherente con 07)
+P_TIPO_RESPUESTA = (0.30, 0.45, 0.25)  # SUPUESTO: proporciones GLOBALES aproximadas (ver synthetic.py)
+
+# El tipo de respuesta ya NO es un sorteo independiente del contexto: es una funcion logit (softmax
+# de 3 clases, INDIFERENTE de referencia) de variables as-of observables + ruido (persistente por
+# afiliado -- "personalidad" -- y transitorio por fila). Pesos SUPUESTOS del generador (coherentes
+# con la logica de 07), aplicados sobre cada variable ESTANDARIZADA (z-score) dentro del lote de
+# contexto -- SOLO variables que varian POR AFILIADO (se descarto `brecha_comision_rel`: es una
+# comision de mercado, identica para todos los clientes de la AFP en un mes dado, asi que no aporta
+# heterogeneidad ENTRE personas, solo en el tiempo; ver README "Decisiones tomadas"): uso digital y
+# cambios de fondo recientes (afiliado activo/comprometido con sus propias decisiones financieras) y
+# mayor saldo (mas en juego, mas dispuesto a evaluar una oferta) suben la probabilidad de
+# PERSUADIBLE; mayor edad la baja (mas apegado a la rutina). Reclamos recientes y que el FONDO
+# PROPIO del afiliado rinda peor que el promedio del sistema (`brecha_rentabilidad_pp` baja o
+# negativa: proxy de insatisfaccion ya instalada, a diferencia de la comision esa si varia por
+# persona via su eleccion de fondo) y mayor edad (menos tolerancia a que lo interrumpan) suben la
+# probabilidad de SLEEPING_DOG.
+TIPO_RESPUESTA_COEF = {
+    "PERSUADIBLE": {"logins_3m": 0.35, "cambios_fondo_3m": 0.30, "log_saldo": 0.25, "edad": -0.30},
+    "SLEEPING_DOG": {"reclamos_6m": 0.45, "brecha_rentabilidad_pp": -0.30, "edad": 0.15},
+}
+TIPO_RESPUESTA_INTERCEPTO = {"PERSUADIBLE": -0.55, "SLEEPING_DOG": -0.75}  # calibrados para que las
+# proporciones globales queden cerca de `P_TIPO_RESPUESTA` una vez sumado el ruido (ver synthetic.py)
+TIPO_RESPUESTA_RUIDO_AFILIADO_SD = 0.6  # rasgo persistente por afiliado ("personalidad", fijo en el tiempo)
+TIPO_RESPUESTA_RUIDO_FILA_SD = 0.4      # ruido transitorio (mes a mes, no explicable por contexto)
 
 # delta en log-odds de traspaso a 6 meses que produce CADA brazo pagado, segun el tipo latente del
 # afiliado (SUPUESTOS del generador, ver README p.2): negativo = el contacto retiene, positivo = el

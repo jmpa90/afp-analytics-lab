@@ -31,7 +31,7 @@ from afp_lab.rim_nowcasting.calendario import periodo_to_idx
 from . import (BRAZOS, COSTOS_BRAZOS_CLP, EPSILON_LOGGING, HORIZONTE_MESES, IDX_BRAZO,
               MESES_ENTRE_CONTACTOS, N_BRAZOS, PRESUPUESTO_MENSUAL_CONTACTOS, TASA_COMISION_ANUAL)
 from .features import CONTEXTO_NUMERICO, ajustar_escalador, construir_contexto, transformar_contexto
-from .synthetic import calcular_respuesta_latente
+from .synthetic import calcular_respuesta_latente, generar_tipo_respuesta
 
 COSTO_VEC = np.array([COSTOS_BRAZOS_CLP[b] for b in BRAZOS], dtype=np.float64)
 
@@ -58,7 +58,7 @@ def preparar_entorno(tablas: dict[str, pd.DataFrame], cortes_sim: list[int],
     X = transformar_contexto(contexto, mu, sigma)
     raw = contexto[CONTEXTO_NUMERICO].fillna(0.0).to_numpy(dtype=np.float64)
 
-    tipo_tabla = tablas["respuesta_latente_tipo"]
+    tipo_tabla = generar_tipo_respuesta(contexto, seed_mundo)
     lat = calcular_respuesta_latente(contexto, tipo_tabla, seed_mundo)
     lat_p = lat[[f"lat_p_churn_{b}" for b in BRAZOS]].to_numpy(dtype=np.float64)
     tipo_resp = lat["lat_tipo_respuesta"].to_numpy()

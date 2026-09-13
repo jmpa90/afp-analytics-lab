@@ -21,7 +21,8 @@ from afp_lab.bandit_contacto import (BRAZOS, DELTA_LOGODDS, EPSILON_LOGGING, IDX
 from afp_lab.bandit_contacto import evaluate as E
 from afp_lab.bandit_contacto import features as F
 from afp_lab.bandit_contacto import model as M
-from afp_lab.bandit_contacto.synthetic import calcular_respuesta_latente, generar_tablas_bandit
+from afp_lab.bandit_contacto.synthetic import (calcular_respuesta_latente, generar_tablas_bandit,
+                                               generar_tipo_respuesta)
 
 N_TEST = 600
 SEED = 42
@@ -46,12 +47,11 @@ def entorno(tablas, cortes_test) -> dict:
 
 # --------------------------------------------------------------------- tablas propias
 def test_generar_tablas_bandit_agrega_tablas_propias(tablas):
-    assert "preferencias_contacto" in tablas and "respuesta_latente_tipo" in tablas
+    assert "preferencias_contacto" in tablas
     assert set(tablas["preferencias_contacto"]["afiliado_id"]) <= set(tablas["afiliados"]["afiliado_id"])
-    tipos = set(tablas["respuesta_latente_tipo"]["lat_tipo_respuesta"])
-    assert tipos <= set(TIPOS_RESPUESTA)
-    # una fila por afiliado, sin duplicados
-    assert tablas["respuesta_latente_tipo"]["afiliado_id"].is_unique
+    # el tipo de respuesta latente ya NO se genera aqui (depende del contexto as-of, que todavia no
+    # existe en este punto): se calcula en `model.preparar_entorno` / bajo demanda con `generar_tipo_respuesta`.
+    assert "respuesta_latente_tipo" not in tablas
 
 
 def test_opt_out_es_minoritario_y_estable(tablas):
@@ -62,7 +62,7 @@ def test_opt_out_es_minoritario_y_estable(tablas):
 # --------------------------------------------------------------------- sin leakage
 def test_contexto_sin_leakage(tablas, cortes_test):
     """Alterar datos POSTERIORES al corte no cambia el contexto construido para ese corte (aplica
-    CONVENCIONES §3 con la tabla `preferencias_contacto` y `respuesta_latente_tipo` sumadas)."""
+    CONVENCIONES §3 sobre `construir_contexto`, que delega en `churn_traspaso.features`)."""
     corte = cortes_test[len(cortes_test) // 2]
     ctx_a = F.construir_contexto(tablas, [corte])
 
@@ -93,7 +93,7 @@ def test_ninguna_columna_latente_en_el_contexto(tablas, cortes_test):
 # --------------------------------------------------------------------- respuesta latente
 def test_respuesta_latente_en_rango_y_coherente(tablas, cortes_test):
     ctx = F.construir_contexto(tablas, cortes_test[-2:])
-    tipo_tabla = tablas["respuesta_latente_tipo"]
+    tipo_tabla = generar_tipo_respuesta(ctx, SEED)
     lat = calcular_respuesta_latente(ctx, tipo_tabla, SEED)
     cols_p = [f"lat_p_churn_{b}" for b in BRAZOS]
     for c in cols_p:
@@ -108,6 +108,53 @@ def test_respuesta_latente_en_rango_y_coherente(tablas, cortes_test):
     assert sd["lat_p_churn_LLAMADA"].mean() > sd["lat_p_churn_SIN_CONTACTO"].mean()
     # techo de predictibilidad razonable (CONVENCIONES §2): ninguna prob. degenerada en {0,1}
     assert lat[cols_p].to_numpy().std() > 0.01
+
+
+def test_tipo_respuesta_correlaciona_con_el_contexto(tablas, cortes_test):
+    """Correccion pedida por el gerente: el tipo latente ya NO es un sorteo independiente del
+    contexto. Verifica, con varios cortes (mas filas, mejor potencia estadistica), que: (a) el tipo
+    esta asociado a las variables que lo generan (ANOVA de una via sobre cada driver, p < 0,01) y (b)
+    el signo del efecto es el esperado (SLEEPING_DOG tiene mas reclamos/brecha de comision que
+    PERSUADIBLE; PERSUADIBLE tiene mas uso digital que SLEEPING_DOG)."""
+    from scipy import stats
+    ctx = F.construir_contexto(tablas, cortes_test)
+    tipo_tabla = generar_tipo_respuesta(ctx, SEED)
+    df = ctx.merge(tipo_tabla, on=["afiliado_id", "periodo_corte"])
+    assert set(df["lat_tipo_respuesta"].unique()) <= set(TIPOS_RESPUESTA)
+
+    grupos = {t: df[df["lat_tipo_respuesta"] == t] for t in TIPOS_RESPUESTA}
+    for driver in ("reclamos_6m", "brecha_rentabilidad_pp", "logins_3m", "cambios_fondo_3m", "edad"):
+        muestras = [g[driver].fillna(0.0).to_numpy() for g in grupos.values()]
+        _, p = stats.f_oneway(*muestras)
+        assert p < 0.01, f"{driver} no esta asociado al tipo de respuesta (p={p:.3g})"
+
+    pers, sd = grupos["PERSUADIBLE"], grupos["SLEEPING_DOG"]
+    assert sd["reclamos_6m"].mean() > pers["reclamos_6m"].mean()
+    # brecha_rentabilidad_pp BAJA (fondo propio rinde peor que el sistema) -> mas sleeping dog
+    assert sd["brecha_rentabilidad_pp"].fillna(0).mean() < pers["brecha_rentabilidad_pp"].fillna(0).mean()
+    assert pers["logins_3m"].mean() > sd["logins_3m"].mean()
+
+    # proporciones globales parecidas a las declaradas (P_TIPO_RESPUESTA), no exactas
+    frac = df["lat_tipo_respuesta"].value_counts(normalize=True)
+    for t, p_obj in zip(TIPOS_RESPUESTA, (0.30, 0.45, 0.25)):
+        assert abs(frac.get(t, 0.0) - p_obj) < 0.15
+
+
+def test_tipo_respuesta_tiene_componente_persistente_por_afiliado(tablas, cortes_test):
+    """El ruido persistente por afiliado hace que el tipo de UN MISMO afiliado sea mas estable en
+    el tiempo que el de afiliados distintos (no es un sorteo nuevo e independiente cada mes)."""
+    ctx = F.construir_contexto(tablas, cortes_test)
+    tipo_tabla = generar_tipo_respuesta(ctx, SEED)
+    piv = tipo_tabla.pivot_table(index="afiliado_id", columns="periodo_corte",
+                                 values="lat_tipo_respuesta", aggfunc="first")
+    piv = piv.dropna(how="any")
+    cortes_ord = sorted(piv.columns)
+    c1, c2 = cortes_ord[0], cortes_ord[-1]
+    estabilidad_real = (piv[c1] == piv[c2]).mean()
+    rng = np.random.default_rng(1)
+    barajado = rng.permutation(piv[c2].to_numpy())
+    estabilidad_azar = (piv[c1].to_numpy() == barajado).mean()
+    assert estabilidad_real > estabilidad_azar
 
 
 # --------------------------------------------------------------------- restricciones de negocio

@@ -193,11 +193,12 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
   <h3>Cómo se construyó</h3>
   <p class="medida">Todos los proyectos parten del mismo universo sintético (afiliados, empleadores, panel
   laboral mensual y macroeconomía) calibrado contra la Ficha 165 de la Superintendencia de Pensiones, para
-  que un afiliado sea "la misma persona" en todos los modelos. Cada entrega pasa por una revisión
-  adversarial de otro data scientist antes de aprobarse: se buscan fugas de información desde el futuro
-  (leakage), reglas de negocio degeneradas y afirmaciones que no reproducen. El resultado se reporta aunque
-  la técnica pierda contra lo simple &mdash; es el criterio que se siguió con las tres técnicas más nuevas del
-  portafolio (causalidad, red secuencial y bandits).</p>
+  que un afiliado sea "la misma persona" en todos los modelos. Cada proyecto nuevo pasa por una revisión
+  adversarial independiente antes de aprobarse: se buscan fugas de información desde el futuro (leakage),
+  reglas de negocio degeneradas y afirmaciones que no reproducen. El detalle de qué se revisó y con qué
+  veredicto está en <code>docs/revisiones/</code> (por proyecto, en el anexo técnico). El resultado se
+  reporta aunque la técnica pierda contra lo simple &mdash; es el criterio que se siguió con las tres
+  técnicas más nuevas del portafolio (causalidad, red secuencial y bandits).</p>
   <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
     <div class="kpi-card"><div class="kpi-num">155</div><div class="kpi-label">tests automatizados en la suite del laboratorio</div><div class="kpi-sub">0 fallos · 9 min 46 s</div></div>
     <div class="kpi-card"><div class="kpi-num">47,3 %</div><div class="kpi-label">densidad de cotización del sistema (Ficha 165)</div><div class="kpi-sub">el universo sintético se recalibró contra esta cifra en la ronda 3</div></div>
@@ -222,6 +223,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">02</span>
     <h3>Traspaso a otra AFP</h3>
     <span class="badge">churn_traspaso</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Qué afiliados se traspasarán a otra AFP en los próximos seis meses, y a quién debería llamar o visitar el ejecutivo de retención con la capacidad de contacto que existe hoy?</dd>
@@ -255,6 +257,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">03</span>
     <h3>Ahorro previsional voluntario</h3>
     <span class="badge">propension_apv</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿A quién llama el ejecutivo este mes para abrir o reactivar un APV, y cuánto ahorro voluntario se puede proyectar para el semestre?</dd>
@@ -288,6 +291,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">04</span>
     <h3>Cese y reingreso de cotización</h3>
     <span class="badge">riesgo_cese_cotizacion</span>
+    <span class="chip chip-info">Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso; resultado en docs/revisiones/ronda_4/</span>
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Quién dejará de cotizar en tres y seis meses, y quién de los que no cotizan hoy va a volver a hacerlo?</dd>
@@ -307,12 +311,12 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
         <tbody><tr class="sev-critical"><td><span class="stripe stripe-critical" aria-hidden="true"></span>Reingreso poco predecible</td><td>AUC actual bajo el umbral del brief</td><td class="num">0,608 &lt; 0,70</td><td><span class="chip chip-critico"><span class="chip-dot" aria-hidden="true"></span>crítico</span></td></tr><tr class="sev-warn"><td><span class="stripe stripe-warn" aria-hidden="true"></span>Cesantía en curso, sin señales de reingreso</td><td>término AFC reciente, cobertura de cesantía activa</td><td class="num">prioridad de asesoría</td><td><span class="chip chip-warn"><span class="chip-dot" aria-hidden="true"></span>atención</span></td></tr><tr class="sev-ok"><td><span class="stripe stripe-ok" aria-hidden="true"></span>Cese a 3 y 6 meses</td><td>sigue por sobre el umbral del brief tras la recalibración</td><td class="num">0,887 / 0,878</td><td><span class="chip chip-ok"><span class="chip-dot" aria-hidden="true"></span>ok</span></td></tr></tbody>
       </table>
     </div>
-    <div class="md-chart"><figure><svg viewBox="0 0 560 230" width="100%" height="auto" role="img" aria-label="AUC del modelo de cese y reingreso, tras la corrección de la ronda 3" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="190.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,000</text><line x1="58" y1="149.5" x2="546" y2="149.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="153.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,284</text><line x1="58" y1="113.0" x2="546" y2="113.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="117.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,568</text><line x1="58" y1="76.5" x2="546" y2="76.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="80.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,852</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1,135</text><rect x="79.1" y="71.9" width="98.7" height="114.1" fill="var(--accent)" rx="2"/><text x="128.5" y="65.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,887</text><text x="139.3" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 3 m</text><rect x="241.8" y="73.1" width="98.7" height="112.9" fill="var(--accent)" rx="2"/><text x="291.2" y="67.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,878</text><text x="302.0" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 6 m</text><rect x="404.5" y="107.8" width="98.7" height="78.2" fill="var(--accent)" rx="2"/><text x="453.8" y="101.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,608</text><text x="464.7" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Reingreso</text><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">AUC modelo</text></svg><figcaption>AUC del modelo por objetivo, tras la corrección de la ronda 3 (perfil sistema, semilla 42).</figcaption></figure></div>
+    <div class="md-chart"><figure><svg viewBox="0 0 560 230" width="100%" height="auto" role="img" aria-label="AUC del modelo de cese y reingreso, con la corrección posterior a la ronda 3 hecha en la ronda 4" xmlns="http://www.w3.org/2000/svg"><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="190.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,000</text><line x1="58" y1="149.5" x2="546" y2="149.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="153.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,284</text><line x1="58" y1="113.0" x2="546" y2="113.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="117.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,568</text><line x1="58" y1="76.5" x2="546" y2="76.5" stroke="var(--border)" stroke-width="1"/><text x="50" y="80.5" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">0,852</text><line x1="58" y1="40.0" x2="546" y2="40.0" stroke="var(--border)" stroke-width="1"/><text x="50" y="44.0" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--font-mono)">1,135</text><rect x="79.1" y="71.9" width="98.7" height="114.1" fill="var(--accent)" rx="2"/><text x="128.5" y="65.9" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,887</text><text x="139.3" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 3 m</text><rect x="241.8" y="73.1" width="98.7" height="112.9" fill="var(--accent)" rx="2"/><text x="291.2" y="67.1" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,878</text><text x="302.0" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Cese 6 m</text><rect x="404.5" y="107.8" width="98.7" height="78.2" fill="var(--accent)" rx="2"/><text x="453.8" y="101.8" text-anchor="middle" font-size="10.3" fill="var(--ink)" font-family="var(--font-mono)">0,608</text><text x="464.7" y="206.0" text-anchor="middle" font-size="12" fill="var(--ink)">Reingreso</text><line x1="58" y1="186.0" x2="546" y2="186.0" stroke="var(--ink)" stroke-width="1.2"/><rect x="58.0" y="9.0" width="11" height="11" fill="var(--accent)" rx="2"/><text x="74.0" y="18.0" font-size="11.5" fill="var(--ink)">AUC modelo</text></svg><figcaption>AUC del modelo por objetivo, con la corrección posterior a la ronda 3 (ronda 4; perfil sistema, semilla 42).</figcaption></figure></div>
   </div>
 </div>
   <h4>Camino a producción</h4>
   <div class="medida">Se necesita el feed real de eventos del Seguro de Cesantía (AFC) y de la planilla previsional con su desfase real de recepción. El modelo de cese está listo para un piloto de alertas de asesoría; el de reingreso necesita, primero, que el generador sintético distinga cesantía reciente de cesantía crónica antes de volver a intentarlo, y luego repetir la validación con datos reales.</div>
-  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El AUC de reingreso cayó de 0,720 a 0,608 (sistema) cuando se recalibró la densidad de cotización del generador contra la Ficha 165 en la ronda 3, y quedó bajo el umbral de aceptación de 0,70. Se diagnosticó y se corrigió lo que se podía corregir en features (mejora de +0,003 a +0,008 AUC, y en un caso -0,005), pero, en palabras del propio informe, 'la dinámica actual del generador dejó el reingreso casi impredecible a nivel individual'. No es un problema de este modelo: es un límite del sandbox que hay que resolver en el generador antes de la próxima ronda.</p></div>
+  <div class="reserva"><span class="reserva-tag">Reserva principal</span><p>El AUC de reingreso cayó de 0,720 a 0,605 (sistema) cuando se recalibró la densidad de cotización del generador contra la Ficha 165 en la ronda 3. Una corrección posterior a la ronda 3, hecha en la ronda 4 (features del último empleo antes del cese), lo subió a 0,608 (+0,003 en la fila de referencia; rango +0,003 a +0,008, y un caso de -0,005), sin recuperar el umbral de 0,70. En palabras del propio informe, 'la dinámica actual del generador dejó el reingreso casi impredecible a nivel individual'. No es un problema de este modelo: es un límite del sandbox que hay que resolver en el generador antes de la próxima ronda. Nota adicional: la captura al 10 % de 63,1 % / 63,5 % y el baseline de regla de negocio (0,798) se midieron ANTES de esta recalibración de densidad y no se volvieron a medir después; se muestran igual, con esta salvedad explícita, porque el mecanismo de captura no cambió, solo la población.</p></div>
   <p class="fuente-cita">Fuente: afp_lab/riesgo_cese_cotizacion/README.md §§1, 6, 7, 12</p>
 </article>
 
@@ -321,6 +325,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">05</span>
     <h3>Riesgo de empleador (cobranza)</h3>
     <span class="badge">riesgo_empleador</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Qué empleadores van a declarar y no pagar, o van a pagar tarde este mes, y cuánta masa imponible de nuestros afiliados queda en riesgo?</dd>
@@ -354,11 +359,12 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">01</span>
     <h3>Renta imponible en tiempo real (nowcasting)</h3>
     <span class="badge">rim_nowcasting</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>La cotización de un afiliado llega a la AFP con dos meses de desfase. ¿Cuál es su renta imponible en esos dos meses que todavía no se conocen?</dd>
     <dt>Qué hace</dt><dd>Proyecta la renta imponible de los dos meses abiertos con un modelo en dos etapas (¿cotiza o no?, y si cotiza, cuánto), y la reemplaza automáticamente por el dato real en cuanto el empleador declara.</dd>
-    <dt>Resultado en el sandbox</dt><dd>A un mes de desfase, el modelo llega a WAPE 0,115 en los afiliados dependientes (contra 0,215 de simplemente repetir el último dato conocido), igual en la cartera sistema que en la Cuprum. A dos meses el error sube a 0,182 en el sistema y 0,221 en Cuprum: pesa más la remuneración variable de finanzas y minería, que se conoce con más rezago. El clasificador de "cotiza o no" llega a AUC 0,969.</dd>
+    <dt>Resultado en el sandbox</dt><dd>A un mes de desfase, el modelo llega a WAPE 0,115 en los afiliados dependientes (contra 0,215 de simplemente repetir el último dato conocido), igual en la cartera sistema que en la Cuprum. A dos meses el error sube a 0,182 en el sistema y 0,221 en Cuprum: pesa más la remuneración variable de finanzas y minería, que se conoce con más rezago. El clasificador de "cotiza o no" llega a AUC 0,969 a un mes y 0,918 a dos meses.</dd>
     <dt>Cómo lo usaría el área</dt><dd>Alimenta cualquier reporte que necesite un número de recaudación o de saldo 'hoy', sin esperar dos meses: proyección de recaudación, saldo estimado de la cuenta obligatoria, e insumo de historia laboral para los demás modelos del laboratorio.</dd>
   </dl>
   
@@ -366,7 +372,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
   <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
     <span class="mockup-title">Recaudación proyectada · rim_nowcasting</span></div>
   <div class="mockup-body">
-    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">0,115</div><div class="md-kpi-label">WAPE a un mes (dependientes)</div></div><div class="md-kpi"><div class="md-kpi-num">0,221</div><div class="md-kpi-label">WAPE a dos meses (Cuprum)</div></div><div class="md-kpi"><div class="md-kpi-num">0,969</div><div class="md-kpi-label">AUC cotiza/no cotiza</div></div></div>
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">0,115</div><div class="md-kpi-label">WAPE a un mes (dependientes)</div></div><div class="md-kpi"><div class="md-kpi-num">0,221</div><div class="md-kpi-label">WAPE a dos meses (Cuprum)</div></div><div class="md-kpi"><div class="md-kpi-num">0,969</div><div class="md-kpi-label">AUC cotiza/no cotiza, a un mes</div></div></div>
     <div class="md-table-wrap">
       <table class="md-table">
         <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
@@ -387,6 +393,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">06</span>
     <h3>Segmentación de afiliados</h3>
     <span class="badge">segmentacion_afiliados</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Qué segmentos de comportamiento existen en la cartera de Cuprum, y qué acción corresponde a cada uno?</dd>
@@ -420,6 +427,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">07</span>
     <h3>A quién conviene contactar (causalidad)</h3>
     <span class="badge">uplift_retencion</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>Rankear por riesgo de traspaso mezcla a quien se queda igual, a quien se va igual, al persuadible (el contacto lo retiene) y al sleeping dog (el contacto lo hace irse). ¿A cuál de los cuatro tipos hay que llamar?</dd>
@@ -432,7 +440,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
   <div class="mockup-bar"><span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
     <span class="mockup-title">A quién conviene contactar · uplift_retencion</span></div>
   <div class="mockup-body">
-    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">4,54×</div><div class="md-kpi-label">veces más traspasos evitados que ordenar por riesgo</div></div><div class="md-kpi"><div class="md-kpi-num">14,6</div><div class="md-kpi-label">traspasos evitados al 10 %</div></div><div class="md-kpi"><div class="md-kpi-num">0,195</div><div class="md-kpi-label">correlación con el efecto causal real</div></div></div>
+    <div class="md-kpis"><div class="md-kpi"><div class="md-kpi-num">4,54×</div><div class="md-kpi-label">veces más traspasos evitados que ordenar por riesgo</div></div><div class="md-kpi"><div class="md-kpi-num">14,6</div><div class="md-kpi-label">traspasos evitados al 10 %</div></div><div class="md-kpi"><div class="md-kpi-num">0,195</div><div class="md-kpi-label">correlación con el efecto causal real (DR-learner)</div></div></div>
     <div class="md-table-wrap">
       <table class="md-table">
         <thead><tr><th>Alerta</th><th>Detalle</th><th>Valor</th><th>Estado</th></tr></thead>
@@ -453,6 +461,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">08</span>
     <h3>Representación secuencial del afiliado</h3>
     <span class="badge">secuencial_afiliado</span>
+    <span class="chip chip-info">Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/</span>
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Una red neuronal que lee la historia mensual completa del afiliado, en vez de un conjunto de features tabulares, predice mejor el traspaso y el cese que los modelos de producción de 02 y 04?</dd>
@@ -486,6 +495,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">09</span>
     <h3>Bandit contextual de contacto</h3>
     <span class="badge">bandit_contacto</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>Cada mes hay que elegir, para cada afiliado en riesgo, entre no contactar, email, llamada, visita o una oferta de ahorro. ¿Se puede aprender esa decisión sobre la marcha, y auditarla antes de arriesgar presupuesto real?</dd>
@@ -519,6 +529,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">—</span>
     <h3>Planilla regulatoria (modelo de datos)</h3>
     <span class="badge">common/planilla</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>Para que un modelo sirva en producción tiene que entrenar con la misma estructura de datos que va a ver ahí: los códigos oficiales de la planilla Previred, no una simplificación propia de cada proyecto.</dd>
@@ -538,6 +549,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <span class="badge badge-accent">—</span>
     <h3>Código de movimiento de personal en el nowcasting</h3>
     <span class="badge">rim_nowcasting (ronda 3)</span>
+    
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>¿Ayuda a proyectar mejor la renta imponible agregar a 01 el código de movimiento de personal de la propia planilla (altas, bajas, licencias) además del aviso del Seguro de Cesantía que ya usaba?</dd>
@@ -643,7 +655,7 @@ footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-to
     <table class="tabla">
       <thead><tr><th>Proyecto</th><th>Datos</th><th>Modelo</th><th>Métrica principal</th>
       <th>Tests</th><th>Runtime</th><th>Revisión</th></tr></thead>
-      <tbody><tr><td>01 rim_nowcasting</td><td>5.000 afiliados, PySpark</td><td>Hurdle: GBT clasificador + regresor</td><td class='num'>WAPE 0,115 (h=1)</td><td class='num'>—</td><td class='num'>—</td><td>Cerrado ronda 1/2</td></tr><tr><td>02 churn_traspaso</td><td>20.000 afiliados</td><td>LightGBM binario + calibración</td><td class='num'>AUC 0,720</td><td class='num'>39</td><td class='num'>60 s</td><td>Aprobado con reserva (ronda 3)</td></tr><tr><td>03 propension_apv</td><td>20.000 afiliados</td><td>Hurdle: LightGBM clasificador + regresor</td><td class='num'>AUC 0,836</td><td class='num'>26</td><td class='num'>86 s</td><td>Aprobado (ronda 2)</td></tr><tr><td>04 riesgo_cese_cotizacion</td><td>20.000 afiliados</td><td>3 × LightGBM binario + calibración</td><td class='num'>AUC cese 0,887</td><td class='num'>29</td><td class='num'>50,1 s</td><td>Aprobado con corrección (ronda 3)</td></tr><tr><td>05 riesgo_empleador</td><td>20.000 afiliados (~1.000 empleadores)</td><td>LightGBM binario por objetivo</td><td class='num'>AUC 0,865</td><td class='num'>21</td><td class='num'>26 s</td><td>Aprobado con reserva (ronda 3)</td></tr><tr><td>06 segmentacion_afiliados</td><td>20.000 afiliados</td><td>k-means + clasificador LightGBM</td><td class='num'>Silueta 0,2395</td><td class='num'>14</td><td class='num'>90,8 s</td><td>Aprobado (ronda 2)</td></tr><tr><td>07 uplift_retencion</td><td>10.000 afiliados</td><td>T-, X- y DR-learner sobre LightGBM</td><td class='num'>Qini X-learner 0,00086</td><td class='num'>13</td><td class='num'>26,2 s</td><td>Aprobado con reserva (ronda 4)</td></tr><tr><td>08 secuencial_afiliado</td><td>10.000 afiliados</td><td>GRU multi-tarea (PyTorch) vs. LightGBM</td><td class='num'>AUC 0,5848 (red, traspaso)</td><td class='num'>7</td><td class='num'>228,9 s</td><td>Aprobado, no aporta (ronda 4)</td></tr><tr><td>09 bandit_contacto</td><td>10.000 afiliados</td><td>ε-greedy, LinUCB, Thompson (lineal y LightGBM)</td><td class='num'>DR err. 0,1 % (ε-greedy)</td><td class='num'>19</td><td class='num'>8-9 s</td><td>Aprobado (ronda 4)</td></tr></tbody>
+      <tbody><tr><td>01 rim_nowcasting</td><td>5.000 afiliados, PySpark</td><td>Hurdle: GBT clasificador + regresor</td><td class='num'>WAPE 0,115 (h=1)</td><td class='num'>18</td><td class='num'>6 minutos</td><td>Ronda 3 — docs/revisiones/ronda_3/datos.md</td></tr><tr><td>02 churn_traspaso</td><td>20.000 afiliados</td><td>LightGBM binario + calibración</td><td class='num'>AUC 0,720</td><td class='num'>39</td><td class='num'>60 s</td><td>Rondas 1, 2 y 3 — docs/revisiones/ronda_1/churn_traspaso.md; ronda_2/churn_traspaso.md; ronda_3/churn.md</td></tr><tr><td>03 propension_apv</td><td>20.000 afiliados</td><td>Hurdle: LightGBM clasificador + regresor</td><td class='num'>AUC 0,836</td><td class='num'>26</td><td class='num'>86 s</td><td>Rondas 1 y 2 — docs/revisiones/ronda_1/propension_apv.md; ronda_2/propension_apv.md</td></tr><tr><td>04 riesgo_cese_cotizacion</td><td>20.000 afiliados</td><td>3 × LightGBM binario + calibración</td><td class='num'>AUC cese 0,887</td><td class='num'>29</td><td class='num'>50,1 s</td><td>Rondas 1 y 2 — docs/revisiones/ronda_1/riesgo_cese_cotizacion.md; ronda_2/riesgo_cese_cotizacion.md. Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso — docs/revisiones/ronda_4/</td></tr><tr><td>05 riesgo_empleador</td><td>20.000 afiliados (~1.000 empleadores)</td><td>LightGBM binario por objetivo</td><td class='num'>AUC 0,865</td><td class='num'>21</td><td class='num'>26 s</td><td>Rondas 2 y 3 — docs/revisiones/ronda_2/riesgo_empleador.md; ronda_3/empleador.md</td></tr><tr><td>06 segmentacion_afiliados</td><td>20.000 afiliados</td><td>k-means + clasificador LightGBM</td><td class='num'>Silueta 0,2395</td><td class='num'>14</td><td class='num'>90,8 s</td><td>Ronda 2 — docs/revisiones/ronda_2/planilla_cese_segmentacion.md</td></tr><tr><td>07 uplift_retencion</td><td>10.000 afiliados</td><td>T-, X- y DR-learner sobre LightGBM</td><td class='num'>Qini X-learner 0,00086</td><td class='num'>13</td><td class='num'>26,2 s</td><td>Ronda 4 — docs/revisiones/ronda_4/uplift.md</td></tr><tr><td>08 secuencial_afiliado</td><td>10.000 afiliados</td><td>GRU multi-tarea (PyTorch) vs. LightGBM</td><td class='num'>AUC 0,5848 (red, traspaso)</td><td class='num'>7</td><td class='num'>228,9 s</td><td>Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/</td></tr><tr><td>09 bandit_contacto</td><td>10.000 afiliados</td><td>ε-greedy, LinUCB, Thompson (lineal y LightGBM)</td><td class='num'>DR err. 0,1 % (ε-greedy)</td><td class='num'>19</td><td class='num'>8-9 s</td><td>Ronda 4 — docs/revisiones/ronda_4/bandit.md</td></tr></tbody>
     </table>
   </div>
   <p class="fuente-cita">Suite completa del laboratorio: 155 tests,

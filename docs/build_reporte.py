@@ -541,11 +541,12 @@ def sec_capacidades():
   <h3>Cómo se construyó</h3>
   <p class="medida">Todos los proyectos parten del mismo universo sintético (afiliados, empleadores, panel
   laboral mensual y macroeconomía) calibrado contra la Ficha 165 de la Superintendencia de Pensiones, para
-  que un afiliado sea "la misma persona" en todos los modelos. Cada entrega pasa por una revisión
-  adversarial de otro data scientist antes de aprobarse: se buscan fugas de información desde el futuro
-  (leakage), reglas de negocio degeneradas y afirmaciones que no reproducen. El resultado se reporta aunque
-  la técnica pierda contra lo simple &mdash; es el criterio que se siguió con las tres técnicas más nuevas del
-  portafolio (causalidad, red secuencial y bandits).</p>
+  que un afiliado sea "la misma persona" en todos los modelos. Cada proyecto nuevo pasa por una revisión
+  adversarial independiente antes de aprobarse: se buscan fugas de información desde el futuro (leakage),
+  reglas de negocio degeneradas y afirmaciones que no reproducen. El detalle de qué se revisó y con qué
+  veredicto está en <code>docs/revisiones/</code> (por proyecto, en el anexo técnico). El resultado se
+  reporta aunque la técnica pierda contra lo simple &mdash; es el criterio que se siguió con las tres
+  técnicas más nuevas del portafolio (causalidad, red secuencial y bandits).</p>
   <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
     {kpi_card(n("meta_tests_total"), "tests automatizados en la suite del laboratorio", f'{n("meta_tests_fallos")} fallos · {n("meta_tests_runtime")}')}
     {kpi_card(n("f165_densidad_sistema"), "densidad de cotización del sistema (Ficha 165)", "el universo sintético se recalibró contra esta cifra en la ronda 3")}
@@ -565,13 +566,16 @@ def sec_capacidades():
 # --------------------------------------------------------------------------
 
 def proyecto_card(*, id_, numero, nombre, titulo, problema, que_hace, resultado_html,
-                   uso_html, mockup_html, produccion_html, reserva_html, fuente_texto):
+                   uso_html, mockup_html, produccion_html, reserva_html, fuente_texto,
+                   estado_chip=""):
+    chip_html = f'<span class="chip chip-info">{esc(estado_chip)}</span>' if estado_chip else ""
     return f"""
 <article class="proyecto" id="{id_}">
   <div class="proyecto-head">
     <span class="badge badge-accent">{esc(numero)}</span>
     <h3>{esc(titulo)}</h3>
     <span class="badge">{esc(nombre)}</span>
+    {chip_html}
   </div>
   <dl class="campos medida">
     <dt>Problema</dt><dd>{problema}</dd>
@@ -734,7 +738,7 @@ def _card04():
         },
         {"AUC modelo": COL_MODELO},
         fmt=_fmt3, width=560, height=230,
-        aria="AUC del modelo de cese y reingreso, tras la corrección de la ronda 3",
+        aria="AUC del modelo de cese y reingreso, con la corrección posterior a la ronda 3 hecha en la ronda 4",
     )
     resultado = (
         f'El modelo de cese llega a AUC {n("p04_auc_cese3m")} a tres meses y {n("p04_auc_cese6m")} a seis '
@@ -753,7 +757,7 @@ def _card04():
             ("warn", "Cesantía en curso, sin señales de reingreso", "término AFC reciente, cobertura de cesantía activa", "prioridad de asesoría"),
             ("ok", "Cese a 3 y 6 meses", "sigue por sobre el umbral del brief tras la recalibración", f'{n("p04_auc_cese3m")} / {n("p04_auc_cese6m")}'),
         ],
-        chart, f'AUC del modelo por objetivo, tras la corrección de la ronda 3 (perfil sistema, semilla {n("semilla42")}).',
+        chart, f'AUC del modelo por objetivo, con la corrección posterior a la ronda 3 (ronda 4; perfil sistema, semilla {n("semilla42")}).',
     )
     produccion = (
         "Se necesita el feed real de eventos del Seguro de Cesantía (AFC) y de la planilla previsional con "
@@ -762,12 +766,19 @@ def _card04():
         "cesantía crónica antes de volver a intentarlo, y luego repetir la validación con datos reales."
     )
     reserva = card_reserva(
-        "El AUC de reingreso cayó de 0,720 a 0,608 (sistema) cuando se recalibró la densidad de cotización "
-        "del generador contra la Ficha 165 en la ronda 3, y quedó bajo el umbral de aceptación de 0,70. Se "
-        f'diagnosticó y se corrigió lo que se podía corregir en features (mejora de +{n("p04_fix_delta_min")} a +{n("p04_fix_delta_max")} AUC, y en un caso -{n("p04_fix_delta_neg")}), '
-        "pero, en palabras del propio informe, 'la dinámica actual del generador dejó el reingreso casi "
+        f'El AUC de reingreso cayó de {n("p04_auc_reingreso_antes_densidad")} a {n("p04_auc_reingreso_tras_densidad")} '
+        "(sistema) cuando se recalibró la densidad de cotización del generador contra la Ficha 165 en la "
+        f'ronda 3. Una corrección posterior a la ronda 3, hecha en la ronda 4 (features del último empleo '
+        f'antes del cese), lo subió a {n("p04_auc_reingreso_actual")} (+{n("p04_fix_delta_min")} en la fila '
+        f'de referencia; rango +{n("p04_fix_delta_min")} a +{n("p04_fix_delta_max")}, y un caso de '
+        f'-{n("p04_fix_delta_neg")}), sin recuperar el umbral de {n("p04_auc_reingreso_umbral")}. En '
+        "palabras del propio informe, 'la dinámica actual del generador dejó el reingreso casi "
         "impredecible a nivel individual'. No es un problema de este modelo: es un límite del sandbox que "
-        "hay que resolver en el generador antes de la próxima ronda."
+        "hay que resolver en el generador antes de la próxima ronda. Nota adicional: la captura al 10 % "
+        f'de {n("p04_captura10_cese3m")} / {n("p04_captura10_cese6m")} y el baseline de regla de negocio '
+        f'({n("p04_auc_regla_cese3m")}) se midieron ANTES de esta recalibración de densidad y no se '
+        "volvieron a medir después; se muestran igual, con esta salvedad explícita, porque el mecanismo de "
+        "captura no cambió, solo la población."
     )
     return proyecto_card(
         id_="p04", numero="04", nombre="riesgo_cese_cotizacion",
@@ -785,6 +796,7 @@ def _card04():
                  "está jubilando.",
         mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
         fuente_texto="afp_lab/riesgo_cese_cotizacion/README.md §§1, 6, 7, 12",
+        estado_chip="Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso; resultado en docs/revisiones/ronda_4/",
     )
 
 
@@ -856,12 +868,12 @@ def _card01():
         f'en la cartera sistema que en la Cuprum. A dos meses el error sube a {n("p01_wape_h2_sistema")} en '
         f'el sistema y {n("p01_wape_h2_cuprum")} en Cuprum: pesa más la remuneración variable de finanzas '
         f'y minería, que se conoce con más rezago. El clasificador de "cotiza o no" llega a AUC '
-        f'{n("p01_auc_cotiza")}.'
+        f'{n("p01_auc_cotiza")} a un mes y {n("p01_auc_cotiza_h2")} a dos meses.'
     )
     mockup = mini_dashboard(
         "Recaudación proyectada · rim_nowcasting",
         [(n("p01_wape_h1"), "WAPE a un mes (dependientes)"), (n("p01_wape_h2_cuprum"), "WAPE a dos meses (Cuprum)"),
-         (n("p01_auc_cotiza"), "AUC cotiza/no cotiza")],
+         (n("p01_auc_cotiza"), "AUC cotiza/no cotiza, a un mes")],
         [
             ("ok", "Reemplazo mensual PREDICHA → REAL", "los pagos que llegan sustituyen la proyección", "ciclo automático"),
             ("warn", "Independientes", "renta anual vía SII, se redibuja cada año", "WAPE alto, modelo aparte recomendado"),
@@ -977,7 +989,7 @@ def _card07():
         "A quién conviene contactar · uplift_retencion",
         [(n("p07_razon_10"), "veces más traspasos evitados que ordenar por riesgo"),
          (n("p07_evitados_xlearner10"), "traspasos evitados al 10 %"),
-         (n("p07_spearman_dr"), "correlación con el efecto causal real")],
+         (n("p07_spearman_dr"), "correlación con el efecto causal real (DR-learner)")],
         [
             ("ok", "Persuadible", "reclamo reciente ya resuelto, saldo y uso digital medios", "contactar: el contacto retiene"),
             ("critical", "Sleeping dog", "uso digital bajo, muy sensible a la comisión", "NO contactar: el contacto empuja a irse"),
@@ -1203,6 +1215,7 @@ def _card08():
                  "02 y 04 con esta arquitectura, a este presupuesto de datos y cómputo.",
         mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
         fuente_texto="afp_lab/secuencial_afiliado/README.md §§1, 6, 7, 8",
+        estado_chip="Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/",
     )
 
 
@@ -1441,32 +1454,34 @@ def sec_supuestos():
 def sec_anexo():
     filas = [
         ("01 rim_nowcasting", n("p01_escala") + ", PySpark",
-         "Hurdle: GBT clasificador + regresor", f'WAPE {n("p01_wape_h1")} (h=1)', "—", "—",
-         "Cerrado ronda 1/2"),
+         "Hurdle: GBT clasificador + regresor", f'WAPE {n("p01_wape_h1")} (h=1)',
+         n("p01c_tests_despues"), n("p01c_runtime"),
+         "Ronda 3 — docs/revisiones/ronda_3/datos.md"),
         ("02 churn_traspaso", n("p02_escala"),
          "LightGBM binario + calibración", f'AUC {n("p02_auc_modelo")}', n("p02_tests"), n("p02_runtime"),
-         "Aprobado con reserva (ronda 3)"),
+         "Rondas 1, 2 y 3 — docs/revisiones/ronda_1/churn_traspaso.md; ronda_2/churn_traspaso.md; ronda_3/churn.md"),
         ("03 propension_apv", n("p03_escala"),
          "Hurdle: LightGBM clasificador + regresor", f'AUC {n("p03_auc")}', n("p03_tests"), n("p03_runtime"),
-         "Aprobado (ronda 2)"),
+         "Rondas 1 y 2 — docs/revisiones/ronda_1/propension_apv.md; ronda_2/propension_apv.md"),
         ("04 riesgo_cese_cotizacion", n("p04_escala"),
          "3 × LightGBM binario + calibración", f'AUC cese {n("p04_auc_cese3m")}', n("p04_tests"), n("p04_runtime"),
-         "Aprobado con corrección (ronda 3)"),
+         "Rondas 1 y 2 — docs/revisiones/ronda_1/riesgo_cese_cotizacion.md; ronda_2/riesgo_cese_cotizacion.md. "
+         "Corrección posterior a la ronda 3 (ronda 4): revisión adversarial en curso — docs/revisiones/ronda_4/"),
         ("05 riesgo_empleador", n("p05_escala") + f' (~{n("p05_empleadores")} empleadores)',
          "LightGBM binario por objetivo", f'AUC {n("p05_auc")}', n("p05_tests"), n("p05_runtime"),
-         "Aprobado con reserva (ronda 3)"),
+         "Rondas 2 y 3 — docs/revisiones/ronda_2/riesgo_empleador.md; ronda_3/empleador.md"),
         ("06 segmentacion_afiliados", n("p06_escala"),
          "k-means + clasificador LightGBM", f'Silueta {n("p06_silueta")}', n("p06_tests"), n("p06_runtime"),
-         "Aprobado (ronda 2)"),
+         "Ronda 2 — docs/revisiones/ronda_2/planilla_cese_segmentacion.md"),
         ("07 uplift_retencion", n("p07_escala"),
          "T-, X- y DR-learner sobre LightGBM", f'Qini X-learner {n("p07_qini_xlearner")}', n("p07_tests"), n("p07_runtime"),
-         "Aprobado con reserva (ronda 4)"),
+         "Ronda 4 — docs/revisiones/ronda_4/uplift.md"),
         ("08 secuencial_afiliado", n("p08_escala"),
          "GRU multi-tarea (PyTorch) vs. LightGBM", f'AUC {n("p08_auc_red_multitarea_traspaso")} (red, traspaso)', n("p08_tests"), n("p08_runtime"),
-         "Aprobado, no aporta (ronda 4)"),
+         "Revisión adversarial en curso; resultado en docs/revisiones/ronda_4/"),
         ("09 bandit_contacto", n("p09_escala"),
          "ε-greedy, LinUCB, Thompson (lineal y LightGBM)", f'DR err. {n("p09_dr_error_epsgreedy")} (ε-greedy)', n("p09_tests"), n("p09_runtime"),
-         "Aprobado (ronda 4)"),
+         "Ronda 4 — docs/revisiones/ronda_4/bandit.md"),
     ]
     filas_html = "".join(
         f"<tr><td>{esc(p)}</td><td>{esc(d)}</td><td>{esc(m)}</td><td class='num'>{esc(me)}</td>"

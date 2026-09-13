@@ -6,9 +6,11 @@ priorizar, detectar) y deja código reproducible, tests y un README con resultad
 
 ## Informe ejecutivo
 
-`docs/reporte_ejecutivo.html` es el entregable para el negocio: qué ofrece el equipo, un caso de uso por
-proyecto con resultados, mockups de dashboards, reservas y camino a producción. Se regenera con
-`python3 docs/build_reporte.py` a partir de `docs/reporte_datos.json`, donde cada cifra lleva su fuente.
+`docs/reporte_ejecutivo.html` es el entregable para el negocio, en formato app de un solo archivo (pantallas
+Inicio, Casos, Torre de control, Roadmap, Datos y límites, Anexo y Glosario; ruteo por hash, filtros por área).
+`docs/reporte_ejecutivo_documento.html` es la misma información como documento imprimible. Ambos se
+regeneran con `python3 docs/build_reporte.py` (y `--documento`) a partir de `docs/reporte_datos.json`, donde
+cada cifra lleva su fuente.
 Revisión de exactitud en `docs/revisiones/ronda_4/reporte_ejecutivo.md`.
 
 ## Cómo trabajamos

@@ -140,6 +140,25 @@ def test_tipo_respuesta_correlaciona_con_el_contexto(tablas, cortes_test):
         assert abs(frac.get(t, 0.0) - p_obj) < 0.15
 
 
+def test_fuerza_senal_cero_reproduce_la_ablacion_aleatoria(tablas, cortes_test):
+    """Pedido del gerente (barrido de sensibilidad): `fuerza_senal=0` debe anular la dependencia del
+    tipo con el contexto (ninguno de los drivers queda asociado, a diferencia de `fuerza_senal=1`,
+    ya probado en el test anterior), manteniendo proporciones globales parecidas."""
+    from scipy import stats
+    ctx = F.construir_contexto(tablas, cortes_test)
+    tipo_tabla = generar_tipo_respuesta(ctx, SEED, fuerza_senal=0.0)
+    df = ctx.merge(tipo_tabla, on=["afiliado_id", "periodo_corte"])
+    grupos = {t: df[df["lat_tipo_respuesta"] == t] for t in TIPOS_RESPUESTA}
+    for driver in ("reclamos_6m", "brecha_rentabilidad_pp", "logins_3m", "cambios_fondo_3m", "edad"):
+        muestras = [g[driver].fillna(0.0).to_numpy() for g in grupos.values()]
+        _, p = stats.f_oneway(*muestras)
+        assert p > 0.05, f"{driver} quedo asociado al tipo con fuerza_senal=0 (p={p:.3g})"
+
+    frac = df["lat_tipo_respuesta"].value_counts(normalize=True)
+    for t, p_obj in zip(TIPOS_RESPUESTA, (0.30, 0.45, 0.25)):
+        assert abs(frac.get(t, 0.0) - p_obj) < 0.15
+
+
 def test_tipo_respuesta_tiene_componente_persistente_por_afiliado(tablas, cortes_test):
     """El ruido persistente por afiliado hace que el tipo de UN MISMO afiliado sea mas estable en
     el tiempo que el de afiliados distintos (no es un sorteo nuevo e independiente cada mes)."""

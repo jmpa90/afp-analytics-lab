@@ -36,6 +36,31 @@ def _mostrar(titulo: str, df: pd.DataFrame, ruta: Path | None = None, max_filas:
         df.to_csv(ruta, index=False)
 
 
+def barrido_fuerza_senal(tablas: dict, cortes_sim: list[int], seed_mundo: int,
+                         seeds: tuple[int, ...], valores: tuple[float, ...]) -> pd.DataFrame:
+    """Sensibilidad a `fuerza_senal` (README "Sensibilidad a la senal contextual"): reusa el MISMO
+    contexto as-of (`preparar_contexto_base`, no depende de `fuerza_senal`) y solo recalcula la
+    respuesta latente para cada valor -- evita regenerar tablas/contexto `len(valores)` veces."""
+    base = M.preparar_contexto_base(tablas, cortes_sim)
+    filas = []
+    for f in valores:
+        entorno = M.agregar_respuesta_latente(base, seed_mundo=seed_mundo, fuerza_senal=f)
+        curvas, _, _ = M.simular_todas(entorno, cortes_sim, seeds)
+        ultimo = curvas[curvas["mes"] == curvas["mes"].max()]
+        piv = ultimo.pivot(index="seed", columns="politica", values="reward")
+        for pol in piv.columns:
+            g = ultimo[ultimo["politica"] == pol]
+            filas.append({
+                "fuerza_senal": f, "politica": pol, "n_semillas": int(len(piv[pol])),
+                "reward_neto_media": float(piv[pol].mean()),
+                "reward_neto_sd": float(piv[pol].std(ddof=1)),
+                "semillas_gana_eps_greedy": int((piv[pol] > piv["EPSILON_GREEDY"]).sum()),
+                "sleeping_dog_media": float(g["sleeping_dog"].mean()),
+                "persuadible_media": float(g["persuadible"].mean()),
+            })
+    return pd.DataFrame(filas)
+
+
 def main(argv: list[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(description="Demo del bandit contextual de contacto (proyecto 09)")
     ap.add_argument("--n-afiliados", type=int, default=10_000)
@@ -46,6 +71,14 @@ def main(argv: list[str] | None = None) -> dict:
                     help="semillas de la simulacion online, separadas por coma")
     ap.add_argument("--seed-mundo", type=int, default=42,
                     help="semilla del universo/contexto/respuesta latente (fija entre semillas)")
+    ap.add_argument("--fuerza-senal", type=float, default=1.0,
+                    help="multiplicador de los coeficientes del logit de tipo de respuesta "
+                         "(0 = ablacion sin senal contextual, 1 = calibracion vigente, sin efecto "
+                         "sobre la corrida de referencia)")
+    ap.add_argument("--barrido-fuerza-senal", type=str, default="",
+                    help="si se pasa (lista separada por coma, p. ej. '0,1,2,4'), corre el barrido "
+                         "de sensibilidad a la senal contextual en vez de la corrida normal y "
+                         "guarda salida/barrido_fuerza_senal.csv")
     ap.add_argument("--perfil", type=str, default="cuprum", choices=("sistema", "cuprum"))
     ap.add_argument("--salida", type=str, default=SALIDA_POR_DEFECTO)
     args = ap.parse_args(argv)
@@ -67,7 +100,16 @@ def main(argv: list[str] | None = None) -> dict:
         raise ValueError(f"solo hay {len(cortes_sim)} cortes evaluables, se pidieron "
                          f"{args.n_meses_simulacion}; ampliar --periodo-fin")
 
-    entorno = M.preparar_entorno(tablas, cortes_sim, seed_mundo=args.seed_mundo)
+    if args.barrido_fuerza_senal:
+        valores = tuple(float(v) for v in args.barrido_fuerza_senal.split(","))
+        barrido = barrido_fuerza_senal(tablas, cortes_sim, args.seed_mundo, seeds, valores)
+        _mostrar(f"Barrido de sensibilidad a la senal contextual (fuerza_senal={valores})",
+                 barrido, salida / "barrido_fuerza_senal.csv", max_filas=200)
+        print(f"\nruntime total del barrido: {time.time() - t0:.1f}s -- salida en {salida}/")
+        return {"barrido_fuerza_senal": barrido}
+
+    entorno = M.preparar_entorno(tablas, cortes_sim, seed_mundo=args.seed_mundo,
+                                 fuerza_senal=args.fuerza_senal)
     t2 = time.time()
     print(f"[2/4] contexto + respuesta latente en {t2 - t1:.1f}s "
          f"({len(entorno['contexto'])} filas afiliado x corte, {len(cortes_sim)} cortes de "

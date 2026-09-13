@@ -273,6 +273,45 @@ honesto, no el esperado por el brief, y se reporta igual.
   un caso LLAMADA con traspaso realizado (reward = -2.000, exactamente el costo del brazo, cero
   comision: confirma la formula de recompensa).
 
+### 6.5 Sensibilidad a la senal contextual (barrido de `fuerza_senal`)
+
+Pedido del gerente: `fuerza_senal` (`synthetic.generar_tipo_respuesta`, expuesto en `run.py
+--fuerza-senal`) multiplica los pesos de `TIPO_RESPUESTA_COEF` (no el intercepto ni el ruido) --
+`0` = ablacion sin senal contextual, `1` = calibracion vigente (§6.1-§6.4), `>1` = mundos
+hipoteticos con mas heterogeneidad explicable por contexto de la que se calibro. Barrido con las
+mismas 5 semillas y presupuesto (`--barrido-fuerza-senal "0,1,2,4"`, `salidas/bandit_contacto/barrido_fuerza_senal.csv`,
+14,8 s):
+
+| fuerza_senal | politica | reward neto (mil M CLP) | semillas gana a eps-greedy | sleeping dogs contactados | persuadibles contactados |
+|---|---|---|---|---|---|
+| 0 (ablacion) | EPSILON_GREEDY | 2,138 ± 0,016 | -- (referencia) | 1.764 | 2.061 |
+| 0 | LINUCB | 2,064 ± 0,024 | 0/5 | 137 | 148 |
+| 0 | THOMPSON_LINEAL | 2,137 ± 0,027 | 3/5 | 1.808 | 2.085 |
+| 0 | THOMPSON_BOOTSTRAP_LGBM | 2,121 ± 0,029 | 1/5 | 1.368 | 1.555 |
+| 1 (vigente) | EPSILON_GREEDY | 2,130 ± 0,021 | -- (referencia) | 2.266 | 1.977 |
+| 1 | LINUCB | 2,063 ± 0,023 | 0/5 | 230 | 129 |
+| 1 | THOMPSON_LINEAL | 2,138 ± 0,023 | 3/5 | 2.230 | 2.055 |
+| 1 | THOMPSON_BOOTSTRAP_LGBM | 2,109 ± 0,024 | 1/5 | 1.680 | 1.582 |
+| 2 | EPSILON_GREEDY | 2,129 ± 0,024 | -- (referencia) | 2.530 | 2.032 |
+| 2 | LINUCB | 2,063 ± 0,023 | 0/5 | 271 | 115 |
+| 2 | THOMPSON_LINEAL | 2,136 ± 0,042 | 3/5 | 2.331 | 2.120 |
+| 2 | THOMPSON_BOOTSTRAP_LGBM | 2,116 ± 0,026 | 2/5 | 1.819 | 1.673 |
+| 4 | EPSILON_GREEDY | 2,135 ± 0,025 | -- (referencia) | 2.582 | 2.259 |
+| 4 | LINUCB | 2,063 ± 0,023 | 0/5 | 286 | 99 |
+| **4** | **THOMPSON_LINEAL** | **2,152 ± 0,033** | **4/5** | 2.371 | 2.466 |
+| 4 | THOMPSON_BOOTSTRAP_LGBM | 2,138 ± 0,013 | 2/5 | 1.915 | 2.021 |
+
+**Lectura para el negocio**: Thompson lineal recien alcanza el umbral de aceptacion (>=4/5 semillas
+contra eps-greedy) cuando la heterogeneidad de respuesta es **4 veces mas fuerte** que la calibrada
+con los supuestos de este generador (que ya buscaban ser razonables para Chile); ni Thompson-LGBM
+(maximo 2/5, en todo el rango) ni LinUCB (0/5 siempre, incluso a 4x: su freno es estructural, no de
+señal, ver §8) lo alcanzan. Para la AFP esto significa que, con la heterogeneidad tipica que hoy se
+puede documentar en datos de contacto (variables de uso digital, reclamos y rentabilidad del fondo
+propio), **24 meses y ~400 contactos/mes no bastan para justificar un bandit contextual por sobre un
+simple promedio por brazo**: haria falta o evidencia mas fuerte de que el `tipo` de respuesta es mas
+predecible por variables observables de lo que se asumio aqui, o bien correr el piloto mas tiempo
+y/o con mas volumen antes de decidir.
+
 ## 7. Lectura de negocio
 
 * La politica **actual** (heuristica top-riesgo + visita/llamada/email por tercil) sigue generando
@@ -360,6 +399,11 @@ cd /home/user/wt/empleador
 PYTHONPATH=/home/user/wt/empleador python3 -m afp_lab.bandit_contacto.run \
     --n-afiliados 10000 --seeds 42,7,123,2024,99 --salida salidas/bandit_contacto
 
+# barrido de sensibilidad a la senal contextual (§6.5), ~15 s adicionales:
+PYTHONPATH=/home/user/wt/empleador python3 -m afp_lab.bandit_contacto.run \
+    --n-afiliados 10000 --seeds 42,7,123,2024,99 \
+    --barrido-fuerza-senal "0,1,2,4" --salida salidas/bandit_contacto
+
 PYTHONPATH=/home/user/wt/empleador python3 -m pytest afp_lab/bandit_contacto/tests -q
 ```
 
@@ -372,7 +416,8 @@ Tiempos medidos en esta maquina (4 vCPU compartidas, `n_jobs=2` en LightGBM):
 | Simulacion online (5 semillas x 7 politicas x 24 meses) | ~3,1 s |
 | Evaluacion off-policy (IPS/SNIPS/DR + interpretabilidad) | ~0,3 s |
 | **Total `run.py`** | **~8-9 s** (limite: 4 min) |
-| Tests (`pytest`, 18 casos) | ~2,5 s (limite: 60 s) |
+| Barrido de sensibilidad (4 valores de `fuerza_senal`, reusando tablas/contexto) | ~15 s (limite: 3 min) |
+| Tests (`pytest`, 19 casos) | ~2,5 s (limite: 60 s) |
 
 Muy por debajo de los limites de la ronda: **se corrio con las 5 semillas pedidas**, sin necesidad
 de bajar a 3.

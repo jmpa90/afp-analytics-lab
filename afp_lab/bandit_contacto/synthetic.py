@@ -85,7 +85,8 @@ def generar_tipo_respuesta(contexto: pd.DataFrame, seed: int,
                           coef: dict = TIPO_RESPUESTA_COEF,
                           intercepto: dict = TIPO_RESPUESTA_INTERCEPTO,
                           sd_afiliado: float = TIPO_RESPUESTA_RUIDO_AFILIADO_SD,
-                          sd_fila: float = TIPO_RESPUESTA_RUIDO_FILA_SD) -> pd.DataFrame:
+                          sd_fila: float = TIPO_RESPUESTA_RUIDO_FILA_SD,
+                          fuerza_senal: float = 1.0) -> pd.DataFrame:
     """Tipo de respuesta latente (softmax de 3 clases, INDIFERENTE de referencia) por FILA de
     contexto (afiliado_id, periodo_corte): tabla LATENTE, funcion suave de variables as-of + ruido.
 
@@ -96,6 +97,13 @@ def generar_tipo_respuesta(contexto: pd.DataFrame, seed: int,
     la mezcla resultante queda cerca de `P_TIPO_RESPUESTA` (30/45/25%) en promedio, pero cada
     afiliado se desvia de ese promedio segun su contexto -- por eso un bandit contextual puede, en
     principio, aprender a distinguirlos (a diferencia de un sorteo puramente al azar por afiliado).
+
+    `fuerza_senal` (SUPUESTO del barrido de sensibilidad, README "Sensibilidad a la senal
+    contextual"): multiplica los pesos de `coef` (NO el intercepto ni el ruido). `0.0` anula el
+    termino de contexto por completo -- el tipo queda determinado solo por intercepto + ruido, es
+    decir, independiente del contexto observable ("ablacion aleatoria", equivalente en espiritu a la
+    primera version de esta ronda); `1.0` es la calibracion vigente; `>1` amplifica la senal (mundo
+    hipotetico con mas heterogeneidad explicable por contexto que la calibrada).
     """
     n = len(contexto)
     rng = np.random.default_rng(seed + 9002)
@@ -119,7 +127,7 @@ def generar_tipo_respuesta(contexto: pd.DataFrame, seed: int,
     for tipo in ("PERSUADIBLE", "SLEEPING_DOG"):
         base = intercepto[tipo] + ruido_af[tipo][af_ids] + ruido_fila[tipo]
         for feat, w in coef[tipo].items():
-            base = base + w * z[feat]
+            base = base + (fuerza_senal * w) * z[feat]
         logits[tipo] = base
 
     orden = ["PERSUADIBLE", "INDIFERENTE", "SLEEPING_DOG"]

@@ -50,18 +50,15 @@ TODAS_LAS_POLITICAS = BASELINES + (LOGGING,) + ALGORITMOS
 
 
 # --------------------------------------------------------------------- entorno (una vez)
-def preparar_entorno(tablas: dict[str, pd.DataFrame], cortes_sim: list[int],
-                     seed_mundo: int = 42) -> dict:
-    """Precomputa el contexto, la respuesta latente y el pool por corte (fijo entre semillas)."""
+def preparar_contexto_base(tablas: dict[str, pd.DataFrame], cortes_sim: list[int]) -> dict:
+    """Parte de `preparar_entorno` que NO depende de `seed_mundo`/`fuerza_senal` (contexto as-of,
+    matriz numerica, opt-out, pool por corte). Separada para reusarla en el barrido de sensibilidad
+    a la senal contextual (`run.py --barrido-fuerza-senal`): el contexto es el mismo, solo cambia
+    como se deriva el tipo de respuesta latente a partir de el."""
     contexto = construir_contexto(tablas, cortes_sim).reset_index(drop=True)
     mu, sigma = ajustar_escalador(contexto)
     X = transformar_contexto(contexto, mu, sigma)
     raw = contexto[CONTEXTO_NUMERICO].fillna(0.0).to_numpy(dtype=np.float64)
-
-    tipo_tabla = generar_tipo_respuesta(contexto, seed_mundo)
-    lat = calcular_respuesta_latente(contexto, tipo_tabla, seed_mundo)
-    lat_p = lat[[f"lat_p_churn_{b}" for b in BRAZOS]].to_numpy(dtype=np.float64)
-    tipo_resp = lat["lat_tipo_respuesta"].to_numpy()
 
     rim_ref = contexto["rim_ref"].fillna(0.0).clip(lower=0.0).to_numpy(dtype=np.float64)
     comision = TASA_COMISION_ANUAL * rim_ref * 12.0
@@ -79,10 +76,31 @@ def preparar_entorno(tablas: dict[str, pd.DataFrame], cortes_sim: list[int],
         idx = np.where(corte_arr == c)[0]
         por_corte[c] = idx[np.argsort(-score[idx])]
 
-    return {"contexto": contexto, "X": X, "raw": raw, "lat_p": lat_p, "tipo_resp": tipo_resp,
-           "comision": comision, "opt_out": opt_out, "af_ids": af_ids, "corte": corte_arr,
-           "score_riesgo": score, "por_corte": por_corte, "n_afiliados": n_afiliados,
-           "d": X.shape[1], "d_raw": raw.shape[1]}
+    return {"contexto": contexto, "X": X, "raw": raw, "comision": comision, "opt_out": opt_out,
+           "af_ids": af_ids, "corte": corte_arr, "score_riesgo": score, "por_corte": por_corte,
+           "n_afiliados": n_afiliados, "d": X.shape[1], "d_raw": raw.shape[1]}
+
+
+def agregar_respuesta_latente(base: dict, seed_mundo: int = 42, fuerza_senal: float = 1.0) -> dict:
+    """Copia `base` (de `preparar_contexto_base`) y le agrega la respuesta latente (`lat_p`,
+    `tipo_resp`), la unica parte que depende de `seed_mundo`/`fuerza_senal`."""
+    contexto = base["contexto"]
+    tipo_tabla = generar_tipo_respuesta(contexto, seed_mundo, fuerza_senal=fuerza_senal)
+    lat = calcular_respuesta_latente(contexto, tipo_tabla, seed_mundo)
+    entorno = dict(base)
+    entorno["lat_p"] = lat[[f"lat_p_churn_{b}" for b in BRAZOS]].to_numpy(dtype=np.float64)
+    entorno["tipo_resp"] = lat["lat_tipo_respuesta"].to_numpy()
+    return entorno
+
+
+def preparar_entorno(tablas: dict[str, pd.DataFrame], cortes_sim: list[int],
+                     seed_mundo: int = 42, fuerza_senal: float = 1.0) -> dict:
+    """Precomputa el contexto, la respuesta latente y el pool por corte (fijo entre semillas).
+
+    `fuerza_senal` (default 1.0, sin efecto sobre la corrida de referencia): multiplicador de los
+    coeficientes del logit de tipo de respuesta, ver `synthetic.generar_tipo_respuesta`."""
+    base = preparar_contexto_base(tablas, cortes_sim)
+    return agregar_respuesta_latente(base, seed_mundo=seed_mundo, fuerza_senal=fuerza_senal)
 
 
 def seleccionar_pool(entorno: dict, corte: int, ultimo_contacto: np.ndarray,
@@ -364,7 +382,7 @@ def simular_politica_online(entorno: dict, nombre: str, cortes_sim: list[int], s
     politica = crear_politica(nombre, entorno, seed)
     pendientes: dict[int, list[tuple[int, int, float]]] = defaultdict(list)
     ultimo_contacto = np.full(entorno["n_afiliados"] + 1, -10_000, dtype=np.int64)
-    acumulado = dict(reward=0.0, costo=0.0, regret=0.0, churn=0, n=0, sleeping_dog=0)
+    acumulado = dict(reward=0.0, costo=0.0, regret=0.0, churn=0, n=0, sleeping_dog=0, persuadible=0)
     curva, log_filas = [], []
 
     for mes_i, corte in enumerate(cortes_sim):
@@ -413,6 +431,7 @@ def simular_politica_online(entorno: dict, nombre: str, cortes_sim: list[int], s
         acumulado["churn"] += int(traspasa.sum())
         acumulado["n"] += int(len(pos_pool))
         acumulado["sleeping_dog"] += int(((arms != 0) & (tipo_pool == "SLEEPING_DOG")).sum())
+        acumulado["persuadible"] += int(((arms != 0) & (tipo_pool == "PERSUADIBLE")).sum())
         curva.append({"mes": mes_i + 1, "corte": corte, **acumulado})
 
         if propension_logueada is not None:

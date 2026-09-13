@@ -27,7 +27,7 @@ def resumen_online(curvas_df: pd.DataFrame, mes_final: int | None = None) -> pd.
     ultimo = curvas_df[curvas_df["mes"] == mes_final].copy()
     ultimo["reward_neto"] = ultimo["reward"]
     ultimo["tasa_traspaso"] = ultimo["churn"] / ultimo["n"].clip(lower=1)
-    cols = ["reward_neto", "regret", "costo", "tasa_traspaso", "sleeping_dog", "n"]
+    cols = ["reward_neto", "regret", "costo", "tasa_traspaso", "sleeping_dog", "persuadible", "n"]
     filas = []
     for pol, g in ultimo.groupby("politica"):
         fila = {"politica": pol, "n_semillas": len(g)}

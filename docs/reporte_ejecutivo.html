@@ -146,8 +146,9 @@ tr.sev-critical td:first-child{font-weight:600;}
 .glosario dd{margin:.15rem 0 0;}
 footer.pie{color:var(--muted); font-size:.8rem; margin:2.5rem 0 1rem; padding-top:1rem; border-top:1px solid var(--border);}
 @media (max-width: 880px){
-  .layout{flex-direction:column; gap:1.1rem;}
-  nav.indice{position:static; width:100%; max-height:none;}
+  .layout{flex-direction:column; gap:1.1rem; align-items:stretch;}
+  main{width:100%; max-width:100%;}
+  nav.indice{position:static; flex:none; width:100%; max-height:none;}
   nav.indice ul{flex-direction:row; flex-wrap:wrap;}
   nav.indice a{font-size:.82rem; padding:.28rem .5rem;}
 }

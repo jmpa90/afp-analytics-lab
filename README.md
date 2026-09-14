@@ -117,7 +117,7 @@ Tres proyectos nuevos, 10.000 afiliados, perfil Cuprum; briefs en `docs/briefs/r
 
 | Proyecto | Resultado | Lectura de negocio |
 |---|---|---|
-| 11 Voz del afiliado (nuevo) | Encuesta sintética con sesgo de no respuesta (8 % invitados, 25 % responden). NPS verdadero de la cartera ≈ −15; NPS ingenuo (solo respondientes) erra 8,5 puntos; NPS inferido con ponderación inversa 6,8; Horvitz-Thompson directo 5,3; una regla ponderada simple 1,1. AUC de detractor 0,753. Drivers con signo correcto 6/6 (licencia mal pagada −2,6 vs −2,5 real; reclamo sin resolver −1,0 vs −2,0). Un punto de NPS ≈ 127 traspasos evitados y ≈ 3.600 MM de saldo, asociación ajustada, no experimento | Aprobado con reserva: corregir el sesgo de la encuesta vale más que el modelo; el modelo de respuesta discrimina poco (AUC 0,54) y limita la corrección; el ML sirve para detectar detractores individuales, no para el agregado |
+| 11 Voz del afiliado (nuevo) | Encuesta sintética con sesgo de no respuesta (8 % invitados, 25 % responden). NPS verdadero de la cartera entre −9,4 y −15,0 en los cortes de test (media −11,6); NPS ingenuo (solo respondientes) erra 8,5 puntos; NPS inferido con ponderación inversa 6,8; Horvitz-Thompson directo 5,3; una regla ponderada simple 1,1. AUC de detractor 0,753. Drivers con signo correcto 6/6 (licencia mal pagada −2,6 vs −2,5 real; reclamo sin resolver −1,0 vs −2,0). Un punto de NPS ≈ 127 traspasos evitados, ≈ 3.600 MM de saldo y ≈ 858 MM de APV adicional, asociación ajustada, no experimento | Aprobado con reserva: corregir el sesgo de la encuesta vale más que el modelo; el modelo de respuesta discrimina poco (AUC 0,54) y limita la corrección; el ML sirve para detectar detractores individuales, no para el agregado |
 
 ## Persona: somos AFP Cuprum
 

@@ -74,6 +74,10 @@ def _fmt1(v):
     return f"{v:.1f}".replace(".", ",")
 
 
+def _fmt2(v):
+    return f"{v:.2f}".replace(".", ",")
+
+
 def _fmt_money0(v):
     return f"{v:,.0f}".replace(",", ".")
 
@@ -455,7 +459,7 @@ def sec_portada():
     APP_RAW["kpis"] = [{"valor": v, "label": lbl, "sub": sub} for v, lbl, sub in kpis]
 
     mensajes = [
-        "El equipo de Data Analytics completó nueve capacidades analíticas y una actualización sobre la "
+        "El equipo de Data Analytics completó diez capacidades analíticas y una actualización sobre la "
         "primera, todas sobre un mismo laboratorio sintético de AFP Cuprum y con revisión adversarial "
         "antes de aprobarse.",
         "Cada modelo mejora la práctica comercial actual con la misma capacidad de contacto: no se pide más "
@@ -1121,6 +1125,83 @@ def _card09():
     )
 
 
+def _card11():
+    chart = grouped_bar_chart(
+        ["Regla", "HT directo", "Ponderado (modelo)", "Sin ponderar", "Ingenuo", "Trivial"],
+        {"MAE (puntos de NPS)": [
+            num("p11_mae_regla"), num("p11_mae_ht"), num("p11_mae_ponderado"),
+            num("p11_mae_sin_ponderar"), num("p11_mae_ingenuo"), num("p11_mae_trivial"),
+        ]},
+        {"MAE (puntos de NPS)": COL_BASE},
+        fmt=_fmt2, width=640, height=250,
+        aria="Error (MAE, puntos de NPS) de cada forma de estimar el NPS de la cartera completa, de menor a mayor error",
+    )
+    resultado = (
+        f'El NPS verdadero de la cartera, en los cortes de test, va de {n("p11_nps_test_max")} a '
+        f'{n("p11_nps_test_min")} puntos según el mes (media ≈ {n("p11_nps_test_media")}) &mdash; bien distinto '
+        f'del NPS ingenuo entre quienes contestan (corrida completa: {n("p11_nps_verdadero_corrida")} real vs. '
+        f'{n("p11_nps_ingenuo_corrida")} ingenuo). Ponderar por el sesgo de no respuesta corrige la DIRECCIÓN '
+        f'del sesgo, pero el modelo ponderado todavía erra {n("p11_mae_ponderado")} puntos en test; un estimador '
+        f'directo (Horvitz&ndash;Thompson, sin modelo) erra menos, {n("p11_mae_ht")}; y una regla de negocio '
+        f'simple e independiente del generador erra menos que ambos, {n("p11_mae_regla")} (ver reserva: no es '
+        f'que la regla sea mejor en general, es que el modelo de respuesta discrimina poco). El modelo de '
+        f'detractor sí cumple el umbral pedido: AUC {n("p11_auc_detractor")}. Los eventos operativos del brief '
+        f'mueven el NPS con el signo correcto en {n("p11_drivers_correctos")} (licencia mal pagada: '
+        f'{n("p11_driver_licencia_est")} estimado vs. {n("p11_driver_licencia_real")} real; reclamo sin '
+        f'resolver: {n("p11_driver_reclamo_est")} estimado vs. {n("p11_driver_reclamo_real")} real). Un punto '
+        f'de NPS se asocia, en la cartera completa, a unos {n("p11_valor_punto_traspasos")} traspasos evitados '
+        f'a seis meses (≈{n("p11_valor_punto_saldo")} de saldo) y a ≈{n("p11_valor_punto_apv")} de aporte '
+        "voluntario adicional (asociación ajustada, no causal)."
+    )
+    mockup = mini_dashboard(
+        "Voz del afiliado · voz_afiliado",
+        [(n("p11_nps_verdadero_corrida"), "NPS real de la cartera (sandbox)"),
+         (n("p11_nps_ingenuo_corrida"), "NPS ingenuo (solo respondientes)"),
+         (n("p11_auc_detractor"), "AUC de detractor (ponderado)")],
+        [
+            ("critical", "Detractor probable tras licencia larga", "driver individual de mayor magnitud", f'{n("p11_driver_licencia_est")} puntos'),
+            ("warn", "Arreglar primero: rentabilidad relativa", f'afecta a {n("p11_prioridad1_incidencia")} de la cartera', f'{n("p11_prioridad1_impacto")} pts de impacto'),
+            ("ok", "Licencia mal pagada", f'{n("p11_prioridad2_incidencia")} de la cartera', f'{n("p11_prioridad2_impacto")} pts de impacto'),
+            ("ok", "Contacto de ejecutivo propio", f'{n("p11_prioridad3_incidencia")} de la cartera', f'{n("p11_prioridad3_impacto")} pts de impacto'),
+        ],
+        chart, "Error (MAE, puntos de NPS) de cada forma de estimar el NPS de la cartera completa, de menor a mayor error.",
+    )
+    produccion = (
+        "Necesita tres cosas que hoy no existen: la encuesta real con fecha e invitados (no solo quienes "
+        "contestaron, para poder pesar por invitación), los eventos operativos con fecha (reclamos, "
+        "licencias, atrasos del empleador), y un holdout de encuesta relacional aleatoria para validar la "
+        "corrección de sesgo con datos reales. El módulo de verbatims (texto libre) con LLM queda como "
+        "siguiente paso, no incluido en esta ronda."
+    )
+    reserva = card_reserva(
+        f'El valor está en corregir el sesgo de la encuesta más que en el modelo: una regla ponderada simple '
+        f'estima mejor el NPS agregado que el modelo, porque el modelo de respuesta discrimina poco (AUC '
+        f'{n("p11_auc_respuesta")}). El machine learning sirve para detectar detractores individuales, no '
+        "para el agregado. El valor del punto es asociación ajustada, no experimento. Una sola semilla."
+    )
+    return proyecto_card(
+        id_="p11", numero="11", nombre="voz_afiliado",
+        titulo="Voz del afiliado (NPS inferido, drivers y valor del punto)",
+        problema="Solo se invita a una fracción de la cartera a la encuesta de NPS cada mes y de esos "
+                 "responde una fracción menor, con sesgo: contestan más los muy satisfechos y los muy "
+                 "insatisfechos. ¿Cuál es el NPS real de TODA la cartera, qué eventos operativos lo mueven, "
+                 "y cuánto vale en traspasos y ahorro voluntario un punto de NPS?",
+        que_hace="Encuesta sintética con sesgo de no respuesta deliberado; un modelo de propensión a "
+                 "responder que pondera (IPW) para corregirlo; un modelo de detractor; un estimador de "
+                 "drivers (T-learner simple) en puntos de NPS por evento operativo; y una regresión de "
+                 "asociación ajustada con traspaso (02) y aporte voluntario (03) para valorar el punto de NPS.",
+        resultado_html=resultado,
+        uso_html="NPS mensual por segmento, región y empleador sin esperar a que más gente conteste la "
+                 "encuesta; una lista de detractores probables tras un evento crítico (reclamo, licencia, "
+                 "atraso del empleador) para cerrar el ciclo antes de que se traspase; y un ranking de qué "
+                 "arreglar primero, en puntos de NPS.",
+        mockup_html=mockup, produccion_html=produccion, reserva_html=reserva,
+        fuente_texto="afp_lab/voz_afiliado/README.md §§5, 6, 7, 8; docs/revisiones/ronda_5/voz_afiliado.md "
+                     "(aprobado con reserva)",
+        estado_chip="Aprobado con reserva (ronda 5)",
+    )
+
+
 def _card_planilla():
     resultado = (
         f'La planilla sintética reproduce {n("planilla_codigos")} de movimiento de personal de la Tabla '
@@ -1330,12 +1411,12 @@ def _card01_correccion():
 def sec_casos():
     tarjetas = (
         _card02() + _card03() + _card04() + _card05() + _card01() + _card06() + _card07() + _card08() + _card09()
-        + _card_planilla() + _card01_correccion()
+        + _card11() + _card_planilla() + _card01_correccion()
     )
     return f"""
 <section id="casos">
   <h2>Un caso de uso por proyecto</h2>
-  <p class="medida">Nueve capacidades completas, la planilla regulatoria que las sostiene a todas, y la
+  <p class="medida">Diez capacidades completas, la planilla regulatoria que las sostiene a todas, y la
   actualización de la ronda 3 sobre la primera. Cada tarjeta dice el problema, qué hace el modelo, el resultado en el sandbox
   traducido a negocio, cómo lo usaría el área, un mockup de dashboard, el camino a producción y la reserva
   principal &mdash; visible aquí, no escondida en el anexo.</p>
@@ -1373,6 +1454,7 @@ def sec_torre_control():
         ("Riesgo", "warn", "Masa en riesgo de empleadores", "captura al 10 % en el límite del criterio de negocio", n("p05_captura10_masa")),
         ("Comercial", "ok", "Traspaso voluntario", "el modelo gana a la regla en todos los segmentos grandes", n("p02_razon_vs_regla") + " la regla"),
         ("Comercial", "ok", "Ahorro voluntario (APV)", "líderes de mercado, captura muy por sobre ordenar por renta", n("p03_captura10_monto")),
+        ("Experiencia", "warn", "NPS agregado bajo el objetivo del brief", "el modelo ponderado no baja del umbral de ±3 puntos; una regla simple gana en el agregado", n("p11_mae_ponderado") + " pts de error"),
     ]
     filas = [(sev, nom, det, val) for (_area, sev, nom, det, val) in filas5]
     caption = ("AUC del modelo vs. la práctica actual hoy, en las cuatro capacidades de priorización de cartera.")
@@ -1533,6 +1615,10 @@ def sec_anexo():
         ("09 bandit_contacto", n("p09_escala"),
          "ε-greedy, LinUCB, Thompson (lineal y LightGBM)", f'DR err. {n("p09_dr_error_epsgreedy")} (ε-greedy)', n("p09_tests"), n("p09_runtime"),
          "Ronda 4 — docs/revisiones/ronda_4/bandit.md"),
+        ("11 voz_afiliado", n("p11_escala"),
+         "2 × LightGBM (respuesta, detractor) + Ridge (drivers) + regresión (valor del punto)",
+         f'AUC detractor {n("p11_auc_detractor")}', n("p11_tests"), n("p11_runtime"),
+         "Aprobado con reserva (ronda 5) — docs/revisiones/ronda_5/voz_afiliado.md"),
     ]
     APP_RAW["anexo"] = [
         {"proyecto": p, "datos": d, "modelo": m, "metrica": me, "tests": t, "runtime": r, "revision": v}
@@ -1591,6 +1677,9 @@ def sec_glosario():
         ("Latente", "Un dato que existe solo dentro del simulador para generar la dinámica (por ejemplo, "
          "la propensión verdadera a irse). Nunca puede ser una feature del modelo, porque en la vida real "
          "no se observa."),
+        ("NPS (Net Promoter Score)", "Puntaje de −100 a 100 que resume qué tan dispuesta está la cartera a "
+         "recomendar la AFP: % de promotores (nota 9-10) menos % de detractores (nota 0-6), ignorando a "
+         "los pasivos (7-8)."),
         ("Off-policy (evaluación fuera de política)", "Estimar qué tan bien habría funcionado una "
          "política nueva usando solo los datos que ya se registraron con la política vieja, sin haberla "
          "corrido de verdad."),
@@ -1646,6 +1735,7 @@ CASE_META = {
     "p07": dict(area="Comercial", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 4)"),
     "p08": dict(area="Operaciones", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 4)"),
     "p09": dict(area="Comercial", estado_nivel="ok", estado_texto="Aprobado (ronda 4)"),
+    "p11": dict(area="Experiencia", estado_nivel="reserva", estado_texto="Aprobado con reserva (ronda 5)"),
     "planilla": dict(area="Normativa", estado_nivel="ok", estado_texto="Aprobado (ronda 2)"),
 }
 
@@ -1662,6 +1752,7 @@ def _case_metrica_principal(id_):
         "p07": f'Qini X-learner {n("p07_qini_xlearner")}',
         "p08": f'AUC red {n("p08_auc_red_multitarea_traspaso")}',
         "p09": f'DR err. {n("p09_dr_error_epsgreedy")}',
+        "p11": f'AUC detractor {n("p11_auc_detractor")}',
         "planilla": f'{n("planilla_codigos")} de la Tabla N° 7',
     }[id_]
 
@@ -1678,6 +1769,7 @@ def _case_reserva_corta(id_):
         "p07": "El Qini del holdout aleatorio no alcanza significancia estadística a esta escala.",
         "p08": f'Alcance de dos de cuatro cabezas; runtime no validado a {n("meta_universo_afiliados")}.',
         "p09": f'Gana a eps-greedy en {n("p09_gana_epsgreedy_thompson")} semillas, no en las {n("p09_umbral_semillas")} exigidas.',
+        "p11": f'Una regla simple estima mejor el NPS agregado (AUC del modelo de respuesta: {n("p11_auc_respuesta")}); una sola semilla.',
         "planilla": "El sorteo de recepción es por línea, no por planilla completa (defecto menor).",
     }[id_]
 
@@ -1753,7 +1845,7 @@ def build_app_data():
 
     data = {
         "titulo": "Portafolio Analítico Cuprum",
-        "areas": ["Comercial", "Operaciones", "Riesgo", "Tesorería", "Normativa"],
+        "areas": ["Comercial", "Operaciones", "Riesgo", "Tesorería", "Normativa", "Experiencia"],
         "kpis": kpis,
         "mensajes": APP_RAW["mensajes"],
         "capacidades": APP_RAW["capacidades"],

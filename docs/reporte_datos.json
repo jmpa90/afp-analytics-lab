@@ -1,246 +1,1583 @@
 {
   "_notas": {
-    "proposito": "Cada número que aparece en docs/reporte_ejecutivo.html debe tener una entrada aquí, con su valor exacto (sin redondear hacia arriba), unidad, fuente (archivo y sección) y si es sintético (sandbox) o real (Ficha 165 / Ley 21.735).",
     "convencion": "valor + unidad se concatenan tal cual para renderizar en el HTML. Los números de citas (Ley 21.735, Tabla N°7, §secciones, 'ronda N') no llevan entrada: son referencias, no datos.",
-    "generado_por": "docs/build_reporte.py, a partir de este archivo"
+    "generado_por": "docs/build_reporte.py, a partir de este archivo",
+    "proposito": "Cada número que aparece en docs/reporte_ejecutivo.html debe tener una entrada aquí, con su valor exacto (sin redondear hacia arriba), unidad, fuente (archivo y sección) y si es sintético (sandbox) o real (Ficha 165 / Ley 21.735)."
   },
-
-  "f165_numero": {"valor": "165", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (Ficha Estadística Previsional N° 165, SP, agosto 2026)", "sintetico": false},
-  "f165_fecha_anio": {"valor": "2026", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (agosto 2026)", "sintetico": false},
-  "f165_cuprum_activos": {"valor": "17,3", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0 (activos administrados, jul-2026)", "sintetico": false},
-  "f165_cuprum_afiliados_pct": {"valor": "4,5", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0 (afiliados, jun-2026)", "sintetico": false},
-  "f165_cuprum_cotizantes_pct": {"valor": "6,3", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0 (cotizantes, jun-2026)", "sintetico": false},
-  "f165_cuprum_var_afiliados": {"valor": "10.995", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (variación neta de afiliados, 12 meses, es negativa)", "sintetico": false},
-  "f165_cuprum_traspasos_netos": {"valor": "4.128", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (traspasos netos, jun-2026)", "sintetico": false},
-  "f165_cuprum_ingreso_imponible": {"valor": "2.331.030", "unidad": " CLP", "fuente": "docs/contexto_afp_cuprum.md §0 (ingreso imponible promedio)", "sintetico": false},
-  "f165_cuprum_comision": {"valor": "1,44", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0", "sintetico": false},
-  "f165_cuprum_rent36_c": {"valor": "5,99", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0 (rentabilidad 36 meses, fondo C)", "sintetico": false},
-  "f165_sistema_afiliados": {"valor": "12.201.632", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (sistema, jun-2026)", "sintetico": false},
-  "f165_sistema_cotizantes": {"valor": "5.775.070", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (sistema, jun-2026)", "sintetico": false},
-  "f165_sistema_ingreso_imponible": {"valor": "1.346.859", "unidad": " CLP", "fuente": "docs/contexto_afp_cuprum.md §0", "sintetico": false},
-  "f165_sistema_traspasos_brutos": {"valor": "56.974", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §0 (cuentas traspasadas entre AFP, jun-2026)", "sintetico": false},
-  "f165_densidad_cuprum_memoria": {"valor": "66,94", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §1 (Memoria Integrada Cuprum 2025)", "sintetico": false, "valor_num": 66.94},
-  "f165_densidad_sistema": {"valor": "47,3", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §0 / afp_lab/common/README.md (Ronda 3)", "sintetico": false, "valor_num": 47.3},
-  "f165_licitacion_anio": {"valor": "2027", "unidad": "", "fuente": "docs/contexto_afp_cuprum.md §3 (Ley 21.735, primera licitación agosto 2027)", "sintetico": false},
-  "f165_licitacion_pct": {"valor": "10", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §3 (afiliados no pensionados sorteados cada 2 años)", "sintetico": false},
-
-  "meta_tests_total": {"valor": "155", "unidad": "", "fuente": "README.md raíz, Resultados de la ronda 3 / afp_lab/common/README.md", "sintetico": false},
-  "meta_tests_fallos": {"valor": "0", "unidad": "", "fuente": "README.md raíz, Resultados de la ronda 3", "sintetico": false},
-  "meta_tests_runtime": {"valor": "9 min 46 s", "unidad": "", "fuente": "README.md raíz, Resultados de la ronda 3", "sintetico": false},
-  "meta_universo_afiliados": {"valor": "20.000", "unidad": "", "fuente": "README.md raíz, Resultados de la ronda 1 (perfil de referencia del laboratorio)", "sintetico": true},
-  "roadmap_horizonte": {"valor": "6", "unidad": "-12 meses", "fuente": "docs/briefs/ronda_4/reporte_ejecutivo.md, Estructura punto 4", "sintetico": false},
-
-  "dens_sistema_antes": {"valor": "78-79", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3 (tabla de PERFILES)", "sintetico": true, "valor_num": 78.5},
-  "dens_sistema_despues": {"valor": "47,7-47,8", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3", "sintetico": true, "valor_num": 47.75},
-  "dens_cuprum_antes": {"valor": "71-73", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3", "sintetico": true, "valor_num": 72},
-  "dens_cuprum_despues": {"valor": "66,4-66,5", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3", "sintetico": true, "valor_num": 66.45},
-
-  "p01_wape_h1": {"valor": "0,115", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10 (dependientes, h=1, sistema y cuprum)", "sintetico": true},
-  "p01_wape_h2_sistema": {"valor": "0,182", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10b (dependientes, h=2, perfil sistema)", "sintetico": true},
-  "p01_wape_h2_cuprum": {"valor": "0,221", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10b (dependientes, h=2, perfil cuprum)", "sintetico": true},
-  "p01_wape_h1_persistencia": {"valor": "0,215", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10 (baseline persistencia, dependientes h=1)", "sintetico": true},
-  "p01_auc_cotiza": {"valor": "0,969", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10 (clasificador cotiza/no cotiza, h=1)", "sintetico": true},
-  "p01_auc_cotiza_h2": {"valor": "0,918", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10 (clasificador cotiza/no cotiza, h=2)", "sintetico": true},
-  "p01_desfase_meses": {"valor": "2", "unidad": " meses", "fuente": "afp_lab/rim_nowcasting/README.md §1 (desfase de la cotización)", "sintetico": true},
-  "p01_escala": {"valor": "5.000", "unidad": " afiliados", "fuente": "afp_lab/rim_nowcasting/README.md §10 (corrida de referencia del demo)", "sintetico": true},
-
-  "p01c_escala": {"valor": "5.000", "unidad": " afiliados", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_snapshots": {"valor": "12", "unidad": " orígenes de entrenamiento", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h1_sistema_antes": {"valor": "0,196", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h1_sistema_despues": {"valor": "0,194", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h2_sistema_antes": {"valor": "0,258", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h2_sistema_despues": {"valor": "0,259", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h1_cuprum_antes": {"valor": "0,210", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h1_cuprum_despues": {"valor": "0,212", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h2_cuprum_antes": {"valor": "0,304", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_wape_h2_cuprum_despues": {"valor": "0,270", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h1_sistema_antes": {"valor": "-4,1", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h1_sistema_despues": {"valor": "-4,6", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h2_sistema_antes": {"valor": "-4,3", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h2_sistema_despues": {"valor": "-4,8", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h2_cuprum_antes": {"valor": "-6,8", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_sesgo_h2_cuprum_despues": {"valor": "-3,4", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_auc_h1_sistema": {"valor": "0,969", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_auc_h2_sistema_antes": {"valor": "0,918", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_auc_h2_sistema_despues": {"valor": "0,919", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_subsidio_h1_antes": {"valor": "0,169", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_subsidio_h1_despues": {"valor": "0,154", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_subsidio_h2_antes": {"valor": "0,218", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_subsidio_h2_despues": {"valor": "0,206", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_resto_h1_antes": {"valor": "0,119", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_resto_h1_despues": {"valor": "0,116", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_resto_h2_antes": {"valor": "0,192", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_resto_h2_despues": {"valor": "0,188", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_independiente_rango": {"valor": "0,85-0,89", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_seg_termino_sesgo": {"valor": "-95", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7) (sesgo aproximado, ambas versiones)", "sintetico": true},
-  "p01c_runtime": {"valor": "6", "unidad": " minutos", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": false},
-  "p01c_tests_antes": {"valor": "11", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": false},
-  "p01c_tests_despues": {"valor": "18", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": false},
-  "p01c_delta_umbral": {"valor": "0,03", "unidad": "", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-  "p01c_coincidencia_termino_afc": {"valor": "87", "unidad": " %", "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)", "sintetico": true},
-
-  "p02_auc_modelo": {"valor": "0,720", "unidad": "", "fuente": "afp_lab/churn_traspaso/README.md §6 (semilla 42, perfil sistema, test 2026-01 a 03)", "sintetico": true, "valor_num": 0.720},
-  "p02_auc_baseline": {"valor": "0,598", "unidad": "", "fuente": "afp_lab/churn_traspaso/README.md §6 (baseline regla graduada)", "sintetico": true, "valor_num": 0.598},
-  "p02_captura10_traspasos": {"valor": "35,0", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §6/§7 (semilla 42)", "sintetico": true},
-  "p02_captura10_saldo": {"valor": "38,2", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §7 (semilla 42)", "sintetico": true},
-  "p02_razon_vs_regla": {"valor": "1,80", "unidad": "×", "fuente": "afp_lab/churn_traspaso/README.md §6/§7 (semilla 42; rango 5 semillas 1,30-1,85)", "sintetico": true},
-  "p02_captura10_rango": {"valor": "30,0-36,6", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §6 (rango 5 semillas)", "sintetico": true},
-  "p02_cuprum_auc_rango": {"valor": "0,714-0,754", "unidad": "", "fuente": "afp_lab/churn_traspaso/README.md §13.A (3 semillas, perfil cuprum)", "sintetico": true},
-  "p02_licitacion_sorteados_pct": {"valor": "9,6", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (cartera cuprum)", "sintetico": true},
-  "p02_licitacion_saldo_riesgo": {"valor": "23.943", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (saldo en riesgo esperado, supuesto 65% salida pasiva)", "sintetico": true},
-  "p02_licitacion_saldo_pct": {"valor": "6,2", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (% del saldo administrado)", "sintetico": true},
-  "p02_escenario_saldo_retenido_valor": {"valor": "5.260", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 65%, prioridad saldo×probabilidad, capacidad 30%)", "sintetico": true, "valor_num": 5260},
-  "p02_escenario_saldo_retenido_azar": {"valor": "2.548", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 65%, prioridad aleatoria, capacidad 30%)", "sintetico": true, "valor_num": 2548},
-  "p02_esc55_prioridad": {"valor": "5.156", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 55%, saldo×probabilidad)", "sintetico": true, "valor_num": 5156},
-  "p02_esc55_azar": {"valor": "2.526", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 55%, aleatorio)", "sintetico": true, "valor_num": 2526},
-  "p02_esc75_prioridad": {"valor": "5.140", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 75%, saldo×probabilidad)", "sintetico": true, "valor_num": 5140},
-  "p02_esc75_azar": {"valor": "2.428", "unidad": " MM CLP", "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 75%, aleatorio)", "sintetico": true, "valor_num": 2428},
-  "p02_esc_pct_baja": {"valor": "55", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario bajo)", "sintetico": true},
-  "p02_esc_pct_ref": {"valor": "65", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario de referencia)", "sintetico": true},
-  "p02_esc_pct_alta": {"valor": "75", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario alto)", "sintetico": true},
-  "p02_esc_capacidad": {"valor": "30", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §13.B (capacidad de campaña sobre los sorteados)", "sintetico": true},
-  "p02_ronda3_auc_antes": {"valor": "0,698", "unidad": "", "fuente": "afp_lab/common/README.md, Ronda 3 (churn, perfil sistema, antes de recalibrar densidad)", "sintetico": true},
-  "p02_ronda3_auc_despues": {"valor": "0,754", "unidad": "", "fuente": "afp_lab/common/README.md, Ronda 3 (churn, perfil sistema, después de recalibrar densidad)", "sintetico": true},
-  "p02_ronda3_captura_antes": {"valor": "35,8", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3", "sintetico": true},
-  "p02_ronda3_captura_despues": {"valor": "39,0", "unidad": " %", "fuente": "afp_lab/common/README.md, Ronda 3", "sintetico": true},
-  "p02_auc_umbral_real": {"valor": "0,75", "unidad": "", "fuente": "afp_lab/churn_traspaso/README.md §8/§10 (umbral para datos reales)", "sintetico": false},
-  "p02_tests": {"valor": "39", "unidad": "", "fuente": "afp_lab/churn_traspaso/README.md §14 (~30 s)", "sintetico": false},
-  "p02_runtime": {"valor": "60", "unidad": " s", "fuente": "afp_lab/churn_traspaso/README.md §9/§14 (perfil cuprum)", "sintetico": false},
-  "p02_escala": {"valor": "20.000", "unidad": " afiliados", "fuente": "afp_lab/churn_traspaso/README.md (corrida de referencia)", "sintetico": true},
-
-  "p03_auc": {"valor": "0,836", "unidad": "", "fuente": "afp_lab/propension_apv/README.md §6.1 (agregado 12 cortes de test)", "sintetico": true, "valor_num": 0.836},
-  "p03_auc_regla": {"valor": "0,709", "unidad": "", "fuente": "afp_lab/propension_apv/README.md §6.1 (baseline regla de negocio)", "sintetico": true, "valor_num": 0.709},
-  "p03_captura10_monto": {"valor": "67,8", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §7 (contactando al 10 %, ordenado por monto esperado)", "sintetico": true},
-  "p03_captura10_monto_renta": {"valor": "49,4", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §7 (ordenar por renta, práctica actual)", "sintetico": true},
-  "p03_captura10_aportantes": {"valor": "47,4", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §7 (nuevos aportantes capturados al 10 %)", "sintetico": true},
-  "p03_wape_monto": {"valor": "0,555", "unidad": "", "fuente": "afp_lab/propension_apv/README.md §6.2 (WAPE del monto, condicional en aportantes, agregado)", "sintetico": true},
-  "p03_sesgo_monto": {"valor": "1,0", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §6.2 (sesgo agregado, monto esperado en toda la población)", "sintetico": true},
-  "p03_tests": {"valor": "26", "unidad": "", "fuente": "afp_lab/propension_apv/README.md (encabezado, ~9 s)", "sintetico": false},
-  "p03_runtime": {"valor": "86", "unidad": " s", "fuente": "afp_lab/propension_apv/README.md §9 (máquina libre)", "sintetico": false},
-  "p03_escala": {"valor": "20.000", "unidad": " afiliados", "fuente": "afp_lab/propension_apv/README.md (corrida de referencia)", "sintetico": true},
-
-  "p04_auc_cese3m": {"valor": "0,887", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, tras corrección de la ronda 3)", "sintetico": true, "valor_num": 0.887},
-  "p04_auc_regla_cese3m": {"valor": "0,798", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (baseline regla de negocio, cese 3 m)", "sintetico": true, "valor_num": 0.798},
-  "p04_auc_cese6m": {"valor": "0,878", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42)", "sintetico": true},
-  "p04_auc_reingreso_antes_densidad": {"valor": "0,720", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, antes de recalibrar la densidad, ronda 2)", "sintetico": true},
-  "p04_auc_reingreso_tras_densidad": {"valor": "0,605", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, solo con la recalibración de densidad, antes de agregar las features del último empleo)", "sintetico": true},
-  "p04_auc_reingreso_actual": {"valor": "0,608", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, después de la corrección de features)", "sintetico": true},
-  "p04_auc_reingreso_umbral": {"valor": "0,70", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §8 (criterio de aceptación del brief)", "sintetico": false},
-  "p04_cuprum_auc_cese3m": {"valor": "0,889", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (cuprum, semilla 42)", "sintetico": true},
-  "p04_cuprum_auc_reingreso": {"valor": "0,626", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (cuprum, semilla 42, después de la corrección)", "sintetico": true},
-  "p04_captura10_cese3m": {"valor": "63,1", "unidad": " %", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (medido antes de la recalibración de densidad de la ronda 3; no vuelto a medir por alcance de esa corrección, ver §12)", "sintetico": true},
-  "p04_captura10_cese6m": {"valor": "63,5", "unidad": " %", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (misma salvedad que la fila anterior)", "sintetico": true},
-  "p04_tests": {"valor": "29", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (~19 s)", "sintetico": false},
-  "p04_runtime": {"valor": "50,1", "unidad": " s", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md, Correcciones de la ronda 3 (revisión del gerente)", "sintetico": false},
-  "p04_escala": {"valor": "20.000", "unidad": " afiliados", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md (corrida de referencia)", "sintetico": true},
-
-  "p05_auc": {"valor": "0,865", "unidad": "", "fuente": "afp_lab/riesgo_empleador/README.md §6.1 (ronda 3, semilla 42)", "sintetico": true, "valor_num": 0.865},
-  "p05_auc_regla": {"valor": "0,756", "unidad": "", "fuente": "afp_lab/riesgo_empleador/README.md §6.1 (baseline regla de negocio)", "sintetico": true, "valor_num": 0.756},
-  "p05_captura10_masa": {"valor": "48,6", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (semilla 42)", "sintetico": true},
-  "p05_captura10_masa_promedio5": {"valor": "51,9", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (promedio de 5 semillas, rango 48,6-57,2 %)", "sintetico": true},
-  "p05_captura10_regla": {"valor": "44,1", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3", "sintetico": true},
-  "p05_precision_lista_modelo": {"valor": "21,9", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3", "sintetico": true},
-  "p05_precision_lista_regla": {"valor": "10,8", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3", "sintetico": true},
-  "p05_volatilidad_agregado": {"valor": "63,6", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (ronda 3, ~1.000 empleadores)", "sintetico": true},
-  "p05_volatilidad_agregado_antes": {"valor": "98,9", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (ronda 2, ~500 empleadores)", "sintetico": true},
-  "p05_meses_dentro_10pct": {"valor": "2", "unidad": " de 12 meses", "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (criterio de error del agregado ≤10 %)", "sintetico": true},
-  "p05_empleadores": {"valor": "1.000", "unidad": "", "fuente": "afp_lab/riesgo_empleador/README.md §2.1 (~1.000 empleadores con 20.000 afiliados, ronda 3)", "sintetico": true},
-  "p05_tests": {"valor": "21", "unidad": "", "fuente": "afp_lab/riesgo_empleador/README.md §9 (~13 s)", "sintetico": false},
-  "p05_runtime": {"valor": "26", "unidad": " s", "fuente": "afp_lab/riesgo_empleador/README.md §9", "sintetico": false},
-  "p05_escala": {"valor": "20.000", "unidad": " afiliados", "fuente": "afp_lab/riesgo_empleador/README.md (corrida de referencia)", "sintetico": true},
-
-  "p06_segmentos_n": {"valor": "4", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (k final tras fusión de segmentos chicos)", "sintetico": true},
-  "p06_silueta": {"valor": "0,2395", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (Aceptación, post-fusión)", "sintetico": true},
-  "p06_ari_remuestreo": {"valor": "0,987", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §6", "sintetico": true},
-  "p06_ari_temporal": {"valor": "0,4655", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §6/§8 (recalculado post-fusión)", "sintetico": true},
-  "p06_clasificador_exactitud": {"valor": "0,9812", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §6", "sintetico": true},
-  "p06_razon_apv": {"valor": "30,69", "unidad": "×", "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (tabla de tasas de negocio por segmento)", "sintetico": true},
-  "p06_razon_cese": {"valor": "3,38", "unidad": "×", "fuente": "afp_lab/segmentacion_afiliados/README.md §6", "sintetico": true},
-  "p06_razon_traspaso": {"valor": "2,08", "unidad": "×", "fuente": "afp_lab/segmentacion_afiliados/README.md §6", "sintetico": true},
-  "p06_tests": {"valor": "14", "unidad": "", "fuente": "afp_lab/segmentacion_afiliados/README.md §9 (~3,1 s)", "sintetico": false},
-  "p06_runtime": {"valor": "90,8", "unidad": " s", "fuente": "afp_lab/segmentacion_afiliados/README.md §9", "sintetico": false},
-  "p06_escala": {"valor": "20.000", "unidad": " afiliados", "fuente": "afp_lab/segmentacion_afiliados/README.md (corrida de referencia)", "sintetico": true},
-
-  "p07_qini_xlearner": {"valor": "0,00086", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.3 (Qini agregado, 3 cortes de test, holdout aleatorio)", "sintetico": true},
-  "p07_evitados_xlearner10": {"valor": "14,6", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (traspasos evitados, contactando 10 %)", "sintetico": true, "valor_num": 14.6},
-  "p07_evitados_drlearner10": {"valor": "10,8", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4", "sintetico": true, "valor_num": 10.8},
-  "p07_evitados_tlearner10": {"valor": "5,3", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4", "sintetico": true, "valor_num": 5.3},
-  "p07_evitados_riesgo10": {"valor": "3,2", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline: ranking de riesgo de 02 usado como uplift)", "sintetico": true, "valor_num": 3.2},
-  "p07_evitados_riesgo20": {"valor": "7,6", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline de riesgo, contactando al 20 %)", "sintetico": true, "valor_num": 7.6},
-  "p07_evitados_azar10": {"valor": "0,2", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline aleatorio)", "sintetico": true, "valor_num": 0.2},
-  "p07_evitados_xlearner20": {"valor": "20,8", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (contactando 20 %)", "sintetico": true},
-  "p07_razon_10": {"valor": "4,54", "unidad": "×", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (X-learner sobre baseline de riesgo, 10 %)", "sintetico": true},
-  "p07_razon_20": {"valor": "2,75", "unidad": "×", "fuente": "afp_lab/uplift_retencion/README.md §6.4 (20 %)", "sintetico": true},
-  "p07_spearman_dr": {"valor": "0,195", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §6.2 (correlación del CATE estimado vs. la verdad del simulador)", "sintetico": true},
-  "p07_tests": {"valor": "13", "unidad": "", "fuente": "afp_lab/uplift_retencion/README.md §9 (~5 s)", "sintetico": false},
-  "p07_runtime": {"valor": "26,2", "unidad": " s", "fuente": "afp_lab/uplift_retencion/README.md §6.6", "sintetico": false},
-  "p07_escala": {"valor": "10.000", "unidad": " afiliados", "fuente": "afp_lab/uplift_retencion/README.md §8 (escala reducida de esta ronda)", "sintetico": true},
-
-  "p09_reward_thompson": {"valor": "2,138", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson lineal, 24 meses, media de 5 semillas)", "sintetico": true, "valor_num": 2.138},
-  "p09_reward_epsgreedy": {"valor": "2,130", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1", "sintetico": true, "valor_num": 2.130},
-  "p09_reward_heuristica": {"valor": "2,116", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1 (política actual)", "sintetico": true, "valor_num": 2.116},
-  "p09_reward_bootstrap": {"valor": "2,109", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson-LGBM)", "sintetico": true, "valor_num": 2.109},
-  "p09_reward_linucb": {"valor": "2,063", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1", "sintetico": true, "valor_num": 2.063},
-  "p09_reward_sincontacto": {"valor": "2,035", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1", "sintetico": true, "valor_num": 2.035},
-  "p09_gasto_heuristica": {"valor": "55,2", "unidad": " M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.1/§7 (costo total, política actual)", "sintetico": true},
-  "p09_ganancia_vs_sincontacto": {"valor": "80", "unidad": " M CLP", "fuente": "afp_lab/bandit_contacto/README.md §7 (política actual sobre SIN_CONTACTO, 24 meses)", "sintetico": true},
-  "p09_gana_epsgreedy_thompson": {"valor": "3", "unidad": "/5", "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson lineal gana a eps-greedy)", "sintetico": true},
-  "p09_umbral_semillas": {"valor": "4", "unidad": "/5", "fuente": "afp_lab/bandit_contacto/README.md §6.1 (criterio de aceptación del brief)", "sintetico": false},
-  "p09_barrido_f4_thompson_gana": {"valor": "4", "unidad": "/5", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal = 4×, Thompson lineal)", "sintetico": true},
-  "p09_barrido_f0_epsgreedy": {"valor": "2,138", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=0)", "sintetico": true, "valor_num": 2.138},
-  "p09_barrido_f0_thompson": {"valor": "2,137", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=0)", "sintetico": true, "valor_num": 2.137},
-  "p09_barrido_f2_epsgreedy": {"valor": "2,129", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=2)", "sintetico": true, "valor_num": 2.129},
-  "p09_barrido_f2_thompson": {"valor": "2,136", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=2)", "sintetico": true, "valor_num": 2.136},
-  "p09_barrido_f4_epsgreedy": {"valor": "2,135", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=4)", "sintetico": true, "valor_num": 2.135},
-  "p09_barrido_f4_thompson": {"valor": "2,152", "unidad": " mil M CLP", "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=4)", "sintetico": true, "valor_num": 2.152},
-  "p09_dr_error_epsgreedy": {"valor": "0,1", "unidad": " %", "fuente": "afp_lab/bandit_contacto/README.md §6.3 (error relativo del estimador DR)", "sintetico": true},
-  "p09_dr_umbral": {"valor": "15", "unidad": " %", "fuente": "afp_lab/bandit_contacto/README.md §6.3/§7 (criterio de aceptación)", "sintetico": false},
-  "p09_tests": {"valor": "19", "unidad": "", "fuente": "afp_lab/bandit_contacto/README.md §9 (~2,5 s)", "sintetico": false},
-  "p09_runtime": {"valor": "8", "unidad": "-9 s", "fuente": "afp_lab/bandit_contacto/README.md §9", "sintetico": false},
-  "p09_escala": {"valor": "10.000", "unidad": " afiliados", "fuente": "afp_lab/bandit_contacto/README.md §6 (corrida de referencia)", "sintetico": true},
-
-  "p04_fix_delta_min": {"valor": "0,003", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (mejora de la corrección de features, tres de cuatro combinaciones)", "sintetico": true},
-  "p04_fix_delta_max": {"valor": "0,008", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12", "sintetico": true},
-  "p04_fix_delta_neg": {"valor": "0,005", "unidad": "", "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (la única combinación donde la corrección empeora, cuprum semilla 7)", "sintetico": true},
-  "p08_delta_lags_min": {"valor": "0,001", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (diferencia entre la red y el LightGBM con la misma información)", "sintetico": true},
-  "p08_delta_lags_max": {"valor": "0,009", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6", "sintetico": true},
-  "p08_reprod_lgbm_cese": {"valor": "0,8614", "unidad": "", "fuente": "docs/revisiones/ronda_4/secuencial.md (cifra reproducida de forma independiente por el revisor, cese, lightgbm_produccion)", "sintetico": true},
-  "p08_umbral_auc": {"valor": "0,01", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (criterio del brief: 'reemplaza' si mejora ≥0,01 AUC en ≥2 cabezas)", "sintetico": false},
-  "glosario_auc_min": {"valor": "0,50", "unidad": "", "fuente": "Definición estándar de AUC (0,5 = azar)", "sintetico": false},
-  "glosario_auc_max": {"valor": "1,00", "unidad": "", "fuente": "Definición estándar de AUC (1,0 = perfecto)", "sintetico": false},
-  "meta_pct_sintetico": {"valor": "100", "unidad": "", "fuente": "docs/briefs/ronda_4/reporte_ejecutivo.md y persona del laboratorio (README.md raíz): todos los datos son sintéticos", "sintetico": false},
-  "p03_voluntario_pct": {"valor": "2,2", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §6.4 (fracción de la cartera elegible que es tipo VOLUNTARIO)", "sintetico": true},
-  "semilla42": {"valor": "42", "unidad": "", "fuente": "Semilla aleatoria de las corridas de referencia citadas en este informe (fijada en cada README para reproducibilidad)", "sintetico": true},
-  "ventana24": {"valor": "24", "unidad": " meses", "fuente": "afp_lab/secuencial_afiliado/README.md §4.1 (ventana de secuencia) y afp_lab/bandit_contacto/README.md §3 (ventana de simulación online)", "sintetico": true},
-  "f165_rent36_meses": {"valor": "36", "unidad": " meses", "fuente": "docs/contexto_afp_cuprum.md §0/§1 (ventana de rentabilidad real donde Cuprum lidera)", "sintetico": false},
-  "p05_umbral_captura": {"valor": "50", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (criterio de aceptación del brief)", "sintetico": false},
-  "p05_captura_rango_texto": {"valor": "45-55", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (cita textual: '45-55 % de la masa con el 10 % de la cartera')", "sintetico": true},
-  "p02_sesgo_min": {"valor": "-3,6", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §6 (sesgo del saldo en riesgo, isotónica, ventana reciente)", "sintetico": true},
-  "p02_sesgo_max": {"valor": "+40,2", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §6 (sesgo del saldo en riesgo, rango 5 semillas)", "sintetico": true},
-
-  "planilla_codigos": {"valor": "12", "unidad": " códigos", "fuente": "afp_lab/common/BRIEF_PLANILLA.md punto 1 (Tabla N° 7 de movimiento de personal)", "sintetico": false},
-  "planilla_reforma_pct": {"valor": "3,5", "unidad": " %", "fuente": "docs/contexto_afp_cuprum.md §3 (Ley 21.735, cotización adicional del empleador desde agosto de 2025)", "sintetico": false},
-
-  "p08_auc_lgbm_traspaso": {"valor": "0,7255", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM de producción de 02, mismo split recortado, traspaso 6 m)", "sintetico": true, "valor_num": 0.7255},
-  "p08_auc_lags_traspaso": {"valor": "0,5940", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM sobre la secuencia aplanada, traspaso)", "sintetico": true, "valor_num": 0.5940},
-  "p08_auc_red_multitarea_traspaso": {"valor": "0,5848", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU multi-tarea, traspaso)", "sintetico": true, "valor_num": 0.5848},
-  "p08_auc_red_single_traspaso": {"valor": "0,5766", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU single-task, traspaso)", "sintetico": true, "valor_num": 0.5766},
-  "p08_auc_lgbm_cese": {"valor": "0,8610", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM de producción de 04, mismo split recortado, cese 6 m)", "sintetico": true, "valor_num": 0.8610},
-  "p08_auc_lags_cese": {"valor": "0,7775", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM sobre la secuencia aplanada, cese)", "sintetico": true, "valor_num": 0.7775},
-  "p08_auc_red_multitarea_cese": {"valor": "0,7768", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU multi-tarea, cese)", "sintetico": true, "valor_num": 0.7768},
-  "p08_auc_red_single_cese": {"valor": "0,7807", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU single-task, cese)", "sintetico": true, "valor_num": 0.7807},
-  "p08_delta_auc_traspaso": {"valor": "0,141", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (caída de AUC de la red multi-tarea vs. LightGBM de producción, traspaso)", "sintetico": true},
-  "p08_delta_auc_cese": {"valor": "0,084", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (caída de AUC de la red multi-tarea vs. LightGBM de producción, cese)", "sintetico": true},
-  "p08_escala": {"valor": "10.000", "unidad": " afiliados", "fuente": "afp_lab/secuencial_afiliado/README.md §6 (corrida de referencia)", "sintetico": true},
-  "p08_cortes_train": {"valor": "7", "unidad": " cortes", "fuente": "afp_lab/secuencial_afiliado/README.md §3/§8 (max_cortes_train, recorte por presupuesto de la ronda)", "sintetico": true},
-  "p08_tests": {"valor": "7", "unidad": "", "fuente": "afp_lab/secuencial_afiliado/README.md §9 (~16,6 s)", "sintetico": false},
-  "p08_runtime": {"valor": "228,9", "unidad": " s", "fuente": "afp_lab/secuencial_afiliado/README.md §9 (corrida de referencia completa)", "sintetico": false},
-
-  "cap10": {"valor": "10", "unidad": " %", "fuente": "Convención de capacidad de contacto de 02 §1, 03 §1, 04 §7 y 05 §1 (10 % de la cartera o de los empleadores al mes)", "sintetico": true},
-  "cap20": {"valor": "20", "unidad": " %", "fuente": "Misma convención que cap10, escenario de duplicar la capacidad de contacto (02 §6, 03 §7, 05 §6.3)", "sintetico": true},
-  "horizonte6": {"valor": "6", "unidad": " meses", "fuente": "Horizonte de predicción de 02 §3, 03 §3 y 04 §3 (cese/reingreso a 6 meses)", "sintetico": true},
-  "horizonte3": {"valor": "3", "unidad": " meses", "fuente": "Horizonte de predicción de 04 §3 (cese a 3 meses) y 05 §1 (variante y_dnp_3m)", "sintetico": true},
-  "p02_captura20_traspasos": {"valor": "51,0", "unidad": " %", "fuente": "afp_lab/churn_traspaso/README.md §6 (contactando al 20 %, semilla 42)", "sintetico": true},
-  "p03_captura20_monto": {"valor": "82,8", "unidad": " %", "fuente": "afp_lab/propension_apv/README.md §7 (contactando al 20 %, ordenado por monto esperado)", "sintetico": true},
-  "p05_captura20_masa": {"valor": "70,9", "unidad": " %", "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (gestionando al 20 % de los empleadores)", "sintetico": true}
+  "cap10": {
+    "fuente": "Convención de capacidad de contacto de 02 §1, 03 §1, 04 §7 y 05 §1 (10 % de la cartera o de los empleadores al mes)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "10"
+  },
+  "cap20": {
+    "fuente": "Misma convención que cap10, escenario de duplicar la capacidad de contacto (02 §6, 03 §7, 05 §6.3)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "20"
+  },
+  "dens_cuprum_antes": {
+    "fuente": "afp_lab/common/README.md, Ronda 3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "71-73",
+    "valor_num": 72
+  },
+  "dens_cuprum_despues": {
+    "fuente": "afp_lab/common/README.md, Ronda 3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "66,4-66,5",
+    "valor_num": 66.45
+  },
+  "dens_sistema_antes": {
+    "fuente": "afp_lab/common/README.md, Ronda 3 (tabla de PERFILES)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "78-79",
+    "valor_num": 78.5
+  },
+  "dens_sistema_despues": {
+    "fuente": "afp_lab/common/README.md, Ronda 3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "47,7-47,8",
+    "valor_num": 47.75
+  },
+  "f165_cuprum_activos": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (activos administrados, jul-2026)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "17,3"
+  },
+  "f165_cuprum_afiliados_pct": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (afiliados, jun-2026)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "4,5"
+  },
+  "f165_cuprum_comision": {
+    "fuente": "docs/contexto_afp_cuprum.md §0",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "1,44"
+  },
+  "f165_cuprum_cotizantes_pct": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (cotizantes, jun-2026)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "6,3"
+  },
+  "f165_cuprum_ingreso_imponible": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (ingreso imponible promedio)",
+    "sintetico": false,
+    "unidad": " CLP",
+    "valor": "2.331.030"
+  },
+  "f165_cuprum_rent36_c": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (rentabilidad 36 meses, fondo C)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "5,99"
+  },
+  "f165_cuprum_traspasos_netos": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (traspasos netos, jun-2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "4.128"
+  },
+  "f165_cuprum_var_afiliados": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (variación neta de afiliados, 12 meses, es negativa)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "10.995"
+  },
+  "f165_densidad_cuprum_memoria": {
+    "fuente": "docs/contexto_afp_cuprum.md §1 (Memoria Integrada Cuprum 2025)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "66,94",
+    "valor_num": 66.94
+  },
+  "f165_densidad_sistema": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 / afp_lab/common/README.md (Ronda 3)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "47,3",
+    "valor_num": 47.3
+  },
+  "f165_fecha_anio": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (agosto 2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "2026"
+  },
+  "f165_licitacion_anio": {
+    "fuente": "docs/contexto_afp_cuprum.md §3 (Ley 21.735, primera licitación agosto 2027)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "2027"
+  },
+  "f165_licitacion_pct": {
+    "fuente": "docs/contexto_afp_cuprum.md §3 (afiliados no pensionados sorteados cada 2 años)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "10"
+  },
+  "f165_numero": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (Ficha Estadística Previsional N° 165, SP, agosto 2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "165"
+  },
+  "f165_rent36_meses": {
+    "fuente": "docs/contexto_afp_cuprum.md §0/§1 (ventana de rentabilidad real donde Cuprum lidera)",
+    "sintetico": false,
+    "unidad": " meses",
+    "valor": "36"
+  },
+  "f165_sistema_afiliados": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (sistema, jun-2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "12.201.632"
+  },
+  "f165_sistema_cotizantes": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (sistema, jun-2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "5.775.070"
+  },
+  "f165_sistema_ingreso_imponible": {
+    "fuente": "docs/contexto_afp_cuprum.md §0",
+    "sintetico": false,
+    "unidad": " CLP",
+    "valor": "1.346.859"
+  },
+  "f165_sistema_traspasos_brutos": {
+    "fuente": "docs/contexto_afp_cuprum.md §0 (cuentas traspasadas entre AFP, jun-2026)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "56.974"
+  },
+  "glosario_auc_max": {
+    "fuente": "Definición estándar de AUC (1,0 = perfecto)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "1,00"
+  },
+  "glosario_auc_min": {
+    "fuente": "Definición estándar de AUC (0,5 = azar)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "0,50"
+  },
+  "horizonte3": {
+    "fuente": "Horizonte de predicción de 04 §3 (cese a 3 meses) y 05 §1 (variante y_dnp_3m)",
+    "sintetico": true,
+    "unidad": " meses",
+    "valor": "3"
+  },
+  "horizonte6": {
+    "fuente": "Horizonte de predicción de 02 §3, 03 §3 y 04 §3 (cese/reingreso a 6 meses)",
+    "sintetico": true,
+    "unidad": " meses",
+    "valor": "6"
+  },
+  "meta_pct_sintetico": {
+    "fuente": "docs/briefs/ronda_4/reporte_ejecutivo.md y persona del laboratorio (README.md raíz): todos los datos son sintéticos",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "100"
+  },
+  "meta_tests_fallos": {
+    "fuente": "README.md raíz, Resultados de la ronda 3",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "0"
+  },
+  "meta_tests_runtime": {
+    "fuente": "README.md raíz, Resultados de la ronda 3",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "9 min 46 s"
+  },
+  "meta_tests_total": {
+    "fuente": "README.md raíz, Resultados de la ronda 3 / afp_lab/common/README.md",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "155"
+  },
+  "meta_universo_afiliados": {
+    "fuente": "README.md raíz, Resultados de la ronda 1 (perfil de referencia del laboratorio)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "20.000"
+  },
+  "p01_auc_cotiza": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10 (clasificador cotiza/no cotiza, h=1)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,969"
+  },
+  "p01_auc_cotiza_h2": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10 (clasificador cotiza/no cotiza, h=2)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,918"
+  },
+  "p01_desfase_meses": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §1 (desfase de la cotización)",
+    "sintetico": true,
+    "unidad": " meses",
+    "valor": "2"
+  },
+  "p01_escala": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10 (corrida de referencia del demo)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "5.000"
+  },
+  "p01_wape_h1": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10 (dependientes, h=1, sistema y cuprum)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,115"
+  },
+  "p01_wape_h1_persistencia": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10 (baseline persistencia, dependientes h=1)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,215"
+  },
+  "p01_wape_h2_cuprum": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10b (dependientes, h=2, perfil cuprum)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,221"
+  },
+  "p01_wape_h2_sistema": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10b (dependientes, h=2, perfil sistema)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,182"
+  },
+  "p01c_auc_h1_sistema": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,969"
+  },
+  "p01c_auc_h2_sistema_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,918"
+  },
+  "p01c_auc_h2_sistema_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,919"
+  },
+  "p01c_coincidencia_termino_afc": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "87"
+  },
+  "p01c_delta_umbral": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,03"
+  },
+  "p01c_escala": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "5.000"
+  },
+  "p01c_runtime": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": false,
+    "unidad": " minutos",
+    "valor": "6"
+  },
+  "p01c_seg_independiente_rango": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,85-0,89"
+  },
+  "p01c_seg_resto_h1_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,119"
+  },
+  "p01c_seg_resto_h1_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,116"
+  },
+  "p01c_seg_resto_h2_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,192"
+  },
+  "p01c_seg_resto_h2_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,188"
+  },
+  "p01c_seg_subsidio_h1_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,169"
+  },
+  "p01c_seg_subsidio_h1_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,154"
+  },
+  "p01c_seg_subsidio_h2_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,218"
+  },
+  "p01c_seg_subsidio_h2_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,206"
+  },
+  "p01c_seg_termino_sesgo": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7) (sesgo aproximado, ambas versiones)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-95"
+  },
+  "p01c_sesgo_h1_sistema_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-4,1"
+  },
+  "p01c_sesgo_h1_sistema_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-4,6"
+  },
+  "p01c_sesgo_h2_cuprum_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-6,8"
+  },
+  "p01c_sesgo_h2_cuprum_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-3,4"
+  },
+  "p01c_sesgo_h2_sistema_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-4,3"
+  },
+  "p01c_sesgo_h2_sistema_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-4,8"
+  },
+  "p01c_snapshots": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": " orígenes de entrenamiento",
+    "valor": "12"
+  },
+  "p01c_tests_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "11"
+  },
+  "p01c_tests_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "18"
+  },
+  "p01c_wape_h1_cuprum_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,210"
+  },
+  "p01c_wape_h1_cuprum_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,212"
+  },
+  "p01c_wape_h1_sistema_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,196"
+  },
+  "p01c_wape_h1_sistema_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,194"
+  },
+  "p01c_wape_h2_cuprum_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,304"
+  },
+  "p01c_wape_h2_cuprum_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,270"
+  },
+  "p01c_wape_h2_sistema_antes": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,258"
+  },
+  "p01c_wape_h2_sistema_despues": {
+    "fuente": "afp_lab/rim_nowcasting/README.md §10c (ronda 3, corrección: código de movimiento de personal, Tabla N° 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,259"
+  },
+  "p02_auc_baseline": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (baseline regla graduada)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,598",
+    "valor_num": 0.598
+  },
+  "p02_auc_modelo": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (semilla 42, perfil sistema, test 2026-01 a 03)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,720",
+    "valor_num": 0.72
+  },
+  "p02_auc_umbral_real": {
+    "fuente": "afp_lab/churn_traspaso/README.md §8/§10 (umbral para datos reales)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "0,75"
+  },
+  "p02_captura10_rango": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (rango 5 semillas)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "30,0-36,6"
+  },
+  "p02_captura10_saldo": {
+    "fuente": "afp_lab/churn_traspaso/README.md §7 (semilla 42)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "38,2"
+  },
+  "p02_captura10_traspasos": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6/§7 (semilla 42)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "35,0"
+  },
+  "p02_captura20_traspasos": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (contactando al 20 %, semilla 42)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "51,0"
+  },
+  "p02_cuprum_auc_rango": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.A (3 semillas, perfil cuprum)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,714-0,754"
+  },
+  "p02_esc55_azar": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 55%, aleatorio)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "2.526",
+    "valor_num": 2526
+  },
+  "p02_esc55_prioridad": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 55%, saldo×probabilidad)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "5.156",
+    "valor_num": 5156
+  },
+  "p02_esc75_azar": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 75%, aleatorio)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "2.428",
+    "valor_num": 2428
+  },
+  "p02_esc75_prioridad": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 75%, saldo×probabilidad)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "5.140",
+    "valor_num": 5140
+  },
+  "p02_esc_capacidad": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (capacidad de campaña sobre los sorteados)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "30"
+  },
+  "p02_esc_pct_alta": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario alto)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "75"
+  },
+  "p02_esc_pct_baja": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario bajo)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "55"
+  },
+  "p02_esc_pct_ref": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (supuesto de salida pasiva, escenario de referencia)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "65"
+  },
+  "p02_escala": {
+    "fuente": "afp_lab/churn_traspaso/README.md (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "20.000"
+  },
+  "p02_escenario_saldo_retenido_azar": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 65%, prioridad aleatoria, capacidad 30%)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "2.548",
+    "valor_num": 2548
+  },
+  "p02_escenario_saldo_retenido_valor": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (escenario 65%, prioridad saldo×probabilidad, capacidad 30%)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "5.260",
+    "valor_num": 5260
+  },
+  "p02_licitacion_saldo_pct": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (% del saldo administrado)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "6,2"
+  },
+  "p02_licitacion_saldo_riesgo": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (saldo en riesgo esperado, supuesto 65% salida pasiva)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "23.943"
+  },
+  "p02_licitacion_sorteados_pct": {
+    "fuente": "afp_lab/churn_traspaso/README.md §13.B (cartera cuprum)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "9,6"
+  },
+  "p02_razon_vs_regla": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6/§7 (semilla 42; rango 5 semillas 1,30-1,85)",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "1,80"
+  },
+  "p02_ronda3_auc_antes": {
+    "fuente": "afp_lab/common/README.md, Ronda 3 (churn, perfil sistema, antes de recalibrar densidad)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,698"
+  },
+  "p02_ronda3_auc_despues": {
+    "fuente": "afp_lab/common/README.md, Ronda 3 (churn, perfil sistema, después de recalibrar densidad)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,754"
+  },
+  "p02_ronda3_captura_antes": {
+    "fuente": "afp_lab/common/README.md, Ronda 3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "35,8"
+  },
+  "p02_ronda3_captura_despues": {
+    "fuente": "afp_lab/common/README.md, Ronda 3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "39,0"
+  },
+  "p02_runtime": {
+    "fuente": "afp_lab/churn_traspaso/README.md §9/§14 (perfil cuprum)",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "60"
+  },
+  "p02_sesgo_max": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (sesgo del saldo en riesgo, rango 5 semillas)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "+40,2"
+  },
+  "p02_sesgo_min": {
+    "fuente": "afp_lab/churn_traspaso/README.md §6 (sesgo del saldo en riesgo, isotónica, ventana reciente)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "-3,6"
+  },
+  "p02_tests": {
+    "fuente": "afp_lab/churn_traspaso/README.md §14 (~30 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "39"
+  },
+  "p03_auc": {
+    "fuente": "afp_lab/propension_apv/README.md §6.1 (agregado 12 cortes de test)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,836",
+    "valor_num": 0.836
+  },
+  "p03_auc_regla": {
+    "fuente": "afp_lab/propension_apv/README.md §6.1 (baseline regla de negocio)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,709",
+    "valor_num": 0.709
+  },
+  "p03_captura10_aportantes": {
+    "fuente": "afp_lab/propension_apv/README.md §7 (nuevos aportantes capturados al 10 %)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "47,4"
+  },
+  "p03_captura10_monto": {
+    "fuente": "afp_lab/propension_apv/README.md §7 (contactando al 10 %, ordenado por monto esperado)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "67,8"
+  },
+  "p03_captura10_monto_renta": {
+    "fuente": "afp_lab/propension_apv/README.md §7 (ordenar por renta, práctica actual)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "49,4"
+  },
+  "p03_captura20_monto": {
+    "fuente": "afp_lab/propension_apv/README.md §7 (contactando al 20 %, ordenado por monto esperado)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "82,8"
+  },
+  "p03_escala": {
+    "fuente": "afp_lab/propension_apv/README.md (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "20.000"
+  },
+  "p03_runtime": {
+    "fuente": "afp_lab/propension_apv/README.md §9 (máquina libre)",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "86"
+  },
+  "p03_sesgo_monto": {
+    "fuente": "afp_lab/propension_apv/README.md §6.2 (sesgo agregado, monto esperado en toda la población)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "1,0"
+  },
+  "p03_tests": {
+    "fuente": "afp_lab/propension_apv/README.md (encabezado, ~9 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "26"
+  },
+  "p03_voluntario_pct": {
+    "fuente": "afp_lab/propension_apv/README.md §6.4 (fracción de la cartera elegible que es tipo VOLUNTARIO)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "2,2"
+  },
+  "p03_wape_monto": {
+    "fuente": "afp_lab/propension_apv/README.md §6.2 (WAPE del monto, condicional en aportantes, agregado)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,555"
+  },
+  "p04_auc_cese3m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, tras corrección de la ronda 3)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,887",
+    "valor_num": 0.887
+  },
+  "p04_auc_cese6m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,878"
+  },
+  "p04_auc_regla_cese3m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (baseline regla de negocio, cese 3 m)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,798",
+    "valor_num": 0.798
+  },
+  "p04_auc_reingreso_actual": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, después de la corrección de features)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,608"
+  },
+  "p04_auc_reingreso_antes_densidad": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, antes de recalibrar la densidad, ronda 2)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,720"
+  },
+  "p04_auc_reingreso_tras_densidad": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (sistema, semilla 42, solo con la recalibración de densidad, antes de agregar las features del último empleo)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,605"
+  },
+  "p04_auc_reingreso_umbral": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §8 (criterio de aceptación del brief)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "0,70"
+  },
+  "p04_captura10_cese3m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (medido antes de la recalibración de densidad de la ronda 3; no vuelto a medir por alcance de esa corrección, ver §12)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "63,1"
+  },
+  "p04_captura10_cese6m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §6 (misma salvedad que la fila anterior)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "63,5"
+  },
+  "p04_cuprum_auc_cese3m": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (cuprum, semilla 42)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,889"
+  },
+  "p04_cuprum_auc_reingreso": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (cuprum, semilla 42, después de la corrección)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,626"
+  },
+  "p04_escala": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "20.000"
+  },
+  "p04_fix_delta_max": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,008"
+  },
+  "p04_fix_delta_min": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (mejora de la corrección de features, tres de cuatro combinaciones)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,003"
+  },
+  "p04_fix_delta_neg": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (la única combinación donde la corrección empeora, cuprum semilla 7)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,005"
+  },
+  "p04_runtime": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md, Correcciones de la ronda 3 (revisión del gerente)",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "50,1"
+  },
+  "p04_tests": {
+    "fuente": "afp_lab/riesgo_cese_cotizacion/README.md §12 (~19 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "29"
+  },
+  "p05_auc": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.1 (ronda 3, semilla 42)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,865",
+    "valor_num": 0.865
+  },
+  "p05_auc_regla": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.1 (baseline regla de negocio)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,756",
+    "valor_num": 0.756
+  },
+  "p05_captura10_masa": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (semilla 42)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "48,6"
+  },
+  "p05_captura10_masa_promedio5": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (promedio de 5 semillas, rango 48,6-57,2 %)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "51,9"
+  },
+  "p05_captura10_regla": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "44,1"
+  },
+  "p05_captura20_masa": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (gestionando al 20 % de los empleadores)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "70,9"
+  },
+  "p05_captura_rango_texto": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (cita textual: '45-55 % de la masa con el 10 % de la cartera')",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "45-55"
+  },
+  "p05_empleadores": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §2.1 (~1.000 empleadores con 20.000 afiliados, ronda 3)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "1.000"
+  },
+  "p05_escala": {
+    "fuente": "afp_lab/riesgo_empleador/README.md (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "20.000"
+  },
+  "p05_meses_dentro_10pct": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (criterio de error del agregado ≤10 %)",
+    "sintetico": true,
+    "unidad": " de 12 meses",
+    "valor": "2"
+  },
+  "p05_precision_lista_modelo": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "21,9"
+  },
+  "p05_precision_lista_regla": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "10,8"
+  },
+  "p05_runtime": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §9",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "26"
+  },
+  "p05_tests": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §9 (~13 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "21"
+  },
+  "p05_umbral_captura": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.3 (criterio de aceptación del brief)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "50"
+  },
+  "p05_volatilidad_agregado": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (ronda 3, ~1.000 empleadores)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "63,6"
+  },
+  "p05_volatilidad_agregado_antes": {
+    "fuente": "afp_lab/riesgo_empleador/README.md §6.4 (ronda 2, ~500 empleadores)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "98,9"
+  },
+  "p06_ari_remuestreo": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,987"
+  },
+  "p06_ari_temporal": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6/§8 (recalculado post-fusión)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,4655"
+  },
+  "p06_clasificador_exactitud": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,9812"
+  },
+  "p06_escala": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "20.000"
+  },
+  "p06_razon_apv": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (tabla de tasas de negocio por segmento)",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "30,69"
+  },
+  "p06_razon_cese": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "3,38"
+  },
+  "p06_razon_traspaso": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "2,08"
+  },
+  "p06_runtime": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §9",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "90,8"
+  },
+  "p06_segmentos_n": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (k final tras fusión de segmentos chicos)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "4"
+  },
+  "p06_silueta": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §6 (Aceptación, post-fusión)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,2395"
+  },
+  "p06_tests": {
+    "fuente": "afp_lab/segmentacion_afiliados/README.md §9 (~3,1 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "14"
+  },
+  "p07_escala": {
+    "fuente": "afp_lab/uplift_retencion/README.md §8 (escala reducida de esta ronda)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "10.000"
+  },
+  "p07_evitados_azar10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline aleatorio)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,2",
+    "valor_num": 0.2
+  },
+  "p07_evitados_drlearner10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "10,8",
+    "valor_num": 10.8
+  },
+  "p07_evitados_riesgo10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline: ranking de riesgo de 02 usado como uplift)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "3,2",
+    "valor_num": 3.2
+  },
+  "p07_evitados_riesgo20": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (baseline de riesgo, contactando al 20 %)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "7,6",
+    "valor_num": 7.6
+  },
+  "p07_evitados_tlearner10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "5,3",
+    "valor_num": 5.3
+  },
+  "p07_evitados_xlearner10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (traspasos evitados, contactando 10 %)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "14,6",
+    "valor_num": 14.6
+  },
+  "p07_evitados_xlearner20": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (contactando 20 %)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "20,8"
+  },
+  "p07_qini_xlearner": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.3 (Qini agregado, 3 cortes de test, holdout aleatorio)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,00086"
+  },
+  "p07_razon_10": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (X-learner sobre baseline de riesgo, 10 %)",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "4,54"
+  },
+  "p07_razon_20": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.4 (20 %)",
+    "sintetico": true,
+    "unidad": "×",
+    "valor": "2,75"
+  },
+  "p07_runtime": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.6",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "26,2"
+  },
+  "p07_spearman_dr": {
+    "fuente": "afp_lab/uplift_retencion/README.md §6.2 (correlación del CATE estimado vs. la verdad del simulador)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,195"
+  },
+  "p07_tests": {
+    "fuente": "afp_lab/uplift_retencion/README.md §9 (~5 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "13"
+  },
+  "p08_auc_lags_cese": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM sobre la secuencia aplanada, cese)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,7775",
+    "valor_num": 0.7775
+  },
+  "p08_auc_lags_traspaso": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM sobre la secuencia aplanada, traspaso)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,5940",
+    "valor_num": 0.594
+  },
+  "p08_auc_lgbm_cese": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM de producción de 04, mismo split recortado, cese 6 m)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,8610",
+    "valor_num": 0.861
+  },
+  "p08_auc_lgbm_traspaso": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (LightGBM de producción de 02, mismo split recortado, traspaso 6 m)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,7255",
+    "valor_num": 0.7255
+  },
+  "p08_auc_red_multitarea_cese": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU multi-tarea, cese)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,7768",
+    "valor_num": 0.7768
+  },
+  "p08_auc_red_multitarea_traspaso": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU multi-tarea, traspaso)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,5848",
+    "valor_num": 0.5848
+  },
+  "p08_auc_red_single_cese": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU single-task, cese)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,7807",
+    "valor_num": 0.7807
+  },
+  "p08_auc_red_single_traspaso": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (red GRU single-task, traspaso)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,5766",
+    "valor_num": 0.5766
+  },
+  "p08_cortes_train": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §3/§8 (max_cortes_train, recorte por presupuesto de la ronda)",
+    "sintetico": true,
+    "unidad": " cortes",
+    "valor": "7"
+  },
+  "p08_delta_auc_cese": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (caída de AUC de la red multi-tarea vs. LightGBM de producción, cese)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,084"
+  },
+  "p08_delta_auc_traspaso": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (caída de AUC de la red multi-tarea vs. LightGBM de producción, traspaso)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,141"
+  },
+  "p08_delta_lags_max": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,009"
+  },
+  "p08_delta_lags_min": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (diferencia entre la red y el LightGBM con la misma información)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,001"
+  },
+  "p08_escala": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "10.000"
+  },
+  "p08_reprod_lgbm_cese": {
+    "fuente": "docs/revisiones/ronda_4/secuencial.md (cifra reproducida de forma independiente por el revisor, cese, lightgbm_produccion)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,8614"
+  },
+  "p08_runtime": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §9 (corrida de referencia completa)",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "228,9"
+  },
+  "p08_tests": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §9 (~16,6 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "7"
+  },
+  "p08_umbral_auc": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §6 (criterio del brief: 'reemplaza' si mejora ≥0,01 AUC en ≥2 cabezas)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "0,01"
+  },
+  "p09_barrido_f0_epsgreedy": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=0)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,138",
+    "valor_num": 2.138
+  },
+  "p09_barrido_f0_thompson": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=0)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,137",
+    "valor_num": 2.137
+  },
+  "p09_barrido_f2_epsgreedy": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=2)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,129",
+    "valor_num": 2.129
+  },
+  "p09_barrido_f2_thompson": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=2)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,136",
+    "valor_num": 2.136
+  },
+  "p09_barrido_f4_epsgreedy": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=4)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,135",
+    "valor_num": 2.135
+  },
+  "p09_barrido_f4_thompson": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal=4)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,152",
+    "valor_num": 2.152
+  },
+  "p09_barrido_f4_thompson_gana": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.5 (fuerza_senal = 4×, Thompson lineal)",
+    "sintetico": true,
+    "unidad": "/5",
+    "valor": "4"
+  },
+  "p09_dr_error_epsgreedy": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.3 (error relativo del estimador DR)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "0,1"
+  },
+  "p09_dr_umbral": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.3/§7 (criterio de aceptación)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "15"
+  },
+  "p09_escala": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6 (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "10.000"
+  },
+  "p09_gana_epsgreedy_thompson": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson lineal gana a eps-greedy)",
+    "sintetico": true,
+    "unidad": "/5",
+    "valor": "3"
+  },
+  "p09_ganancia_vs_sincontacto": {
+    "fuente": "afp_lab/bandit_contacto/README.md §7 (política actual sobre SIN_CONTACTO, 24 meses)",
+    "sintetico": true,
+    "unidad": " M CLP",
+    "valor": "80"
+  },
+  "p09_gasto_heuristica": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1/§7 (costo total, política actual)",
+    "sintetico": true,
+    "unidad": " M CLP",
+    "valor": "55,2"
+  },
+  "p09_reward_bootstrap": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson-LGBM)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,109",
+    "valor_num": 2.109
+  },
+  "p09_reward_epsgreedy": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,130",
+    "valor_num": 2.13
+  },
+  "p09_reward_heuristica": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1 (política actual)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,116",
+    "valor_num": 2.116
+  },
+  "p09_reward_linucb": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,063",
+    "valor_num": 2.063
+  },
+  "p09_reward_sincontacto": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,035",
+    "valor_num": 2.035
+  },
+  "p09_reward_thompson": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1 (Thompson lineal, 24 meses, media de 5 semillas)",
+    "sintetico": true,
+    "unidad": " mil M CLP",
+    "valor": "2,138",
+    "valor_num": 2.138
+  },
+  "p09_runtime": {
+    "fuente": "afp_lab/bandit_contacto/README.md §9",
+    "sintetico": false,
+    "unidad": "-9 s",
+    "valor": "8"
+  },
+  "p09_tests": {
+    "fuente": "afp_lab/bandit_contacto/README.md §9 (~2,5 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "19"
+  },
+  "p09_umbral_semillas": {
+    "fuente": "afp_lab/bandit_contacto/README.md §6.1 (criterio de aceptación del brief)",
+    "sintetico": false,
+    "unidad": "/5",
+    "valor": "4"
+  },
+  "p11_auc_detractor": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1/§8.0 (ponderado, holdout test respondientes, tras corrección del bloqueante #2); docs/revisiones/ronda_5/voz_afiliado.md (reproducido dígito a dígito)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,753"
+  },
+  "p11_auc_respuesta": {
+    "fuente": "afp_lab/voz_afiliado/README.md §8.2 (modelo de propensión a responder, validación)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,54"
+  },
+  "p11_driver_licencia_est": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers.csv)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-2,62"
+  },
+  "p11_driver_licencia_real": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2/§6.3 (efecto verdadero del generador)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-2,5"
+  },
+  "p11_driver_reclamo_est": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers.csv)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-0,97"
+  },
+  "p11_driver_reclamo_real": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2/§6.3 (efecto verdadero del generador)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-2,0"
+  },
+  "p11_drivers_correctos": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (7 eventos del brief, 6 estimables con grupo de control)",
+    "sintetico": true,
+    "unidad": " de 6 estimables",
+    "valor": "6"
+  },
+  "p11_escala": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6/§9 (corrida de referencia)",
+    "sintetico": true,
+    "unidad": " afiliados",
+    "valor": "10.000"
+  },
+  "p11_invitacion_pct": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2 (chequeo de la simulación, objetivo ~8 %)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "8,02"
+  },
+  "p11_mae_ht": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (MAE, Horvitz-Thompson directo, sin modelo)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "5,32"
+  },
+  "p11_mae_ingenuo": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (MAE, solo respondientes)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "8,47"
+  },
+  "p11_mae_ponderado": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1/§8.0 (MAE, modelo ponderado IPW, tras corrección del bloqueante #2)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "6,75"
+  },
+  "p11_mae_regla": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1/§8.0 (MAE, regla de negocio independiente del generador, tras corrección del bloqueante #1)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "1,13"
+  },
+  "p11_mae_sin_ponderar": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1/§8.0 (MAE, modelo sin ponderar, tras corrección del bloqueante #2)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "8,20"
+  },
+  "p11_mae_trivial": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (MAE, baseline trivial)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "11,63"
+  },
+  "p11_nps_ingenuo_corrida": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2 (chequeo de la simulación, solo respondientes)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-21,3"
+  },
+  "p11_nps_test_max": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (NPS verdadero, test, 12 cortes 202707-202806)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-15,0"
+  },
+  "p11_nps_test_media": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (NPS verdadero, media de los 12 cortes de test)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-11,6"
+  },
+  "p11_nps_test_min": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.1 (NPS verdadero, test, 12 cortes 202707-202806)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-9,4"
+  },
+  "p11_nps_verdadero_corrida": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2 (chequeo de la simulación, corrida de referencia, cartera completa)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "-14,9"
+  },
+  "p11_prioridad1_impacto": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, rentabilidad relativa)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,44"
+  },
+  "p11_prioridad1_incidencia": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, rentabilidad relativa)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "70,5"
+  },
+  "p11_prioridad2_impacto": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, licencia mal pagada)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,29"
+  },
+  "p11_prioridad2_incidencia": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, licencia mal pagada)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "11,2"
+  },
+  "p11_prioridad3_impacto": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, contacto ejecutivo)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "0,08"
+  },
+  "p11_prioridad3_incidencia": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.3 (drivers_prioridad.csv, contacto ejecutivo)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "17,4"
+  },
+  "p11_respuesta_pct": {
+    "fuente": "afp_lab/voz_afiliado/README.md §2.2 (chequeo de la simulación, objetivo ~25 %)",
+    "sintetico": true,
+    "unidad": " %",
+    "valor": "25,1"
+  },
+  "p11_runtime": {
+    "fuente": "afp_lab/voz_afiliado/README.md §9 (corrida de referencia completa)",
+    "sintetico": false,
+    "unidad": " s",
+    "valor": "29,7"
+  },
+  "p11_tests": {
+    "fuente": "afp_lab/voz_afiliado/README.md §9 (4,1 s)",
+    "sintetico": false,
+    "unidad": "",
+    "valor": "13"
+  },
+  "p11_valor_punto_apv": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.4 (aporte APV traducido a la cartera, tras corrección del bloqueante #2: sube de ≈645 a ≈858 MM al sacar peso_ipw como feature)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "858"
+  },
+  "p11_valor_punto_saldo": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.4 (saldo asociado, tras corrección del bloqueante #2)",
+    "sintetico": true,
+    "unidad": " MM CLP",
+    "valor": "3.613"
+  },
+  "p11_valor_punto_traspasos": {
+    "fuente": "afp_lab/voz_afiliado/README.md §6.4 (traducido a la cartera de 10 000 afiliados, tras corrección del bloqueante #2)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "127"
+  },
+  "planilla_codigos": {
+    "fuente": "afp_lab/common/BRIEF_PLANILLA.md punto 1 (Tabla N° 7 de movimiento de personal)",
+    "sintetico": false,
+    "unidad": " códigos",
+    "valor": "12"
+  },
+  "planilla_reforma_pct": {
+    "fuente": "docs/contexto_afp_cuprum.md §3 (Ley 21.735, cotización adicional del empleador desde agosto de 2025)",
+    "sintetico": false,
+    "unidad": " %",
+    "valor": "3,5"
+  },
+  "roadmap_horizonte": {
+    "fuente": "docs/briefs/ronda_4/reporte_ejecutivo.md, Estructura punto 4",
+    "sintetico": false,
+    "unidad": "-12 meses",
+    "valor": "6"
+  },
+  "semilla42": {
+    "fuente": "Semilla aleatoria de las corridas de referencia citadas en este informe (fijada en cada README para reproducibilidad)",
+    "sintetico": true,
+    "unidad": "",
+    "valor": "42"
+  },
+  "ventana24": {
+    "fuente": "afp_lab/secuencial_afiliado/README.md §4.1 (ventana de secuencia) y afp_lab/bandit_contacto/README.md §3 (ventana de simulación online)",
+    "sintetico": true,
+    "unidad": " meses",
+    "valor": "24"
+  }
 }

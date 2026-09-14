@@ -42,8 +42,10 @@ Estándares obligatorios en `CONVENCIONES.md`.
 | 07 | `uplift_retencion` | ¿A quién conviene contactar para que el contacto de verdad evite el traspaso? | Inferencia causal / uplift (T-, X-, DR-learner) | Cerrado ronda 4 | pandas + LightGBM |
 | 08 | `secuencial_afiliado` | ¿Una red secuencial multi-tarea supera a los LightGBM de 02 y 04? | Red neuronal (GRU, PyTorch CPU) | Cerrado ronda 4 (no aporta, ver abajo) | PyTorch + LightGBM |
 | 09 | `bandit_contacto` | ¿Qué política de contacto maximiza la retención neta de costo? | Bandits contextuales + evaluación off-policy | Cerrado ronda 4 | pandas + LightGBM |
-| 10 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
-| 11 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
+| 10 | `pronostico_agregado` | ¿TimesFM (modelo fundacional de series) pronostica mejor las series agregadas que ETS o LightGBM? | Series de tiempo | Brief listo; en pausa hasta contar con los pesos | statsforecast + TimesFM |
+| 11 | `voz_afiliado` | ¿Cuál es el NPS de toda la cartera, qué eventos lo mueven y cuánto vale un punto? | NPS inferido + causal | Cerrado ronda 5 (aprobado con reserva) | pandas + LightGBM |
+| 12 | `proyeccion_pension` | ¿Qué pensión y tasa de reemplazo proyecta cada afiliado bajo escenarios? | Simulación + ML | Backlog | |
+| 13 | `anomalias_planillas` | ¿Qué planillas tienen errores o patrones anómalos? | Detección de anomalías | Backlog | |
 
 ## Resultados de la ronda 1
 
@@ -110,6 +112,12 @@ Tres proyectos nuevos, 10.000 afiliados, perfil Cuprum; briefs en `docs/briefs/r
 | 07 Uplift causal (nuevo) | Campaña histórica confundida + holdout aleatorio 10 %; efecto verdadero heterogéneo (persuadibles, neutros, sleeping dogs). Spearman CATE estimado vs verdadero: DR 0,195, X 0,186, T 0,152, riesgo 0,054. Con 20 % de presupuesto el X-learner evita 2,75× los traspasos del ranking por riesgo (4,5× al 10 %). Qini en holdout aleatorio positivo solo para el X-learner y con IC que cruza cero | Aprobado con reserva: contactar por uplift y no por riesgo cambia a quién se llama; la validación experimental necesita un holdout mayor que el del sandbox |
 | 08 Red secuencial (nuevo) | GRU multi-tarea sobre 24 meses vs LightGBM de 02/04 en los mismos cortes: traspaso 0,585 vs 0,726; cese 0,777 vs 0,861. Con la misma información, LightGBM con lags empata con la red (0,594 / 0,778) | No aporta hoy: la brecha es de información (variables operacionales y de mercado que la secuencia no incluye), no de arquitectura |
 | 09 Bandit de contacto (nuevo) | Cinco políticas, 24 meses, 400 contactos/mes, 5 semillas, recompensa rezagada 6 meses, OPE con IPS/SNIPS/DR (error < 10 %). Con la señal contextual calibrada, Thompson lineal gana a ε-greedy en 3/5 semillas; solo con señal 4× más fuerte llega a 4/5; LinUCB nunca | Aprobado: con la heterogeneidad documentable hoy, un promedio simple por brazo rinde casi igual que un bandit contextual; primero hay que medir cuánta señal traen los datos reales |
+
+## Resultados de la ronda 5
+
+| Proyecto | Resultado | Lectura de negocio |
+|---|---|---|
+| 11 Voz del afiliado (nuevo) | Encuesta sintética con sesgo de no respuesta (8 % invitados, 25 % responden). NPS verdadero de la cartera ≈ −15; NPS ingenuo (solo respondientes) erra 8,5 puntos; NPS inferido con ponderación inversa 6,8; Horvitz-Thompson directo 5,3; una regla ponderada simple 1,1. AUC de detractor 0,753. Drivers con signo correcto 6/6 (licencia mal pagada −2,6 vs −2,5 real; reclamo sin resolver −1,0 vs −2,0). Un punto de NPS ≈ 127 traspasos evitados y ≈ 3.600 MM de saldo, asociación ajustada, no experimento | Aprobado con reserva: corregir el sesgo de la encuesta vale más que el modelo; el modelo de respuesta discrimina poco (AUC 0,54) y limita la corrección; el ML sirve para detectar detractores individuales, no para el agregado |
 
 ## Persona: somos AFP Cuprum
 
